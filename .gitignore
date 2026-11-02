@@ -7,9 +7,10 @@ config*.tmp
 *.log
 logs/
 
-# 截图产物
+# 截图产物与暂存目录
 screenshots/
 pending/
+FallbackScreenshots/
 *.png
 *.png.bak
 [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
