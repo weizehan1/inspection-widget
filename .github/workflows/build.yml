@@ -26,21 +26,28 @@ jobs:
 
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: 安装 MSBuild
-        uses: microsoft/setup-msbuild@v2
+      # 不用 microsoft/setup-msbuild（仍基于已弃用的 Node 20，会报警告）：
+      # runner 自带 vswhere，直接定位 VS2022 的 MSBuild.exe。
+      - name: 定位 MSBuild
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+          if (-not $msbuild) { throw "未找到 MSBuild.exe" }
+          "MSBUILD_PATH=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: 构建主程序（Release）
         shell: pwsh
-        run: msbuild InspectionWidget.sln /p:Configuration=Release /m
+        run: '& $env:MSBUILD_PATH InspectionWidget.sln /p:Configuration=Release /m'
 
       # tests 工程未包含在 .sln 中，需单独构建；
       # 它是控制台 exe、自带极简测试框架，Main 以失败数决定退出码（0=全过，1=有失败），
       # 用例均为纯逻辑（含 System.Drawing 位图逻辑，不弹真实窗体），可在 runner 上直接运行。
       - name: 构建测试工程（Release）
         shell: pwsh
-        run: msbuild tests\InspectionWidget.Tests.csproj /p:Configuration=Release /p:Platform=AnyCPU
+        run: '& $env:MSBUILD_PATH tests\InspectionWidget.Tests.csproj /p:Configuration=Release /p:Platform=AnyCPU'
 
       - name: 运行测试
         shell: pwsh
@@ -49,17 +56,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码 $LASTEXITCODE" }
 
       - name: 上传产物（单个 exe）
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: InspectionWidget
           path: src/bin/Release/InspectionWidget.exe
           if-no-files-found: error
 
+      # 用 runner 自带的 gh 命令行发版，不再引第三方 action（避免其运行时版本弃用警告）。
       - name: 发布 Release（仅 v* 标签）
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          files: src/bin/Release/InspectionWidget.exe
-          body: |
-            自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create ${{ github.ref_name }} "src/bin/Release/InspectionWidget.exe" --title ${{ github.ref_name }} --notes "自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget"
