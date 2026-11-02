@@ -1,17 +1,27 @@
 # 本地配置与敏感内容（永不入库）
 config.json
+config.json.*
+config.*.json
+config.*.json.*
+config*.tmp
 *.log
 logs/
 
 # 截图产物
 screenshots/
+pending/
+*.png
 *.png.bak
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
 
 # 编译产物
 bin/
 obj/
 *.exe
 *.pdb
+*.user
+*.suo
+*.cache
 
 # 系统与编辑器
 Thumbs.db
