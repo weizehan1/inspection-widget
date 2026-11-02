@@ -1,0 +1,65 @@
+# 巡检截图小组件 —— GitHub Actions 自动构建与发版
+#
+# 在 windows-latest 上用 MSBuild（VS2022 工具链）构建：
+# - src/InspectionWidget.csproj 已设置 <ApplicationManifest>..\app.manifest</ApplicationManifest>，
+#   MSBuild 构建时把 app.manifest 内嵌进 exe，产物为单文件，不再外置 .manifest
+#   （本地 Mono xbuild 无法内嵌，才在 build/ 里外置一份，那是本地构建的差异）。
+# - 每次 push 到 main 与手动 workflow_dispatch 都构建并上传 artifact。
+# - 推送 v* 标签时，额外把 exe 附到同名 GitHub Release。
+
+name: 构建巡检截图小组件
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: 构建主程序（Release）
+        shell: pwsh
+        run: msbuild InspectionWidget.sln /p:Configuration=Release /m
+
+      # tests 工程未包含在 .sln 中，需单独构建；
+      # 它是控制台 exe、自带极简测试框架，Main 以失败数决定退出码（0=全过，1=有失败），
+      # 用例均为纯逻辑（含 System.Drawing 位图逻辑，不弹真实窗体），可在 runner 上直接运行。
+      - name: 构建测试工程（Release）
+        shell: pwsh
+        run: msbuild tests\InspectionWidget.Tests.csproj /p:Configuration=Release /p:Platform=AnyCPU
+
+      - name: 运行测试
+        shell: pwsh
+        run: |
+          & tests\bin\Release\InspectionWidget.Tests.exe
+          if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码 $LASTEXITCODE" }
+
+      - name: 上传产物（单个 exe）
+        uses: actions/upload-artifact@v4
+        with:
+          name: InspectionWidget
+          path: src/bin/Release/InspectionWidget.exe
+          if-no-files-found: error
+
+      - name: 发布 Release（仅 v* 标签）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: src/bin/Release/InspectionWidget.exe
+          body: |
+            自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget
