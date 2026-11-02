@@ -59,3 +59,12 @@
 1. 推送 GitHub 时按约定走官方连接器（本子代理全程未加 remote、未推送）。
 2. 交付用户时给两个文件：`build/InspectionWidget.exe`＋`build/InspectionWidget.exe.manifest`，外加 `build/试用说明.md`。
 3. 用户在单位 Windows 实机试跑后，照 docs/验收记录.md 的待实机项逐项回填即可；若 VS2022 重编，记得更新 README 版本记录里的大小与 SHA256。
+
+## v1.0.1 补记（2026-11-03 晨，用户试跑反馈三条）
+
+- **设置窗口居中**：SettingsForm 不再 CenterParent 贴着主面板弹，改 Manual 起始 + 打开时按主面板所在屏幕的工作区中央定位（纯函数 `PanelLayout.CenterInWorkingArea`，含副屏偏移与超尺寸钳制用例）。
+- **界面缩放选项**：设置「存储与通用」组新增「界面缩放」下拉（100%/125%/150%/175%/200%，旁注 4K 建议），保存制；配置新增 `UiScalePercent`（缺字段补默认 100、非法值加载时归一）。主面板全部度量与字号统一乘因子、保存后立即按 Bottom 锚定重排；设置窗口按下次打开时的档位缩放呈现。满量配置在高档位下仍靠凭据折叠兜底防溢出（高度公式已含因子，钳制口径不变）。
+- **配置默认落点改 AppData**：优先读 exe 同目录已有的 config.json（兼容便携口径与昨晚的已有副本）；不存在时用 `%LocalAppData%\InspectionWidget\config.json`，首次保存自动建目录落盘，exe 文件夹从此只剩 exe（与同名 manifest）。原「同目录不可写才回退 AppData」的判定已并入这条优先序，原子写、跨会话互斥、损坏自愈规则原样不变；设置窗底部照旧显示实际生效路径，注记文案已改中性。
+- **验证**：`bash build.sh` 退出 0，全量测试 **215/215 通过**（v1.0.0 的 191 条零回归，新增 24 条：UiScale 9、PanelLayout 缩放高度与居中 9、ConfigStore 缩放字段往返/缺字段/非法归一 3、AppConfig 默认值 1、深拷贝保留 1、路径组净增 1（5→6 条，整组按新优先序改写）；另全字段往返旧用例补了 UiScalePercent=150 的往返断言（不计新增）。开工时 Mono 工具链不在（VM 替换），已按昨晚方法重装同版本 6.8.0.105。
+- **产物**：`build/InspectionWidget.exe`（**88,576 字节**，SHA256 `54a7eda8202d413cf65a53f02e3ef70d059f4e5043e3f1c62515e1f612b5e3ef`）＋外置 manifest；版本号 AssemblyInfo 1.0.1.0 / 关于页徽章 v1.0.1 / README 版本记录已同步。本地提交，不打标签、不推送（推送仍由主代理晨间执行）。
+- **待 Windows 实机确认（新增三项，详见 docs/验收记录.md 的 v1.0.1 补记）**：①设置窗口实际居中弹出位置（多屏落在主面板所在屏）；②缩放档位下主面板与设置窗的真实渲染（4K 屏 150%/200% 的大小与清晰度、满量配置不溢出）；③**AppData 落盘**——首启保存后 config.json 实际出现在 `%LocalAppData%\InspectionWidget\`、exe 文件夹无 config.json。

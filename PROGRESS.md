@@ -36,3 +36,18 @@ SDD skill 文件（subagent-driven-development/SKILL.md）被系统安全检查�
 - git：分支 main、无 remote、标签 v1.0.0 在位；入库红线复查无 config.json/截图/png/日志（仅 build/InspectionWidget.exe.manifest 一个文本清单文件在库，系 R5 交付物，无害保留）。
 - 总结报告：BUILD-REPORT.md（仓库根）。
 - Task 4（阶段 4 截图引擎）：实现提交 cdfa92e（回报通道曾丢弃，现场核实为准）。协调者亲跑 **146/146**（基线 131 + 新增 15）。审查：规格 ✅、质量通过（Critical 0 / Important 0 / Minor 3）——环境插曲经审查核实属实（libgif7/libexif12 直下 deb 补 libgdiplus 依赖，仅测试环境、不涉产品代码）。Minor-1 与 Minor-3 已小修（fix 6d0db85）并经范围复审两项全过；Minor-2（移动复核与黑图判定顺序）记录备考不修。**Task 4 complete：147/147 用例。** 遗留实机：七格矩阵+补测六项待 Windows 验收。
+
+## CI 接入（2026-11-03，用户拍板「配 GitHub Actions 自动构建」）
+- 新增 .github/workflows/build.yml：windows-latest + microsoft/setup-msbuild@v2，MSBuild Release 构建 InspectionWidget.sln，产物 src/bin/Release/InspectionWidget.exe 经 actions/upload-artifact@v4 上传（artifact 名 InspectionWidget，仅 exe 一个文件）；push 到 main、workflow_dispatch 触发构建，推送 v* 标签时另用 softprops/action-gh-release@v2 生成同名 Release 并附 exe。
+- 勘查结论：src/InspectionWidget.csproj 本就设有 <ApplicationManifest>..\app.manifest</ApplicationManifest>，MSBuild 构建即内嵌清单，**csproj 无需改动**（Mono xbuild 忽略该属性、本地构建不受影响，此次未跑本地回归是因为零代码改动）；tests 工程为独立控制台 exe（不在 .sln 内），Main 按失败数返回 0/1，用例全为纯逻辑（含 SettingsFormTests 明确不实例化窗体），工作流中单独构建后直接运行、以退出码定成败。
+- YAML 已用 python yaml 解析自检通过。本地提交，**未推送、未加 remote**，推送由主代理统一执行；首次云端构建结果待推送后核验（manifest 是否确已内嵌以云端产物实测为准）。
+
+## v1.0.1 迭代（2026-11-03 晨，用户试跑反馈）
+
+- 环境注记：本轮开工时发现 Mono 工具链不在（VM 已替换），按昨晚 PROGRESS 记载的 azure 源临时列表方法重装 Mono 6.8.0.105 + libgdiplus（未改系统源），与昨晚同版本。
+- 计划先行：docs/实施计划.md 追加 v1.0.1 三个 Task（提交 e59f74a）。TDD：先写 24 条新用例跑出红灯（缺 UiScale/PanelLayout.Scale 等 API 的编译错误），再实现转绿。
+- Task V1 设置窗口居中：SettingsForm 改 Manual + OnLoad 按 Screen.FromControl(Owner).WorkingArea 经 PanelLayout.CenterInWorkingArea 定位；纯函数 3 条用例（居中/副屏偏移/超尺寸钳制）。真实弹出位置待实机。
+- Task V2 界面缩放：新增 src/Config/UiScale.cs（五档/归一/因子/索引映射）；AppConfig.UiScalePercent（默认 100，Load 非法归一并标 Defaulted，OptionalFieldNames 已补）；PanelLayout 带 factor 的度量重载（旧签名 1.0 委托）；MainForm 度量经 M()＋因子感知字体缓存＋ApplyScaleToStaticLayout（构造/Reload/保存后各调一次），保存后立即重排、Bottom 锚定不变；SettingsForm 自身按打开时档位缩放（S/P/Z 全几何＋缩放下拉，存「存储与通用」组，保存制，本窗下次打开生效、文案已注明）。
+- Task V3 配置落点：ConfigPathResolver 新优先序（同目录已有 config 用它，否则 AppData），dirWritable 探针退出判定；SettingsForm 回退注记改中性文案「（配置文件位于系统 AppData 目录）」。路径用例按新口径重写（4 条优先序＋落盘实证＋不可写不落盘）。
+- 修正一条旧用例：全字段往返（ConfigStoreTests）原对象初始化器未含 UiScalePercent（值为 0 被归一判 Defaulted），补 150 并加往返断言——属用例随新字段扩展，非生产问题。
+- 闸门证据：`bash build.sh` 退出 0，全量 **215/215 通过**（191 基线零回归＋新增 24）。产物 build/InspectionWidget.exe 88,576 字节，SHA256 54a7eda8202d413cf65a53f02e3ef70d059f4e5043e3f1c62515e1f612b5e3ef；外置 manifest 照旧。验收记录已加 v1.0.1 补记（三条均标待实机及判据）。本地提交收口，不打标签、不推送、无 remote。
