@@ -19,6 +19,8 @@ namespace InspectionWidget.Tests
                 Assert.True(AppConfig.CreateDefault().AutoClearClipboard));
             TestRunner.Run("CreateDefault：IsCredentialCollapsed 默认 false", () =>
                 Assert.False(AppConfig.CreateDefault().IsCredentialCollapsed));
+            TestRunner.Run("CreateDefault：UiScalePercent 默认 100", () =>
+                Assert.Equal(100, AppConfig.CreateDefault().UiScalePercent));
             TestRunner.Run("CreateDefault：CaptureMode 默认 Auto", () =>
                 Assert.Equal(CaptureMode.Auto, AppConfig.CreateDefault().CaptureMode));
             TestRunner.Run("CreateDefault：Credentials 为空表（非 null）", () =>

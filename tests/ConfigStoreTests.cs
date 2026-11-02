@@ -48,7 +48,8 @@ namespace InspectionWidget.Tests
                         CaptureMode = CaptureMode.BitBltOnly,
                         WindowLeft = 123,
                         WindowTop = 45,
-                        LastDevice = "机房B"
+                        LastDevice = "机房B",
+                        UiScalePercent = 150
                     };
                     SaveResult saved = store.Save(cfg);
                     Assert.True(saved.Saved, saved.Error);
@@ -68,6 +69,7 @@ namespace InspectionWidget.Tests
                     Assert.Equal((int?)123, r.Config.WindowLeft);
                     Assert.Equal((int?)45, r.Config.WindowTop);
                     Assert.Equal("机房B", r.Config.LastDevice);
+                    Assert.Equal(150, r.Config.UiScalePercent);
                 }
                 finally { Cleanup(dir); }
             });
@@ -197,6 +199,55 @@ namespace InspectionWidget.Tests
                 }
                 finally { Cleanup(dir); }
             });
+            TestRunner.Run("存储：UiScalePercent 往返保留（175）", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    var cfg = AppConfig.CreateDefault();
+                    cfg.UiScalePercent = 175;
+                    SaveResult saved = MakeStore(dir).Save(cfg);
+                    Assert.True(saved.Saved, saved.Error);
+                    LoadResult r = MakeStore(dir).Load();
+                    Assert.Equal(ConfigLoadKind.Ok, r.Kind);
+                    Assert.Equal(175, r.Config.UiScalePercent);
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：手写 JSON 缺 UiScalePercent → Defaulted 且补默认 100、已写字段保留", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    File.WriteAllText(ConfigFile(dir),
+                        "{\"RootPath\":\"D:/shots\",\"Devices\":[\"设备甲\"],\"LastDevice\":\"设备甲\"}");
+                    LoadResult r = MakeStore(dir).Load();
+                    Assert.Equal(ConfigLoadKind.Defaulted, r.Kind);
+                    Assert.Equal(100, r.Config.UiScalePercent, "缺字段时须补默认 100");
+                    Assert.Equal("D:/shots", r.Config.RootPath);
+                    Assert.Equal("设备甲", r.Config.Devices[0]);
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：手写 JSON 的 UiScalePercent 非法值 137 → 归一 100 且标 Defaulted、其余字段不动", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    File.WriteAllText(ConfigFile(dir),
+                        "{\"RootPath\":\"D:/x\",\"Devices\":[\"设备甲\"],\"Credentials\":[],"
+                        + "\"IsCredentialCollapsed\":false,\"AutoClearClipboard\":true,\"CaptureMode\":0,"
+                        + "\"WindowLeft\":null,\"WindowTop\":null,\"LastDevice\":null,\"UiScalePercent\":137}");
+                    LoadResult r = MakeStore(dir).Load();
+                    Assert.Equal(ConfigLoadKind.Defaulted, r.Kind);
+                    Assert.Equal(100, r.Config.UiScalePercent);
+                    Assert.Equal("设备甲", r.Config.Devices[0]);
+                }
+                finally { Cleanup(dir); }
+            });
+
         }
 
         internal static string MakeTempDir()
@@ -228,6 +279,7 @@ namespace InspectionWidget.Tests
             {
                 // 临时目录清理失败不影响用例结论
             }
+
         }
     }
 }

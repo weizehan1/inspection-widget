@@ -59,6 +59,10 @@ namespace InspectionWidget.Config
         [DataMember]
         public string LastDevice { get; set; }
 
+        /// <summary>界面缩放百分比（v1.0.1）：合法档位见 UiScale，默认 100；非法值在加载时归一。</summary>
+        [DataMember]
+        public int UiScalePercent { get; set; }
+
         // DataContract 反序列化不走构造函数：先把字段设成默认值，JSON 里有的字段再覆盖。
         // 这样缺 AutoClearClipboard 字段的老/手改配置加载后仍是默认 true，列表也不会是 null。
         [OnDeserializing]
@@ -67,6 +71,7 @@ namespace InspectionWidget.Config
             AutoClearClipboard = true;
             IsCredentialCollapsed = false;
             CaptureMode = CaptureMode.Auto;
+            UiScalePercent = UiScale.DefaultPercent;
             Devices = new List<string>();
             Credentials = new List<CredentialEntry>();
         }
@@ -84,7 +89,8 @@ namespace InspectionWidget.Config
                 CaptureMode = CaptureMode.Auto,
                 WindowLeft = null,
                 WindowTop = null,
-                LastDevice = null
+                LastDevice = null,
+                UiScalePercent = UiScale.DefaultPercent
             };
         }
     }

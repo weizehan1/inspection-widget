@@ -135,6 +135,16 @@ namespace InspectionWidget.Tests
                 Assert.NotNull(copy.Credentials);
             });
 
+            TestRunner.Run("深拷贝：UiScalePercent 保留（设置保存不丢缩放档位）", () =>
+            {
+                var source = AppConfig.CreateDefault();
+                source.UiScalePercent = 175;
+                AppConfig copy = AppConfigCloner.Clone(source);
+                Assert.Equal(175, copy.UiScalePercent);
+                source.UiScalePercent = 125;
+                Assert.Equal(175, copy.UiScalePercent, "深拷贝须独立于源对象后续修改");
+            });
+
             TestRunner.Run("深拷贝：沿用不编辑字段（折叠态/窗口位置/LastDevice）", () =>
             {
                 var source = AppConfig.CreateDefault();

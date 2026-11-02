@@ -35,7 +35,18 @@ namespace InspectionWidget
         private static readonly Color ButtonBackColor = Color.White;
 
         private const int SideMargin = 10;
-        private const int ContentWidth = PanelLayout.PanelWidth - SideMargin * 2; // 210
+
+        // 界面缩放（v1.0.1）：度量一律经 M() 按当前配置档位缩放，布局公式在 PanelLayout。
+        private double ScaleFactor
+        {
+            get { return _config == null ? 1.0 : UiScale.Factor(_config.UiScalePercent); }
+        }
+
+        private int M(int value) { return PanelLayout.Scale(value, ScaleFactor); }
+
+        private int PanelWidthNow { get { return PanelLayout.ScaledPanelWidth(ScaleFactor); } }
+
+        private int ContentWidthNow { get { return PanelWidthNow - M(SideMargin) * 2; } }
 
         private readonly ConfigStore _store;
         private readonly PanelStateMachine _stateMachine;
@@ -88,9 +99,14 @@ namespace InspectionWidget
         private int _waitingSessionId;
 
         private Panel _titleBarPanel;
+        private Label _titleLabel;
+        private Label _dateLabel;
+        private Button _settingsButton;
+        private Button _minimizeButton;
         private Label _deviceHeaderLabel;
         private Panel _deviceZonePanel;
         private Panel _credentialHeaderPanel;
+        private Label _credentialHeaderLabel;
         private Label _credentialArrowLabel;
         private Panel _credentialZonePanel;
         private Label _feedbackLabel;
@@ -112,31 +128,31 @@ namespace InspectionWidget
         private Font _font13Bold;
         private Font _font11;
 
+        /// <summary>因子感知字体缓存：目标字号随当前缩放档位变，变了才重建（旧字体先释放）。</summary>
+        private Font GetScaledFont(ref Font cache, float basePx, FontStyle style)
+        {
+            float target = basePx * (float)ScaleFactor;
+            if (cache == null || cache.Size != target)
+            {
+                if (cache != null) cache.Dispose();
+                cache = CreateFont(target, style);
+            }
+            return cache;
+        }
+
         private Font Font13
         {
-            get
-            {
-                if (_font13 == null) _font13 = CreateFont(13f, FontStyle.Regular);
-                return _font13;
-            }
+            get { return GetScaledFont(ref _font13, 13f, FontStyle.Regular); }
         }
 
         private Font Font13Bold
         {
-            get
-            {
-                if (_font13Bold == null) _font13Bold = CreateFont(13f, FontStyle.Bold);
-                return _font13Bold;
-            }
+            get { return GetScaledFont(ref _font13Bold, 13f, FontStyle.Bold); }
         }
 
         private Font Font11
         {
-            get
-            {
-                if (_font11 == null) _font11 = CreateFont(11f, FontStyle.Regular);
-                return _font11;
-            }
+            get { return GetScaledFont(ref _font11, 11f, FontStyle.Regular); }
         }
 
         protected override void Dispose(bool disposing)
@@ -183,7 +199,8 @@ namespace InspectionWidget
             EnsureConfigLists();
             RebuildClipboardGuard();
 
-            ClientSize = new Size(PanelLayout.PanelWidth, ComputeCurrentHeight());
+            ApplyScaleToStaticLayout();
+            ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
             RestorePosition();
             LayoutSections();
 
@@ -204,7 +221,7 @@ namespace InspectionWidget
 
             // 标题栏
             _titleBarPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.TitleBarHeight) };
-            var titleLabel = new Label
+            var titleLabel = _titleLabel = new Label
             {
                 Text = "巡检截图",
                 Font = font13Bold,
@@ -212,7 +229,7 @@ namespace InspectionWidget
                 AutoSize = true,
                 Location = new Point(SideMargin, 9)
             };
-            var dateLabel = new Label
+            var dateLabel = _dateLabel = new Label
             {
                 Text = DateTime.Now.ToString("yyyy-MM-dd"),
                 Font = font11,
@@ -220,7 +237,7 @@ namespace InspectionWidget
                 AutoSize = true,
                 Location = new Point(82, 11)
             };
-            var settingsButton = new Button
+            var settingsButton = _settingsButton = new Button
             {
                 Text = "⚙",
                 Font = font13,
@@ -232,7 +249,7 @@ namespace InspectionWidget
             };
             settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += OnSettingsClicked;
-            var minimizeButton = new Button
+            var minimizeButton = _minimizeButton = new Button
             {
                 Text = "—",
                 Font = font13,
@@ -275,7 +292,7 @@ namespace InspectionWidget
 
             // 凭据区标题行（整行点击折叠）
             _credentialHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.SectionHeaderHeight) };
-            var credentialHeaderLabel = new Label
+            var credentialHeaderLabel = _credentialHeaderLabel = new Label
             {
                 Text = "凭据",
                 Font = font13,
@@ -310,7 +327,7 @@ namespace InspectionWidget
                 Font = font13,
                 ForeColor = SecondaryTextColor,
                 AutoSize = false,
-                Size = new Size(ContentWidth, 24),
+                Size = new Size(ContentWidthNow, 24),
                 Location = new Point(SideMargin, 4)
             };
             // 保存失败时反馈行即重试入口（Task 5 口径，见 OnSaveCompleted）
@@ -321,7 +338,7 @@ namespace InspectionWidget
                 Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = false,
-                Size = new Size(ContentWidth, 22),
+                Size = new Size(ContentWidthNow, 22),
                 Location = new Point(SideMargin, 31),
                 Cursor = Cursors.Hand
             };
@@ -370,46 +387,90 @@ namespace InspectionWidget
 
         // ---------- 布局 ----------
 
+        /// <summary>
+        /// 静态骨架的字体与几何按当前缩放档位重设（v1.0.1）：构造时配置加载后、
+        /// 设置保存后各调一次；动态按钮由 RefreshConfigState 另行重建。
+        /// 设备标题行字体不在此列（等待态由 RefreshStateVisuals 管 Font13/13Bold 切换）。
+        /// </summary>
+        private void ApplyScaleToStaticLayout()
+        {
+            int w = PanelWidthNow;
+            int margin = M(SideMargin);
+
+            _titleBarPanel.Size = new Size(w, M(PanelLayout.TitleBarHeight));
+            _titleLabel.Font = Font13Bold;
+            _titleLabel.Location = new Point(margin, M(9));
+            _dateLabel.Font = Font11;
+            _dateLabel.Location = new Point(M(82), M(11));
+            _settingsButton.Font = Font13;
+            _settingsButton.Size = new Size(M(28), M(28));
+            _settingsButton.Location = new Point(w - M(66), M(4));
+            _minimizeButton.Font = Font13;
+            _minimizeButton.Size = new Size(M(28), M(28));
+            _minimizeButton.Location = new Point(w - M(34), M(4));
+
+            _deviceHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
+            _deviceHeaderLabel.Location = new Point(margin, M(5));
+
+            _deviceZonePanel.Width = w;
+
+            _credentialHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
+            _credentialHeaderLabel.Font = Font13;
+            _credentialHeaderLabel.Location = new Point(margin, M(5));
+            _credentialArrowLabel.Font = Font13;
+            _credentialArrowLabel.Location = new Point(w - M(26), M(5));
+
+            _credentialZonePanel.Width = w;
+
+            _bottomPanel.Size = new Size(w, M(PanelLayout.BottomStatusHeight));
+            _feedbackLabel.Font = Font13;
+            _feedbackLabel.Size = new Size(ContentWidthNow, M(24));
+            _feedbackLabel.Location = new Point(margin, M(4));
+            _rootLabel.Font = Font11;
+            _rootLabel.Size = new Size(ContentWidthNow, M(22));
+            _rootLabel.Location = new Point(margin, M(31));
+        }
+
         private int ComputeCurrentHeight()
         {
             int devices = _config != null && _config.Devices != null ? _config.Devices.Count : 0;
             int credentials = _config != null && _config.Credentials != null ? _config.Credentials.Count : 0;
             bool collapsed = _config != null && _config.IsCredentialCollapsed;
-            return PanelLayout.ComputeHeight(devices, credentials, collapsed);
+            return PanelLayout.ComputeHeight(devices, credentials, collapsed, ScaleFactor);
         }
 
         /// <summary>按区高依次摆放各分区（ClientSize 须已按 ComputeCurrentHeight 设好）。</summary>
         private void LayoutSections()
         {
-            int deviceZone = PanelLayout.DeviceZoneHeight(_config.Devices.Count);
-            int credentialZone = PanelLayout.CredentialZoneHeight(_config.Credentials.Count, _config.IsCredentialCollapsed);
+            int deviceZone = PanelLayout.DeviceZoneHeight(_config.Devices.Count, ScaleFactor);
+            int credentialZone = PanelLayout.CredentialZoneHeight(_config.Credentials.Count, _config.IsCredentialCollapsed, ScaleFactor);
             int total = ComputeCurrentHeight();
 
             _titleBarPanel.Location = new Point(0, 0);
-            int y = PanelLayout.TitleBarHeight;
+            int y = M(PanelLayout.TitleBarHeight);
             _deviceHeaderPanel.Location = new Point(0, y);
-            y += PanelLayout.SectionHeaderHeight;
+            y += M(PanelLayout.SectionHeaderHeight);
             _deviceZonePanel.Location = new Point(0, y);
             _deviceZonePanel.Height = deviceZone;
             y += deviceZone;
             _credentialHeaderPanel.Location = new Point(0, y);
-            y += PanelLayout.SectionHeaderHeight;
+            y += M(PanelLayout.SectionHeaderHeight);
             _credentialZonePanel.Location = new Point(0, y);
             _credentialZonePanel.Height = credentialZone;
             y += credentialZone;
-            _bottomPanel.Location = new Point(0, total - PanelLayout.BottomStatusHeight);
+            _bottomPanel.Location = new Point(0, total - M(PanelLayout.BottomStatusHeight));
         }
 
         /// <summary>高度变化统一入口：先按 Bottom 锚定算 Top，再改尺寸与分区布局。</summary>
         private void ApplyHeightAnchored()
         {
             int newHeight = ComputeCurrentHeight();
-            if (ClientSize.Height != newHeight)
+            if (ClientSize.Height != newHeight || ClientSize.Width != PanelWidthNow)
             {
                 int bottom = Bottom;
                 int workingTop = Screen.FromControl(this).WorkingArea.Top;
                 int newTop = PanelLayout.ComputeTop(bottom, newHeight, workingTop);
-                ClientSize = new Size(PanelLayout.PanelWidth, newHeight);
+                ClientSize = new Size(PanelWidthNow, newHeight);
                 Location = new Point(Left, newTop);
             }
             LayoutSections();
@@ -417,7 +478,7 @@ namespace InspectionWidget
 
         private void RestorePosition()
         {
-            var size = new Size(PanelLayout.PanelWidth, ClientSize.Height);
+            var size = new Size(PanelWidthNow, ClientSize.Height);
             if (_config.WindowLeft.HasValue && _config.WindowTop.HasValue)
             {
                 var candidate = new Rectangle(_config.WindowLeft.Value, _config.WindowTop.Value, size.Width, size.Height);
@@ -449,6 +510,7 @@ namespace InspectionWidget
             LoadResult load = _store.Load();
             _config = load.Config != null ? load.Config : AppConfig.CreateDefault();
             EnsureConfigLists();
+            ApplyScaleToStaticLayout();
             RefreshConfigState();
             ApplyHeightAnchored();
         }
@@ -528,7 +590,7 @@ namespace InspectionWidget
 
             if (_config.Devices.Count == 0)
             {
-                _deviceHint = CreateHintLabel("暂无设备，去设置添加", WeakTextColor, PanelLayout.DeviceRowHeight);
+                _deviceHint = CreateHintLabel("暂无设备，去设置添加", WeakTextColor, M(PanelLayout.DeviceRowHeight));
                 _deviceZonePanel.Controls.Add(_deviceHint);
                 return;
             }
@@ -545,8 +607,8 @@ namespace InspectionWidget
                     BackColor = ButtonBackColor,
                     ForeColor = PrimaryTextColor,
                     TextAlign = ContentAlignment.MiddleLeft,
-                    Size = new Size(ContentWidth, PanelLayout.DeviceRowHeight),
-                    Location = new Point(SideMargin, i * (PanelLayout.DeviceRowHeight + PanelLayout.DeviceRowGap))
+                    Size = new Size(ContentWidthNow, M(PanelLayout.DeviceRowHeight)),
+                    Location = new Point(M(SideMargin), i * (M(PanelLayout.DeviceRowHeight) + M(PanelLayout.DeviceRowGap)))
                 };
                 button.FlatAppearance.BorderColor = BorderColor;
                 button.FlatAppearance.BorderSize = 1;
@@ -570,7 +632,7 @@ namespace InspectionWidget
 
             if (_config.Credentials.Count == 0)
             {
-                Control hint = CreateHintLabel("未设置凭据，去设置添加", AccentColor, PanelLayout.CredentialRowHeight);
+                Control hint = CreateHintLabel("未设置凭据，去设置添加", AccentColor, M(PanelLayout.CredentialRowHeight));
                 _credentialControls.Add(hint);
                 _credentialZonePanel.Controls.Add(hint);
                 return;
@@ -588,8 +650,8 @@ namespace InspectionWidget
                     BackColor = ButtonBackColor,
                     ForeColor = entry.NeedsReset ? ErrorColor : PrimaryTextColor,
                     TextAlign = ContentAlignment.MiddleLeft,
-                    Size = new Size(ContentWidth, PanelLayout.CredentialRowHeight),
-                    Location = new Point(SideMargin, i * (PanelLayout.CredentialRowHeight + PanelLayout.CredentialRowGap))
+                    Size = new Size(ContentWidthNow, M(PanelLayout.CredentialRowHeight)),
+                    Location = new Point(M(SideMargin), i * (M(PanelLayout.CredentialRowHeight) + M(PanelLayout.CredentialRowGap)))
                 };
                 button.FlatAppearance.BorderColor = BorderColor;
                 button.FlatAppearance.BorderSize = 1;
@@ -608,8 +670,8 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = foreColor,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Size = new Size(ContentWidth, height),
-                Location = new Point(SideMargin, 0)
+                Size = new Size(ContentWidthNow, height),
+                Location = new Point(M(SideMargin), 0)
             };
             hint.Paint += delegate(object sender, PaintEventArgs e)
             {
@@ -706,6 +768,7 @@ namespace InspectionWidget
 
             _config = savedConfig;
             EnsureConfigLists();
+            ApplyScaleToStaticLayout();
             RebuildClipboardGuard();
             RefreshConfigState();
             ApplyHeightAnchored();

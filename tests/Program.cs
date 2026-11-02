@@ -12,6 +12,7 @@ namespace InspectionWidget.Tests
             ConfigPathResolverTests.RunAll();
             ConfigStoreLockTests.RunAll();
             PanelLayoutTests.RunAll();
+            UiScaleTests.RunAll();
             PanelStateMachineTests.RunAll();
             TargetClassifierTests.RunAll();
             CaptureGeometryTests.RunAll();

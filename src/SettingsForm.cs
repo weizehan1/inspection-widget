@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
+using InspectionWidget.Capture;
 using InspectionWidget.Config;
 using InspectionWidget.Credentials;
 
@@ -27,7 +28,8 @@ namespace InspectionWidget
                 CaptureMode = source.CaptureMode,
                 WindowLeft = source.WindowLeft,
                 WindowTop = source.WindowTop,
-                LastDevice = source.LastDevice
+                LastDevice = source.LastDevice,
+                UiScalePercent = source.UiScalePercent
             };
             if (source.Credentials != null)
             {
@@ -138,6 +140,14 @@ namespace InspectionWidget
         /// <summary>传入配置的深拷贝：窗内一切编辑都落在这里，取消不影响原配置。</summary>
         private readonly AppConfig _working;
 
+        /// <summary>本窗自身的显示缩放因子（打开时按当前配置档位定，窗内改档下次打开才作用于本窗）。</summary>
+        private readonly double _scaleFactor;
+
+        // 布局度量缩放助手：全部几何以 100% 基准值书写，落点时统一乘因子取整
+        private int S(int value) { return PanelLayout.Scale(value, _scaleFactor); }
+        private Point P(int x, int y) { return new Point(S(x), S(y)); }
+        private Size Z(int width, int height) { return new Size(S(width), S(height)); }
+
         /// <summary>保存成功后的新配置（Saved 后由 MainForm 取用刷新）。</summary>
         public AppConfig ResultConfig { get; private set; }
 
@@ -150,10 +160,10 @@ namespace InspectionWidget
         private Font _font11;
         private Font _font20Bold;
 
-        private Font Font13 { get { if (_font13 == null) _font13 = CreateFont(13f, FontStyle.Regular); return _font13; } }
-        private Font Font13Bold { get { if (_font13Bold == null) _font13Bold = CreateFont(13f, FontStyle.Bold); return _font13Bold; } }
-        private Font Font11 { get { if (_font11 == null) _font11 = CreateFont(11f, FontStyle.Regular); return _font11; } }
-        private Font Font20Bold { get { if (_font20Bold == null) _font20Bold = CreateFont(20f, FontStyle.Bold); return _font20Bold; } }
+        private Font Font13 { get { if (_font13 == null) _font13 = CreateFont(13f * (float)_scaleFactor, FontStyle.Regular); return _font13; } }
+        private Font Font13Bold { get { if (_font13Bold == null) _font13Bold = CreateFont(13f * (float)_scaleFactor, FontStyle.Bold); return _font13Bold; } }
+        private Font Font11 { get { if (_font11 == null) _font11 = CreateFont(11f * (float)_scaleFactor, FontStyle.Regular); return _font11; } }
+        private Font Font20Bold { get { if (_font20Bold == null) _font20Bold = CreateFont(20f * (float)_scaleFactor, FontStyle.Bold); return _font20Bold; } }
 
         private static Font CreateFont(float sizePx, FontStyle style)
         {
@@ -220,6 +230,7 @@ namespace InspectionWidget
         private TextBox _rootPathTextBox;
         private Label _rootStatusLabel;
         private CheckBox _autoClearCheckBox;
+        private ComboBox _uiScaleComboBox;
         private RadioButton _modeAutoRadio;
         private RadioButton _modePrintWindowRadio;
         private RadioButton _modeBitBltRadio;
@@ -237,11 +248,14 @@ namespace InspectionWidget
             _protector = protector;
             _working = AppConfigCloner.Clone(config);
             _editRootPath = _working.RootPath;
+            _scaleFactor = UiScale.Factor(_working.UiScalePercent);
 
             Text = "设置 · 巡检截图小组件";
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(744, 430);
+            // 居中口径（v1.0.1）：Manual + OnLoad 按主面板所在屏幕工作区中央定位，
+            // 不再贴着右下角主面板弹出（CenterParent 是贴着 Owner 居中，不合要求）。
+            StartPosition = FormStartPosition.Manual;
+            ClientSize = Z(744, 430);
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
@@ -254,10 +268,22 @@ namespace InspectionWidget
             SelectGroup(GroupDevices);
         }
 
+        /// <summary>打开时居中：按主面板（Owner）所在屏幕的工作区中央定位。</summary>
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            Form owner = Owner;
+            if (owner != null)
+            {
+                var workingArea = Screen.FromControl(owner).WorkingArea;
+                Location = PanelLayout.CenterInWorkingArea(workingArea, Size);
+            }
+        }
+
         private void BuildLayout()
         {
             // 左侧导航列
-            var navPanel = new Panel { Location = new Point(0, 0), Size = new Size(130, 382), BackColor = PanelBackColor };
+            var navPanel = new Panel { Location = P(0, 0), Size = Z(130, 382), BackColor = PanelBackColor };
             string[] navTexts = { "设备管理", "凭据管理", "存储与通用", "关于" };
             for (int i = 0; i < navTexts.Length; i++)
             {
@@ -270,22 +296,22 @@ namespace InspectionWidget
                     FlatStyle = FlatStyle.Flat,
                     BackColor = PanelBackColor,
                     TextAlign = ContentAlignment.MiddleLeft,
-                    Padding = new Padding(14, 0, 0, 0),
-                    Location = new Point(0, 12 + i * 46),
-                    Size = new Size(130, 40)
+                    Padding = new Padding(S(14), 0, 0, 0),
+                    Location = new Point(0, S(12) + i * S(46)),
+                    Size = Z(130, 40)
                 };
                 button.FlatAppearance.BorderSize = 0;
                 button.Click += delegate { SelectGroup(index); };
                 _navButtons[i] = button;
                 navPanel.Controls.Add(button);
             }
-            _navAccent = new Panel { BackColor = AccentColor, Size = new Size(4, 40), Location = new Point(0, 12) };
+            _navAccent = new Panel { BackColor = AccentColor, Size = Z(4, 40), Location = P(0, 12) };
             navPanel.Controls.Add(_navAccent);
             _navAccent.BringToFront();
             Controls.Add(navPanel);
 
             // 右侧内容区：四组各一块 Panel，切换可见性（不用 TabControl）
-            var contentPanel = new Panel { Location = new Point(130, 0), Size = new Size(614, 382), BackColor = PanelBackColor };
+            var contentPanel = new Panel { Location = P(130, 0), Size = Z(614, 382), BackColor = PanelBackColor };
             Controls.Add(contentPanel);
             _groupPanels[GroupDevices] = BuildDevicesGroup();
             _groupPanels[GroupCredentials] = BuildCredentialsGroup();
@@ -301,16 +327,16 @@ namespace InspectionWidget
                 ForeColor = ErrorColor,
                 AutoSize = false,
                 AutoEllipsis = true,
-                Size = new Size(524, 32),
-                Location = new Point(12, 394)
+                Size = Z(524, 32),
+                Location = P(12, 394)
             };
             Controls.Add(_feedbackLabel);
             var saveButton = new Button
             {
                 Text = "保存",
                 Font = Font13,
-                Size = new Size(84, 32),
-                Location = new Point(552, 390)
+                Size = Z(84, 32),
+                Location = P(552, 390)
             };
             saveButton.Click += OnSaveClicked;
             Controls.Add(saveButton);
@@ -318,8 +344,8 @@ namespace InspectionWidget
             {
                 Text = "取消",
                 Font = Font13,
-                Size = new Size(84, 32),
-                Location = new Point(644, 390)
+                Size = Z(84, 32),
+                Location = P(644, 390)
             };
             cancelButton.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(cancelButton);
@@ -342,7 +368,7 @@ namespace InspectionWidget
 
         private Panel NewGroupPanel()
         {
-            return new Panel { Location = new Point(0, 0), Size = new Size(614, 382), BackColor = PanelBackColor };
+            return new Panel { Location = P(0, 0), Size = Z(614, 382), BackColor = PanelBackColor };
         }
 
         // ---------- 设备管理组 ----------
@@ -354,8 +380,8 @@ namespace InspectionWidget
             _deviceListBox = new ListBox
             {
                 Font = Font13,
-                Location = new Point(16, 16),
-                Size = new Size(320, 288)
+                Location = P(16, 16),
+                Size = Z(320, 288)
             };
             _deviceListBox.SelectedIndexChanged += OnDeviceSelectionChanged;
             panel.Controls.Add(_deviceListBox);
@@ -366,35 +392,35 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(352, 16)
+                Location = P(352, 16)
             };
             panel.Controls.Add(editLabel);
 
             _deviceNameTextBox = new TextBox
             {
                 Font = Font13,
-                Location = new Point(352, 42),
-                Size = new Size(246, 30)
+                Location = P(352, 42),
+                Size = Z(246, 30)
             };
             panel.Controls.Add(_deviceNameTextBox);
 
-            var applyButton = new Button { Text = "应用修改", Font = Font13, Location = new Point(352, 84), Size = new Size(246, 32) };
+            var applyButton = new Button { Text = "应用修改", Font = Font13, Location = P(352, 84), Size = Z(246, 32) };
             applyButton.Click += OnDeviceApplyClicked;
             panel.Controls.Add(applyButton);
 
-            var addButton = new Button { Text = "添加", Font = Font13, Location = new Point(352, 128), Size = new Size(118, 32) };
+            var addButton = new Button { Text = "添加", Font = Font13, Location = P(352, 128), Size = Z(118, 32) };
             addButton.Click += OnDeviceAddClicked;
             panel.Controls.Add(addButton);
 
-            var deleteButton = new Button { Text = "删除", Font = Font13, Location = new Point(480, 128), Size = new Size(118, 32) };
+            var deleteButton = new Button { Text = "删除", Font = Font13, Location = P(480, 128), Size = Z(118, 32) };
             deleteButton.Click += OnDeviceDeleteClicked;
             panel.Controls.Add(deleteButton);
 
-            var upButton = new Button { Text = "上移", Font = Font13, Location = new Point(352, 172), Size = new Size(118, 32) };
+            var upButton = new Button { Text = "上移", Font = Font13, Location = P(352, 172), Size = Z(118, 32) };
             upButton.Click += delegate { MoveDevice(-1); };
             panel.Controls.Add(upButton);
 
-            var downButton = new Button { Text = "下移", Font = Font13, Location = new Point(480, 172), Size = new Size(118, 32) };
+            var downButton = new Button { Text = "下移", Font = Font13, Location = P(480, 172), Size = Z(118, 32) };
             downButton.Click += delegate { MoveDevice(1); };
             panel.Controls.Add(downButton);
 
@@ -404,7 +430,7 @@ namespace InspectionWidget
                 Font = Font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
-                Location = new Point(16, 322)
+                Location = P(16, 322)
             };
             panel.Controls.Add(note);
             return panel;
@@ -520,7 +546,7 @@ namespace InspectionWidget
         {
             Panel panel = NewGroupPanel();
 
-            _addCredentialButton = new Button { Text = "+ 添加凭据", Font = Font13, Location = new Point(16, 12), Size = new Size(130, 30) };
+            _addCredentialButton = new Button { Text = "+ 添加凭据", Font = Font13, Location = P(16, 12), Size = Z(130, 30) };
             _addCredentialButton.Click += OnAddCredentialClicked;
             panel.Controls.Add(_addCredentialButton);
 
@@ -529,7 +555,7 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(158, 18)
+                Location = P(158, 18)
             };
             panel.Controls.Add(_credentialCountLabel);
 
@@ -539,21 +565,21 @@ namespace InspectionWidget
                 Font = Font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
-                Location = new Point(16, 50)
+                Location = P(16, 50)
             };
             panel.Controls.Add(note);
 
-            var nameHeader = new Label { Text = "名称", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = new Point(16, 76) };
-            var secretHeader = new Label { Text = "内容", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = new Point(174, 76) };
-            var statusHeader = new Label { Text = "状态", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = new Point(342, 76) };
+            var nameHeader = new Label { Text = "名称", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(16, 76) };
+            var secretHeader = new Label { Text = "内容", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(174, 76) };
+            var statusHeader = new Label { Text = "状态", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(342, 76) };
             panel.Controls.Add(nameHeader);
             panel.Controls.Add(secretHeader);
             panel.Controls.Add(statusHeader);
 
             _credentialRowsPanel = new Panel
             {
-                Location = new Point(16, 98),
-                Size = new Size(582, 272),
+                Location = P(16, 98),
+                Size = Z(582, 272),
                 AutoScroll = true,
                 BackColor = PanelBackColor
             };
@@ -580,16 +606,16 @@ namespace InspectionWidget
                 Cleared = false,
                 OriginalNeedsReset = needsReset
             };
-            row.NameBox = new TextBox { Font = Font13, Size = new Size(150, 30), Text = title ?? string.Empty };
+            row.NameBox = new TextBox { Font = Font13, Size = Z(150, 30), Text = title ?? string.Empty };
             // 内容框恒为空白：已存内容绝不回显；PasswordChar 掩码新输入
-            row.SecretBox = new TextBox { Font = Font13, Size = new Size(160, 30), PasswordChar = '●' };
+            row.SecretBox = new TextBox { Font = Font13, Size = Z(160, 30), PasswordChar = '●' };
             row.SecretBox.TextChanged += delegate { RefreshRowStatus(row); };
-            row.StatusLabel = new Label { Font = Font11, AutoSize = false, Size = new Size(120, 36) };
-            row.ClearButton = new Button { Text = "清除", Font = Font11, Size = new Size(50, 30) };
+            row.StatusLabel = new Label { Font = Font11, AutoSize = false, Size = Z(120, 36) };
+            row.ClearButton = new Button { Text = "清除", Font = Font11, Size = Z(50, 30) };
             // 新增条目尚无已存密文可清，「清除」禁用；既有条目才可清除内容
             row.ClearButton.Enabled = !isNew;
             row.ClearButton.Click += delegate { OnCredentialClearClicked(row); };
-            row.DeleteButton = new Button { Text = "删除", Font = Font11, Size = new Size(50, 30) };
+            row.DeleteButton = new Button { Text = "删除", Font = Font11, Size = Z(50, 30) };
             row.DeleteButton.Click += delegate { OnCredentialDeleteClicked(row); };
 
             _credentialRowsPanel.Controls.Add(row.NameBox);
@@ -607,12 +633,12 @@ namespace InspectionWidget
             for (int i = 0; i < _credentialRows.Count; i++)
             {
                 CredentialRow row = _credentialRows[i];
-                int y = i * 46;
+                int y = i * S(46);
                 row.NameBox.Location = new Point(0, y);
-                row.SecretBox.Location = new Point(158, y);
-                row.StatusLabel.Location = new Point(326, y);
-                row.ClearButton.Location = new Point(452, y);
-                row.DeleteButton.Location = new Point(508, y);
+                row.SecretBox.Location = new Point(S(158), y);
+                row.StatusLabel.Location = new Point(S(326), y);
+                row.ClearButton.Location = new Point(S(452), y);
+                row.DeleteButton.Location = new Point(S(508), y);
             }
         }
 
@@ -701,20 +727,20 @@ namespace InspectionWidget
         {
             Panel panel = NewGroupPanel();
 
-            var rootLabel = new Label { Text = "截图根目录", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = new Point(16, 16) };
+            var rootLabel = new Label { Text = "截图根目录", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 16) };
             panel.Controls.Add(rootLabel);
 
-            _rootPathTextBox = new TextBox { Font = Font13, ReadOnly = true, Location = new Point(16, 44), Size = new Size(440, 30) };
+            _rootPathTextBox = new TextBox { Font = Font13, ReadOnly = true, Location = P(16, 44), Size = Z(440, 30) };
             panel.Controls.Add(_rootPathTextBox);
 
-            var changeButton = new Button { Text = "更改…", Font = Font13, Location = new Point(468, 42), Size = new Size(110, 32) };
+            var changeButton = new Button { Text = "更改…", Font = Font13, Location = P(468, 42), Size = Z(110, 32) };
             changeButton.Click += OnChangeRootClicked;
             panel.Controls.Add(changeButton);
 
-            _rootStatusLabel = new Label { Font = Font11, AutoSize = true, Location = new Point(16, 82) };
+            _rootStatusLabel = new Label { Font = Font11, AutoSize = true, Location = P(16, 82) };
             panel.Controls.Add(_rootStatusLabel);
 
-            var configLabel = new Label { Text = "配置文件实际路径", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = new Point(16, 118) };
+            var configLabel = new Label { Text = "配置文件实际路径", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 118) };
             panel.Controls.Add(configLabel);
 
             var configPathTextBox = new TextBox
@@ -722,8 +748,8 @@ namespace InspectionWidget
                 Font = Font11,
                 ReadOnly = true,
                 Text = _store.AuthoritativePath,
-                Location = new Point(16, 146),
-                Size = new Size(582, 26)
+                Location = P(16, 146),
+                Size = Z(582, 26)
             };
             panel.Controls.Add(configPathTextBox);
 
@@ -731,11 +757,11 @@ namespace InspectionWidget
             {
                 var fallbackNote = new Label
                 {
-                    Text = "（exe 目录不可写，已回退）",
+                    Text = "（配置文件位于系统 AppData 目录）",
                     Font = Font11,
-                    ForeColor = ErrorColor,
+                    ForeColor = WeakTextColor,
                     AutoSize = true,
-                    Location = new Point(16, 178)
+                    Location = P(16, 178)
                 };
                 panel.Controls.Add(fallbackNote);
             }
@@ -746,14 +772,40 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = PrimaryTextColor,
                 AutoSize = true,
-                Location = new Point(16, 214)
+                Location = P(16, 214)
             };
             panel.Controls.Add(_autoClearCheckBox);
 
-            var modeGroup = new GroupBox { Text = "截图模式", Font = Font13, Location = new Point(16, 252), Size = new Size(582, 84) };
-            _modeAutoRadio = new RadioButton { Text = "自动（推荐）", Font = Font13, AutoSize = true, Location = new Point(16, 34) };
-            _modePrintWindowRadio = new RadioButton { Text = "仅 PrintWindow", Font = Font13, AutoSize = true, Location = new Point(150, 34) };
-            _modeBitBltRadio = new RadioButton { Text = "仅屏幕拷贝（置前抓屏）", Font = Font13, AutoSize = true, Location = new Point(320, 34) };
+            // 界面缩放（v1.0.1）：保存制——点「保存」才落盘；主面板保存后立即按新档重排，
+            // 本设置窗口下次打开时按新档呈现（窗内文案据实说明）。
+            var scaleLabel = new Label { Text = "界面缩放", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 250) };
+            panel.Controls.Add(scaleLabel);
+
+            _uiScaleComboBox = new ComboBox
+            {
+                Font = Font13,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = P(104, 246),
+                Size = Z(110, 28)
+            };
+            for (int i = 0; i < UiScale.Count; i++)
+                _uiScaleComboBox.Items.Add(UiScale.TextForIndex(i));
+            panel.Controls.Add(_uiScaleComboBox);
+
+            var scaleNote = new Label
+            {
+                Text = "4K 建议 150% / 200%；主面板保存后立即生效，本窗口下次打开生效",
+                Font = Font11,
+                ForeColor = WeakTextColor,
+                AutoSize = true,
+                Location = P(226, 250)
+            };
+            panel.Controls.Add(scaleNote);
+
+            var modeGroup = new GroupBox { Text = "截图模式", Font = Font13, Location = P(16, 288), Size = Z(582, 84) };
+            _modeAutoRadio = new RadioButton { Text = "自动（推荐）", Font = Font13, AutoSize = true, Location = P(16, 34) };
+            _modePrintWindowRadio = new RadioButton { Text = "仅 PrintWindow", Font = Font13, AutoSize = true, Location = P(150, 34) };
+            _modeBitBltRadio = new RadioButton { Text = "仅屏幕拷贝（置前抓屏）", Font = Font13, AutoSize = true, Location = P(320, 34) };
             modeGroup.Controls.Add(_modeAutoRadio);
             modeGroup.Controls.Add(_modePrintWindowRadio);
             modeGroup.Controls.Add(_modeBitBltRadio);
@@ -766,6 +818,7 @@ namespace InspectionWidget
             _rootPathTextBox.Text = _editRootPath ?? string.Empty;
             RefreshRootStatus();
             _autoClearCheckBox.Checked = _working.AutoClearClipboard;
+            _uiScaleComboBox.SelectedIndex = UiScale.IndexForPercent(_working.UiScalePercent);
             _modeAutoRadio.Checked = _working.CaptureMode == CaptureMode.Auto;
             _modePrintWindowRadio.Checked = _working.CaptureMode == CaptureMode.PrintWindowOnly;
             _modeBitBltRadio.Checked = _working.CaptureMode == CaptureMode.BitBltOnly;
@@ -821,19 +874,19 @@ namespace InspectionWidget
                 Font = Font20Bold,
                 ForeColor = PrimaryTextColor,
                 AutoSize = true,
-                Location = new Point(16, 20)
+                Location = P(16, 20)
             };
             panel.Controls.Add(productLabel);
 
             var versionBadge = new Label
             {
-                Text = "v1.0",
+                Text = "v1.0.1",
                 Font = Font13Bold,
                 ForeColor = Color.White,
                 BackColor = AccentColor,
                 AutoSize = true,
-                Padding = new Padding(8, 2, 8, 2),
-                Location = new Point(16, 66)
+                Padding = new Padding(S(8), S(2), S(8), S(2)),
+                Location = P(16, 66)
             };
             panel.Controls.Add(versionBadge);
 
@@ -843,7 +896,7 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(16, 108)
+                Location = P(16, 108)
             };
             panel.Controls.Add(introLabel);
 
@@ -852,7 +905,7 @@ namespace InspectionWidget
                 Text = "https://github.com/weizehan1/inspection-widget",
                 Font = Font13,
                 AutoSize = true,
-                Location = new Point(16, 144)
+                Location = P(16, 144)
             };
             repoLink.LinkClicked += delegate
             {
@@ -873,14 +926,14 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(16, 180)
+                Location = P(16, 180)
             };
             panel.Controls.Add(techLabel);
 
-            _aboutConfigPathLabel = new Label { Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = new Point(16, 224) };
+            _aboutConfigPathLabel = new Label { Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(16, 224) };
             panel.Controls.Add(_aboutConfigPathLabel);
 
-            _aboutRootPathLabel = new Label { Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = new Point(16, 250) };
+            _aboutRootPathLabel = new Label { Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(16, 250) };
             panel.Controls.Add(_aboutRootPathLabel);
             return panel;
         }
@@ -986,6 +1039,9 @@ namespace InspectionWidget
             result.Credentials = credentials;
             result.RootPath = _editRootPath;
             result.AutoClearClipboard = _autoClearCheckBox.Checked;
+            result.UiScalePercent = _uiScaleComboBox.SelectedIndex >= 0
+                ? UiScale.PercentForIndex(_uiScaleComboBox.SelectedIndex)
+                : _working.UiScalePercent;
             result.CaptureMode = _modePrintWindowRadio.Checked
                 ? CaptureMode.PrintWindowOnly
                 : (_modeBitBltRadio.Checked ? CaptureMode.BitBltOnly : CaptureMode.Auto);

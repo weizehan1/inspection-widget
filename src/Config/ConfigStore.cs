@@ -41,7 +41,8 @@ namespace InspectionWidget.Config
         private static readonly string[] OptionalFieldNames =
         {
             "RootPath", "Devices", "Credentials", "IsCredentialCollapsed",
-            "AutoClearClipboard", "CaptureMode", "WindowLeft", "WindowTop", "LastDevice"
+            "AutoClearClipboard", "CaptureMode", "WindowLeft", "WindowTop", "LastDevice",
+            "UiScalePercent"
         };
 
         private readonly ConfigPaths _paths;
@@ -157,6 +158,12 @@ namespace InspectionWidget.Config
             }
 
             bool defaulted = false;
+            if (!UiScale.IsValid(config.UiScalePercent))
+            {
+                // 手改出的非法缩放档位归一为默认 100 并计入 Defaulted（自愈口径）
+                config.UiScalePercent = UiScale.DefaultPercent;
+                defaulted = true;
+            }
             if (config.Devices == null)
             {
                 config.Devices = new List<string>();
