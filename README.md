@@ -4,20 +4,6 @@
 
 `平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.1` · `单文件 exe，零第三方依赖`
 
-## 界面预览
-
-主面板常态（设备与凭据按实际配置数量渲染，下图为 8 个设备＋10 个凭据）：
-
-![主面板](docs/images/panel-main.png)
-
-设置窗口分四组管理，下图为「设备管理」与「凭据管理」两组：
-
-![设置 · 设备管理](docs/images/settings-devices.png)
-
-![设置 · 凭据管理](docs/images/settings-credentials.png)
-
-> 以上为界面设计图（v3.5），实机界面以程序为准。
-
 ## 它解决什么问题
 
 - 巡检要逐台截图，手动 PrintScreen 再裁剪、改名、归档，一轮下来重复劳动很多；
@@ -117,7 +103,7 @@ bash build.sh
 | `src/Storage/` | 截图保存、命名顺延与暂存回退 |
 | `src/Native/` | Win32 API 声明 |
 | `tests/` | 自动化测试工程（与主工程同跑 `build.sh`） |
-| `docs/` | 实施计划、验收记录与本页配图（`docs/images/`） |
+| `docs/` | 实施计划与验收记录 |
 | `build/` | 构建产物（exe 与试用说明） |
 | `.github/workflows/` | GitHub Actions 自动构建与发版 |
 
