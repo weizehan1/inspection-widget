@@ -30,3 +30,6 @@ Desktop.ini
 .vs/
 .idea/
 .vscode/
+
+# 构建产物目录（Task 0 审查 Minor）
+build/
