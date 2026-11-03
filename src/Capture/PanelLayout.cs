@@ -21,6 +21,23 @@ namespace InspectionWidget.Capture
         public const int CredentialRowGap = 8;
         public const int EmptyRowHeight = 33;
 
+        // 标题栏右侧按钮（v1.0.2 起三枚：设置/最小化/关闭）：边长 28、右边距 6、槽距 32、顶距 4。
+        public const int TitleBarButtonSize = 28;
+        public const int TitleBarButtonRightMargin = 6;
+        public const int TitleBarButtonStride = 32;
+        public const int TitleBarButtonTop = 4;
+
+        /// <summary>
+        /// 标题栏右侧按钮左缘 X：slotFromRight=0 为最右一枚。每令牌先各自取整再组合，
+        /// 与全窗体缩放口径一致。1.0 档三槽为 W-34 / W-66 / W-98。
+        /// </summary>
+        public static int TitleBarButtonX(int panelWidth, int slotFromRight, double factor)
+        {
+            int inset = Scale(TitleBarButtonRightMargin + TitleBarButtonSize, factor)
+                + slotFromRight * Scale(TitleBarButtonStride, factor);
+            return panelWidth - inset;
+        }
+
         /// <summary>单个度量按因子缩放并四舍五入（AwayFromZero，0.5 进位）。</summary>
         public static int Scale(int value, double factor)
         {

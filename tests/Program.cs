@@ -22,6 +22,8 @@ namespace InspectionWidget.Tests
             ScreenshotSaverTests.RunAll();
             SettingsFormTests.RunAll();
             ErrorLogTests.RunAll();
+            FolderNamePatternTests.RunAll();
+            V102Tests.RunAll();
 
             Console.WriteLine("----------------------------------------");
             Console.WriteLine("用例总数：" + TestRunner.TotalCount

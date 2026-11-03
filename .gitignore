@@ -33,3 +33,6 @@ Desktop.ini
 
 # 构建产物目录（Task 0 审查 Minor）
 build/
+
+# 图标预览图是源码资产，不受上面的截图 *.png 规则影响
+!assets/app-icon.png

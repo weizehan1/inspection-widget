@@ -16,7 +16,7 @@ using SystemClock = InspectionWidget.Storage.SystemClock;
 namespace InspectionWidget
 {
     /// <summary>
-    /// 主面板：无边框置顶面板。标题栏（短名+日期+设置/最小化）、设备按钮列、
+    /// 主面板：无边框置顶面板。标题栏（短名+日期+设置/最小化/关闭）、设备按钮列、
     /// 可折叠凭据区、底部反馈行与根目录行；高度变化一律 Bottom 锚定。
     /// 配置加载/刷新走同一入口 RefreshConfigState（含设备名单校验 Minor-5 接线）。
     /// </summary>
@@ -72,6 +72,8 @@ namespace InspectionWidget
             public string RootPath;
             public DateTime Date;
             public int RequestId;
+            // 日期文件夹名模式快照（v1.0.2）：与 Date 同刻固定，保存/重试共用
+            public string FolderPattern;
         }
 
         private readonly IClock _clock = new SystemClock();
@@ -103,6 +105,14 @@ namespace InspectionWidget
         private Label _dateLabel;
         private Button _settingsButton;
         private Button _minimizeButton;
+        private Button _closeButton;
+        private ToolTip _titleToolTip;
+        private Font _fontGear;
+        private Bitmap _gearImage;
+        private bool _settingsUsesGearImage;
+
+        // 系统托盘（v1.0.2）：常驻 NotifyIcon，最小化 = 隐藏到托盘，托盘恢复/退出。
+        private NotifyIcon _trayIcon;
         private Label _deviceHeaderLabel;
         private Panel _deviceZonePanel;
         private Panel _credentialHeaderPanel;
@@ -155,6 +165,63 @@ namespace InspectionWidget
             get { return GetScaledFont(ref _font11, 11f, FontStyle.Regular); }
         }
 
+        // 设置按钮齿轮（v1.0.2）：Segoe UI Symbol 的 ⚙ 才是标准齿轮字形，
+        // 基准 16px（比正文 13px 大一号，一眼可辨），随界面缩放因子放大。
+        private Font GearFont
+        {
+            get
+            {
+                float target = 16f * (float)ScaleFactor;
+                if (_fontGear == null || _fontGear.Size != target)
+                {
+                    if (_fontGear != null) _fontGear.Dispose();
+                    _fontGear = new Font("Segoe UI Symbol", target, FontStyle.Regular, GraphicsUnit.Pixel);
+                }
+                return _fontGear;
+            }
+        }
+
+        private static bool HasSymbolFont
+        {
+            get
+            {
+                foreach (FontFamily family in FontFamily.Families)
+                {
+                    if (family.Name == "Segoe UI Symbol")
+                        return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置按钮视觉（v1.0.2）：有 Segoe UI Symbol → ⚙ 字形 + 齿轮字体；
+        /// 字体缺失 → GearArt 代码绘制的齿轮位图兜底（文字清空、走 Image）。
+        /// </summary>
+        private void ApplySettingsButtonVisual()
+        {
+            if (HasSymbolFont)
+            {
+                _settingsButton.Image = null;
+                _settingsButton.Text = "⚙";
+                _settingsButton.Font = GearFont;
+                _settingsUsesGearImage = false;
+            }
+            else
+            {
+                _settingsButton.Text = string.Empty;
+                _settingsButton.Font = Font13;
+                int imageSize = M(18);
+                if (_gearImage == null || _gearImage.Width != imageSize)
+                {
+                    if (_gearImage != null) _gearImage.Dispose();
+                    _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
+                }
+                _settingsButton.Image = _gearImage;
+                _settingsUsesGearImage = true;
+            }
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -167,10 +234,14 @@ namespace InspectionWidget
                     _pendingGeneration++;
                 }
                 if (_rootToolTip != null) _rootToolTip.Dispose();
+                if (_titleToolTip != null) _titleToolTip.Dispose();
+                if (_trayIcon != null) _trayIcon.Dispose();
                 if (_feedbackTimer != null) _feedbackTimer.Dispose();
                 if (_font13 != null) _font13.Dispose();
                 if (_font13Bold != null) _font13Bold.Dispose();
                 if (_font11 != null) _font11.Dispose();
+                if (_fontGear != null) _fontGear.Dispose();
+                if (_gearImage != null) _gearImage.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -187,12 +258,19 @@ namespace InspectionWidget
             Text = "巡检截图";
             FormBorderStyle = FormBorderStyle.None;
             TopMost = true;
-            ShowInTaskbar = true;
+            // v1.0.2 口径改定（2026-11-03 用户实机反馈）：不再进任务栏，常驻系统托盘。
+            ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             BackColor = PanelBackColor;
             DoubleBuffered = true;
 
+            // 应用图标（v1.0.2）：与 exe 图标同源（嵌入资源），任务栏/Alt-Tab 不再是默认图标
+            Icon appIcon = AppIcon.Load();
+            if (appIcon != null)
+                Icon = appIcon;
+
             BuildStaticLayout();
+            BuildTrayIcon();
 
             LoadResult load = _store.Load();
             _config = load.Config != null ? load.Config : AppConfig.CreateDefault();
@@ -235,8 +313,11 @@ namespace InspectionWidget
                 Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
-                Location = new Point(82, 11)
+                Location = new Point(68, 11)
             };
+            // 标题栏右侧三按钮（v1.0.2）：设置（槽 2）/ 最小化（槽 1）/ 关闭（槽 0），
+            // 位置统一走 PanelLayout.TitleBarButtonX，缩放重排在 ApplyScaleToStaticLayout。
+            _titleToolTip = new ToolTip();
             var settingsButton = _settingsButton = new Button
             {
                 Text = "⚙",
@@ -244,11 +325,12 @@ namespace InspectionWidget
                 ForeColor = SecondaryTextColor,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
-                Size = new Size(28, 28),
-                Location = new Point(PanelLayout.PanelWidth - 66, 4)
+                Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
+                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.PanelWidth, 2, 1.0), PanelLayout.TitleBarButtonTop)
             };
             settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += OnSettingsClicked;
+            _titleToolTip.SetToolTip(settingsButton, "设置");
             var minimizeButton = _minimizeButton = new Button
             {
                 Text = "—",
@@ -256,16 +338,32 @@ namespace InspectionWidget
                 ForeColor = SecondaryTextColor,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
-                Size = new Size(28, 28),
-                Location = new Point(PanelLayout.PanelWidth - 34, 4)
+                Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
+                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.PanelWidth, 1, 1.0), PanelLayout.TitleBarButtonTop)
             };
             minimizeButton.FlatAppearance.BorderSize = 0;
-            minimizeButton.Click += delegate { WindowState = FormWindowState.Minimized; };
+            minimizeButton.Click += OnMinimizeClicked;
+            _titleToolTip.SetToolTip(minimizeButton, "最小化");
+            var closeButton = _closeButton = new Button
+            {
+                Text = "✕",
+                Font = font13,
+                ForeColor = SecondaryTextColor,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = PanelBackColor,
+                Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
+                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.PanelWidth, 0, 1.0), PanelLayout.TitleBarButtonTop)
+            };
+            closeButton.FlatAppearance.BorderSize = 0;
+            // 关闭 = Close()：走既有 FormClosing（先清剪贴板→停钩→存位置），不另写退出路径
+            closeButton.Click += delegate { Close(); };
+            _titleToolTip.SetToolTip(closeButton, "关闭");
 
             _titleBarPanel.Controls.Add(titleLabel);
             _titleBarPanel.Controls.Add(dateLabel);
             _titleBarPanel.Controls.Add(settingsButton);
             _titleBarPanel.Controls.Add(minimizeButton);
+            _titleBarPanel.Controls.Add(closeButton);
             AttachDragHandlers(_titleBarPanel);
             AttachDragHandlers(titleLabel);
             AttachDragHandlers(dateLabel);
@@ -401,13 +499,16 @@ namespace InspectionWidget
             _titleLabel.Font = Font13Bold;
             _titleLabel.Location = new Point(margin, M(9));
             _dateLabel.Font = Font11;
-            _dateLabel.Location = new Point(M(82), M(11));
-            _settingsButton.Font = Font13;
-            _settingsButton.Size = new Size(M(28), M(28));
-            _settingsButton.Location = new Point(w - M(66), M(4));
+            _dateLabel.Location = new Point(M(68), M(11));
+            ApplySettingsButtonVisual();
+            _settingsButton.Size = new Size(M(PanelLayout.TitleBarButtonSize), M(PanelLayout.TitleBarButtonSize));
+            _settingsButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 2, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
             _minimizeButton.Font = Font13;
-            _minimizeButton.Size = new Size(M(28), M(28));
-            _minimizeButton.Location = new Point(w - M(34), M(4));
+            _minimizeButton.Size = new Size(M(PanelLayout.TitleBarButtonSize), M(PanelLayout.TitleBarButtonSize));
+            _minimizeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 1, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
+            _closeButton.Font = Font13;
+            _closeButton.Size = new Size(M(PanelLayout.TitleBarButtonSize), M(PanelLayout.TitleBarButtonSize));
+            _closeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 0, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
 
             _deviceHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
             _deviceHeaderLabel.Location = new Point(margin, M(5));
@@ -783,7 +884,8 @@ namespace InspectionWidget
                 ShowFeedback("尚未设置保存目录，请先在设置中选择", true);
                 return;
             }
-            string todayDir = Path.Combine(_config.RootPath, _clock.Now.ToString("yyyy-MM-dd"));
+            string todayDir = Path.Combine(_config.RootPath,
+                FolderNamePattern.Format(_config.FolderNamePattern, _clock.Now));
             if (!Directory.Exists(todayDir))
             {
                 // 只提示不建夹：没有今日截图就不该凭空多出一个空日期夹
@@ -933,7 +1035,8 @@ namespace InspectionWidget
                         Device = _stateMachine.CurrentDevice,
                         RootPath = _config.RootPath,
                         Date = _clock.Now,
-                        RequestId = _stateMachine.CurrentRequestId
+                        RequestId = _stateMachine.CurrentRequestId,
+                        FolderPattern = _config.FolderNamePattern
                     };
                     OnTargetResolved(result, _stateMachine.CurrentRequestId);
                     break;
@@ -1152,7 +1255,7 @@ namespace InspectionWidget
                 StorageSaveResult result;
                 try
                 {
-                    result = _saver.Save(image, request.RootPath, request.Device, request.Date);
+                    result = _saver.Save(image, request.RootPath, request.Device, request.Date, request.FolderPattern);
                 }
                 catch (Exception ex)
                 {
@@ -1428,8 +1531,71 @@ namespace InspectionWidget
             SaveBestEffort();
         }
 
+        // ---------- 系统托盘（v1.0.2） ----------
+
+        private void BuildTrayIcon()
+        {
+            var menu = new ContextMenuStrip();
+            var showItem = new ToolStripMenuItem("显示面板");
+            showItem.Click += delegate { ShowPanelFromTray(); };
+            var exitItem = new ToolStripMenuItem("退出");
+            // 退出与标题栏关闭按钮同一路径：Close() → FormClosing（先清剪贴板再退）
+            exitItem.Click += delegate { Close(); };
+            menu.Items.Add(showItem);
+            menu.Items.Add(exitItem);
+
+            _trayIcon = new NotifyIcon
+            {
+                Icon = Icon,
+                Text = "巡检截图",
+                ContextMenuStrip = menu,
+                Visible = true
+            };
+            _trayIcon.MouseClick += OnTrayMouseClick;
+            _trayIcon.DoubleClick += delegate { ShowPanelFromTray(); };
+        }
+
+        private void OnTrayMouseClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+                ShowPanelFromTray();
+        }
+
+        /// <summary>从托盘恢复：显示面板（位置不变、TopMost 照旧）并激活。</summary>
+        private void ShowPanelFromTray()
+        {
+            if (!Visible)
+                Show();
+            if (WindowState != FormWindowState.Normal)
+                WindowState = FormWindowState.Normal;
+            Activate();
+        }
+
+        /// <summary>
+        /// 最小化按钮（v1.0.2）：隐藏面板到托盘，程序继续运行；
+        /// 首次隐藏给一次气泡提示，标记落盘后不再提示。
+        /// </summary>
+        private void OnMinimizeClicked(object sender, EventArgs e)
+        {
+            Hide();
+            if (_config != null && !_config.TrayHintShown)
+            {
+                _config.TrayHintShown = true;
+                SaveBestEffort();
+                if (_trayIcon != null)
+                    _trayIcon.ShowBalloonTip(3000, "巡检截图", "已最小化到托盘，点图标恢复", ToolTipIcon.Info);
+            }
+        }
+
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            // 托盘图标先隐藏并释放，避免进程退出后托盘区残影。
+            if (_trayIcon != null)
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+                _trayIcon = null;
+            }
             // 退出兜底（Task 6）：先按回执核对清剪贴板（有回执且序列号+令牌
             // 匹配才清，Guard 内部处理），再 Dispose Guard，最后走原有逻辑。
             if (_clipboardGuard != null)

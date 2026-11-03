@@ -7,11 +7,16 @@
     <ProjectGuid>{C3CF6B60-4871-4E2E-B57E-82EFD26A79F2}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>InspectionWidget</RootNamespace>
-    <AssemblyName>InspectionWidget</AssemblyName>
+    <!-- v1.0.2：exe 文件名改中文「巡检助手」；RootNamespace 与代码命名空间保持
+         InspectionWidget 不变（资源名与内部标识不随文件名迁移）。 -->
+    <AssemblyName>巡检助手</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <LangVersion>7.3</LangVersion>
     <ApplicationManifest>..\app.manifest</ApplicationManifest>
+    <!-- v1.0.2：应用图标。MSBuild 构建时作为 exe 图标内嵌；下方 EmbeddedResource
+         同一份文件供窗体/托盘从程序集资源加载，两处同源。 -->
+    <ApplicationIcon>..\assets\app.ico</ApplicationIcon>
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
@@ -57,6 +62,10 @@
     <None Include="..\app.manifest">
       <Link>app.manifest</Link>
     </None>
+    <EmbeddedResource Include="..\assets\app.ico">
+      <Link>assets\app.ico</Link>
+      <LogicalName>InspectionWidget.AppIcon.ico</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -42,7 +42,7 @@ namespace InspectionWidget.Config
         {
             "RootPath", "Devices", "Credentials", "IsCredentialCollapsed",
             "AutoClearClipboard", "CaptureMode", "WindowLeft", "WindowTop", "LastDevice",
-            "UiScalePercent"
+            "UiScalePercent", "FolderNamePattern", "TrayHintShown"
         };
 
         private readonly ConfigPaths _paths;
@@ -162,6 +162,12 @@ namespace InspectionWidget.Config
             {
                 // 手改出的非法缩放档位归一为默认 100 并计入 Defaulted（自愈口径）
                 config.UiScalePercent = UiScale.DefaultPercent;
+                defaulted = true;
+            }
+            if (string.IsNullOrEmpty(config.FolderNamePattern))
+            {
+                // 日期文件夹模式缺失/被手改成空 → 自愈为默认 yyyy-MM-dd（自愈口径）
+                config.FolderNamePattern = FolderNamePattern.Default;
                 defaulted = true;
             }
             if (config.Devices == null)

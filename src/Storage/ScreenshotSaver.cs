@@ -44,11 +44,20 @@ namespace InspectionWidget.Storage
             _localAppDataDir = localAppDataDir;
         }
 
+        /// <summary>旧签名：日期文件夹名按默认模式（yyyy-MM-dd），与 v1.0.2 前口径一致。</summary>
+        public SaveResult Save(Bitmap image, string rootPath, string deviceName, DateTime captureDate)
+        {
+            return Save(image, rootPath, deviceName, captureDate, FolderNamePattern.Default);
+        }
+
         /// <summary>
         /// 保存截图。captureDate 只由调用方传入（采集开始时固定），本方法内不取系统时间。
         /// 根目录为空是配置问题：直接失败、不进暂存；磁盘故障才走暂存链。
+        /// folderNamePattern 决定日期子目录名；模式非法（手改配置绕过设置校验）时
+        /// 回退默认模式，绝不让格式化出的分隔符把图写到根目录之外。
         /// </summary>
-        public SaveResult Save(Bitmap image, string rootPath, string deviceName, DateTime captureDate)
+        public SaveResult Save(Bitmap image, string rootPath, string deviceName, DateTime captureDate,
+            string folderNamePattern)
         {
             if (string.IsNullOrEmpty(rootPath))
                 return new SaveResult { Saved = false, Error = "未设置保存根目录" };
@@ -57,7 +66,9 @@ namespace InspectionWidget.Storage
             if (string.IsNullOrEmpty(deviceName))
                 return new SaveResult { Saved = false, Error = "尚未保存：设备名为空" };
 
-            string datePart = captureDate.ToString("yyyy-MM-dd");
+            if (FolderNamePattern.Validate(folderNamePattern) != null)
+                folderNamePattern = FolderNamePattern.Default;
+            string datePart = FolderNamePattern.Format(folderNamePattern, captureDate);
             string primaryDir = Path.Combine(rootPath, datePart);
 
             string[] chain =

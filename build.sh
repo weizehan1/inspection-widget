@@ -29,10 +29,10 @@ else
     xbuild /p:Configuration=Release /p:Platform=AnyCPU /p:LangVersion=7.2 "$PROJECT"
 fi
 
-# 收集产物
+# 收集产物（v1.0.2 起 AssemblyName 为「巡检助手」）
 mkdir -p "$OUT_DIR"
-cp "src/bin/Release/InspectionWidget.exe" "$OUT_DIR/InspectionWidget.exe"
-cp "app.manifest" "$OUT_DIR/InspectionWidget.exe.manifest"
+cp "src/bin/Release/巡检助手.exe" "$OUT_DIR/巡检助手.exe"
+cp "app.manifest" "$OUT_DIR/巡检助手.exe.manifest"
 echo "产物已放入 $OUT_DIR/："
 ls -la "$OUT_DIR"
 
@@ -55,7 +55,7 @@ if [ -n "$TEST_PROJECT" ]; then
 
     # 运行测试可执行文件（若构建产生了 exe）
     # 只跑 *.Tests.exe：tests 输出目录里还有 ProjectReference 依赖拷贝的主程序
-    # InspectionWidget.exe（GUI 程序，无显示环境必崩），不能当测试运行（Task 1 接线时修正）。
+    # 巡检助手.exe（GUI 程序，无显示环境必崩），不能当测试运行（Task 1 接线时修正）。
     for test_exe in tests/bin/Release/*.Tests.exe; do
         if [ -f "$test_exe" ]; then
             echo "运行测试：$test_exe"

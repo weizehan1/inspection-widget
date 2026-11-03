@@ -63,6 +63,14 @@ namespace InspectionWidget.Config
         [DataMember]
         public int UiScalePercent { get; set; }
 
+        /// <summary>截图日期文件夹名模式（v1.0.2）：默认 yyyy-MM-dd；缺字段/空值在加载时自愈为默认。</summary>
+        [DataMember]
+        public string FolderNamePattern { get; set; }
+
+        /// <summary>托盘气泡提示是否已展示过（v1.0.2）：首次最小化到托盘提示一次后置 true，默认 false。</summary>
+        [DataMember]
+        public bool TrayHintShown { get; set; }
+
         // DataContract 反序列化不走构造函数：先把字段设成默认值，JSON 里有的字段再覆盖。
         // 这样缺 AutoClearClipboard 字段的老/手改配置加载后仍是默认 true，列表也不会是 null。
         [OnDeserializing]
@@ -72,6 +80,8 @@ namespace InspectionWidget.Config
             IsCredentialCollapsed = false;
             CaptureMode = CaptureMode.Auto;
             UiScalePercent = UiScale.DefaultPercent;
+            FolderNamePattern = global::InspectionWidget.Config.FolderNamePattern.Default;
+            TrayHintShown = false;
             Devices = new List<string>();
             Credentials = new List<CredentialEntry>();
         }
@@ -90,7 +100,9 @@ namespace InspectionWidget.Config
                 WindowLeft = null,
                 WindowTop = null,
                 LastDevice = null,
-                UiScalePercent = UiScale.DefaultPercent
+                UiScalePercent = UiScale.DefaultPercent,
+                FolderNamePattern = global::InspectionWidget.Config.FolderNamePattern.Default,
+                TrayHintShown = false
             };
         }
     }

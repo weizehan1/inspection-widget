@@ -29,7 +29,9 @@ namespace InspectionWidget
                 WindowLeft = source.WindowLeft,
                 WindowTop = source.WindowTop,
                 LastDevice = source.LastDevice,
-                UiScalePercent = source.UiScalePercent
+                UiScalePercent = source.UiScalePercent,
+                FolderNamePattern = source.FolderNamePattern,
+                TrayHintShown = source.TrayHintShown
             };
             if (source.Credentials != null)
             {
@@ -229,6 +231,7 @@ namespace InspectionWidget
         private bool _rootPathChanged;
         private TextBox _rootPathTextBox;
         private Label _rootStatusLabel;
+        private TextBox _folderPatternTextBox;
         private CheckBox _autoClearCheckBox;
         private ComboBox _uiScaleComboBox;
         private RadioButton _modeAutoRadio;
@@ -255,7 +258,12 @@ namespace InspectionWidget
             // 居中口径（v1.0.1）：Manual + OnLoad 按主面板所在屏幕工作区中央定位，
             // 不再贴着右下角主面板弹出（CenterParent 是贴着 Owner 居中，不合要求）。
             StartPosition = FormStartPosition.Manual;
-            ClientSize = Z(744, 430);
+            // v1.0.2：内容区加高（430→486），容纳「存储与通用」组新增的日期文件夹名一行。
+            ClientSize = Z(744, 486);
+            // 应用图标（v1.0.2）：与主面板同源（嵌入资源）
+            Icon appIcon = AppIcon.Load();
+            if (appIcon != null)
+                Icon = appIcon;
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
@@ -283,7 +291,7 @@ namespace InspectionWidget
         private void BuildLayout()
         {
             // 左侧导航列
-            var navPanel = new Panel { Location = P(0, 0), Size = Z(130, 382), BackColor = PanelBackColor };
+            var navPanel = new Panel { Location = P(0, 0), Size = Z(130, 438), BackColor = PanelBackColor };
             string[] navTexts = { "设备管理", "凭据管理", "存储与通用", "关于" };
             for (int i = 0; i < navTexts.Length; i++)
             {
@@ -311,7 +319,7 @@ namespace InspectionWidget
             Controls.Add(navPanel);
 
             // 右侧内容区：四组各一块 Panel，切换可见性（不用 TabControl）
-            var contentPanel = new Panel { Location = P(130, 0), Size = Z(614, 382), BackColor = PanelBackColor };
+            var contentPanel = new Panel { Location = P(130, 0), Size = Z(614, 438), BackColor = PanelBackColor };
             Controls.Add(contentPanel);
             _groupPanels[GroupDevices] = BuildDevicesGroup();
             _groupPanels[GroupCredentials] = BuildCredentialsGroup();
@@ -328,7 +336,7 @@ namespace InspectionWidget
                 AutoSize = false,
                 AutoEllipsis = true,
                 Size = Z(524, 32),
-                Location = P(12, 394)
+                Location = P(12, 450)
             };
             Controls.Add(_feedbackLabel);
             var saveButton = new Button
@@ -336,7 +344,7 @@ namespace InspectionWidget
                 Text = "保存",
                 Font = Font13,
                 Size = Z(84, 32),
-                Location = P(552, 390)
+                Location = P(552, 446)
             };
             saveButton.Click += OnSaveClicked;
             Controls.Add(saveButton);
@@ -345,7 +353,7 @@ namespace InspectionWidget
                 Text = "取消",
                 Font = Font13,
                 Size = Z(84, 32),
-                Location = P(644, 390)
+                Location = P(644, 446)
             };
             cancelButton.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(cancelButton);
@@ -368,7 +376,7 @@ namespace InspectionWidget
 
         private Panel NewGroupPanel()
         {
-            return new Panel { Location = P(0, 0), Size = Z(614, 382), BackColor = PanelBackColor };
+            return new Panel { Location = P(0, 0), Size = Z(614, 438), BackColor = PanelBackColor };
         }
 
         // ---------- 设备管理组 ----------
@@ -740,7 +748,24 @@ namespace InspectionWidget
             _rootStatusLabel = new Label { Font = Font11, AutoSize = true, Location = P(16, 82) };
             panel.Controls.Add(_rootStatusLabel);
 
-            var configLabel = new Label { Text = "配置文件实际路径", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 118) };
+            // 日期文件夹名（v1.0.2）：占位 yyyy/MM/dd 可混排固定文字，保存时校验拦截。
+            var folderLabel = new Label { Text = "日期文件夹名", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 106) };
+            panel.Controls.Add(folderLabel);
+
+            _folderPatternTextBox = new TextBox { Font = Font13, Location = P(16, 130), Size = Z(440, 28) };
+            panel.Controls.Add(_folderPatternTextBox);
+
+            var folderHint = new Label
+            {
+                Text = "示例：yyyy-MM-dd → 2026-11-03；巡检-yyyyMMdd → 巡检-20261103",
+                Font = Font11,
+                ForeColor = WeakTextColor,
+                AutoSize = true,
+                Location = P(16, 164)
+            };
+            panel.Controls.Add(folderHint);
+
+            var configLabel = new Label { Text = "配置文件实际路径", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 184) };
             panel.Controls.Add(configLabel);
 
             var configPathTextBox = new TextBox
@@ -748,7 +773,7 @@ namespace InspectionWidget
                 Font = Font11,
                 ReadOnly = true,
                 Text = _store.AuthoritativePath,
-                Location = P(16, 146),
+                Location = P(16, 212),
                 Size = Z(582, 26)
             };
             panel.Controls.Add(configPathTextBox);
@@ -761,7 +786,7 @@ namespace InspectionWidget
                     Font = Font11,
                     ForeColor = WeakTextColor,
                     AutoSize = true,
-                    Location = P(16, 178)
+                    Location = P(16, 244)
                 };
                 panel.Controls.Add(fallbackNote);
             }
@@ -772,20 +797,20 @@ namespace InspectionWidget
                 Font = Font13,
                 ForeColor = PrimaryTextColor,
                 AutoSize = true,
-                Location = P(16, 214)
+                Location = P(16, 280)
             };
             panel.Controls.Add(_autoClearCheckBox);
 
             // 界面缩放（v1.0.1）：保存制——点「保存」才落盘；主面板保存后立即按新档重排，
             // 本设置窗口下次打开时按新档呈现（窗内文案据实说明）。
-            var scaleLabel = new Label { Text = "界面缩放", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 250) };
+            var scaleLabel = new Label { Text = "界面缩放", Font = Font13, ForeColor = SecondaryTextColor, AutoSize = true, Location = P(16, 316) };
             panel.Controls.Add(scaleLabel);
 
             _uiScaleComboBox = new ComboBox
             {
                 Font = Font13,
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Location = P(104, 246),
+                Location = P(104, 312),
                 Size = Z(110, 28)
             };
             for (int i = 0; i < UiScale.Count; i++)
@@ -798,11 +823,11 @@ namespace InspectionWidget
                 Font = Font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
-                Location = P(226, 250)
+                Location = P(226, 316)
             };
             panel.Controls.Add(scaleNote);
 
-            var modeGroup = new GroupBox { Text = "截图模式", Font = Font13, Location = P(16, 288), Size = Z(582, 84) };
+            var modeGroup = new GroupBox { Text = "截图模式", Font = Font13, Location = P(16, 354), Size = Z(582, 80) };
             _modeAutoRadio = new RadioButton { Text = "自动（推荐）", Font = Font13, AutoSize = true, Location = P(16, 34) };
             _modePrintWindowRadio = new RadioButton { Text = "仅 PrintWindow", Font = Font13, AutoSize = true, Location = P(150, 34) };
             _modeBitBltRadio = new RadioButton { Text = "仅屏幕拷贝（置前抓屏）", Font = Font13, AutoSize = true, Location = P(320, 34) };
@@ -816,6 +841,7 @@ namespace InspectionWidget
         private void LoadStorageValues()
         {
             _rootPathTextBox.Text = _editRootPath ?? string.Empty;
+            _folderPatternTextBox.Text = FolderNamePattern.Normalize(_working.FolderNamePattern);
             RefreshRootStatus();
             _autoClearCheckBox.Checked = _working.AutoClearClipboard;
             _uiScaleComboBox.SelectedIndex = UiScale.IndexForPercent(_working.UiScalePercent);
@@ -880,7 +906,7 @@ namespace InspectionWidget
 
             var versionBadge = new Label
             {
-                Text = "v1.0.1",
+                Text = "v1.0.2",
                 Font = Font13Bold,
                 ForeColor = Color.White,
                 BackColor = AccentColor,
@@ -981,10 +1007,19 @@ namespace InspectionWidget
                 return;
             }
 
-            // 路径长度：与 ScreenshotSaver 同口径——根目录\日期子目录\设备名.png 全路径
+            // 1.5) 日期文件夹名校验（v1.0.2）：不合法不许保存，错误落到本组
+            string folderPattern = (_folderPatternTextBox.Text ?? string.Empty).Trim();
+            string patternError = FolderNamePattern.Validate(folderPattern);
+            if (patternError != null)
+            {
+                ShowError(GroupStorage, "存储与通用：日期文件夹名——" + patternError, _folderPatternTextBox);
+                return;
+            }
+
+            // 路径长度：与 ScreenshotSaver 同口径——根目录\日期子目录（按当前模式）\设备名.png 全路径
             if (!string.IsNullOrEmpty(_editRootPath))
             {
-                string todayDir = Path.Combine(_editRootPath, DateTime.Now.ToString("yyyy-MM-dd"));
+                string todayDir = Path.Combine(_editRootPath, FolderNamePattern.Format(folderPattern, DateTime.Now));
                 for (int i = 0; i < devices.Count; i++)
                 {
                     string lengthError = DeviceNameValidator.ValidateFullPathLength(todayDir, devices[i] + ".png");
@@ -1038,6 +1073,7 @@ namespace InspectionWidget
             result.Devices = devices;
             result.Credentials = credentials;
             result.RootPath = _editRootPath;
+            result.FolderNamePattern = folderPattern;
             result.AutoClearClipboard = _autoClearCheckBox.Checked;
             result.UiScalePercent = _uiScaleComboBox.SelectedIndex >= 0
                 ? UiScale.PercentForIndex(_uiScaleComboBox.SelectedIndex)

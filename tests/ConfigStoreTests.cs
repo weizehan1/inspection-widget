@@ -49,7 +49,9 @@ namespace InspectionWidget.Tests
                         WindowLeft = 123,
                         WindowTop = 45,
                         LastDevice = "机房B",
-                        UiScalePercent = 150
+                        UiScalePercent = 150,
+                        FolderNamePattern = "yyyy-MM-dd",
+                        TrayHintShown = true
                     };
                     SaveResult saved = store.Save(cfg);
                     Assert.True(saved.Saved, saved.Error);
@@ -70,6 +72,8 @@ namespace InspectionWidget.Tests
                     Assert.Equal((int?)45, r.Config.WindowTop);
                     Assert.Equal("机房B", r.Config.LastDevice);
                     Assert.Equal(150, r.Config.UiScalePercent);
+                    Assert.Equal("yyyy-MM-dd", r.Config.FolderNamePattern);
+                    Assert.True(r.Config.TrayHintShown);
                 }
                 finally { Cleanup(dir); }
             });
