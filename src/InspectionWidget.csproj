@@ -7,9 +7,12 @@
     <ProjectGuid>{C3CF6B60-4871-4E2E-B57E-82EFD26A79F2}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>InspectionWidget</RootNamespace>
-    <!-- v1.0.2：exe 文件名改中文「巡检助手」；RootNamespace 与代码命名空间保持
-         InspectionWidget 不变（资源名与内部标识不随文件名迁移）。 -->
-    <AssemblyName>巡检助手</AssemblyName>
+    <!-- 程序集名与交付文件名解耦：程序集名保持 ASCII「InspectionWidget」
+         （VS2022 MSBuild 构建 .NET Framework 老式工程时，非 ASCII 程序集名会让
+         产物名退化成 default.exe）；交付给用户的「巡检助手.exe」由 build.sh 与
+         GitHub Actions 工作流在构建后更名得到。RootNamespace、Mutex 名、
+         %LocalAppData% 目录名同为 InspectionWidget，一并保持不变。 -->
+    <AssemblyName>InspectionWidget</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <LangVersion>7.3</LangVersion>
