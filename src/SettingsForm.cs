@@ -24,6 +24,7 @@ namespace InspectionWidget
                 Devices = source.Devices != null ? new List<string>(source.Devices) : new List<string>(),
                 Credentials = new List<CredentialEntry>(),
                 IsCredentialCollapsed = source.IsCredentialCollapsed,
+                IsDeviceCollapsed = source.IsDeviceCollapsed,
                 AutoClearClipboard = source.AutoClearClipboard,
                 CaptureMode = source.CaptureMode,
                 WindowLeft = source.WindowLeft,
@@ -112,6 +113,159 @@ namespace InspectionWidget
                 return null;
             }
             return row.OriginalSecret ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 列表单步移动的纯逻辑（v1.0.3，凭据排序等列表调序共用）：
+    /// 把 index 处元素与 index+delta 处交换；列表为空、索引/目标越界或步长为 0 时
+    /// 不改列表、返回 false（首行上移/末行下移即此 no-op 口径，与设备侧按钮一致）。
+    /// </summary>
+    public static class ListReorder
+    {
+        public static bool Move<T>(IList<T> list, int index, int delta)
+        {
+            if (list == null || delta == 0)
+                return false;
+            int target = index + delta;
+            if (index < 0 || index >= list.Count || target < 0 || target >= list.Count)
+                return false;
+            T moving = list[index];
+            list[index] = list[target];
+            list[target] = moving;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 设置保存的校验＋组装＋落盘（v1.0.3 抽出供「保存」与「应用」共用，与控件无关，可单测）。
+    /// 校验顺序与原保存流程完全一致：设备名整体 → 日期文件夹名 → 完整路径长度 →
+    /// 凭据条数 → 逐行收集 → 组装（未编辑字段沿用工作副本）→ 落盘。
+    /// 任一步失败都不落盘。Error 为可直接展示的完整文案（含组别前缀）；
+    /// ErrorGroup 为出错组别（0 设备 / 1 凭据 / 2 存储；-1 表示落盘失败类，无组别定位）。
+    /// </summary>
+    public static class SettingsSaveCoordinator
+    {
+        public sealed class Outcome
+        {
+            public bool Saved;
+            public string Error;
+            public int ErrorGroup;
+            /// <summary>凭据收集出错的行下标（0 起）；非凭据收集错误为 -1。</summary>
+            public int CredentialErrorIndex;
+            /// <summary>凭据出错时焦点应落在名称框（名称为空时）还是内容框。</summary>
+            public bool CredentialErrorOnTitle;
+            /// <summary>成功时的新配置（已落盘）。</summary>
+            public AppConfig Result;
+        }
+
+        public static Outcome Execute(
+            AppConfig working,
+            List<string> devices,
+            List<CredentialRowCollector.RowInput> credentialInputs,
+            string rootPath,
+            string folderPattern,
+            bool autoClearClipboard,
+            int uiScalePercent,
+            CaptureMode captureMode,
+            ICredentialProtector protector,
+            ConfigStore store)
+        {
+            // 1) 设备名整体校验（合法性 + 列表内查重）
+            string deviceError = DeviceNameValidator.ValidateAll(devices);
+            if (deviceError != null)
+                return Fail("设备管理：设备名不合法——" + deviceError, 0);
+
+            // 2) 日期文件夹名校验
+            string patternError = FolderNamePattern.Validate(folderPattern);
+            if (patternError != null)
+                return Fail("存储与通用：日期文件夹名——" + patternError, 2);
+
+            // 3) 完整路径长度：根目录\日期子目录（按当前模式）\设备名.png
+            if (!string.IsNullOrEmpty(rootPath))
+            {
+                string todayDir = Path.Combine(rootPath, FolderNamePattern.Format(folderPattern, DateTime.Now));
+                for (int i = 0; i < devices.Count; i++)
+                {
+                    string lengthError = DeviceNameValidator.ValidateFullPathLength(todayDir, devices[i] + ".png");
+                    if (lengthError != null)
+                        return Fail("设备管理：设备「" + devices[i] + "」" + lengthError, 0);
+                }
+            }
+
+            // 4) 凭据：条数上限 → 逐行收集（名称必填；新内容在此刻才加密）
+            if (credentialInputs.Count > CredentialRowCollector.MaxCredentials)
+                return Fail("凭据管理：凭据最多 " + CredentialRowCollector.MaxCredentials + " 条。", 1);
+            var credentials = new List<CredentialEntry>();
+            for (int i = 0; i < credentialInputs.Count; i++)
+            {
+                CredentialRowCollector.RowInput input = credentialInputs[i];
+                string error;
+                string secret = CredentialRowCollector.CollectSecret(input, protector, out error);
+                if (error != null)
+                {
+                    return new Outcome
+                    {
+                        Saved = false,
+                        Error = "凭据管理：第 " + (i + 1) + " 条凭据——" + error,
+                        ErrorGroup = 1,
+                        CredentialErrorIndex = i,
+                        CredentialErrorOnTitle = string.IsNullOrWhiteSpace(input.Title)
+                    };
+                }
+                credentials.Add(new CredentialEntry
+                {
+                    Title = input.Title,
+                    EncryptedSecret = secret,
+                    // 密文为空（清除后/从未设置）运行时即需重设，与 MainForm 口径一致
+                    NeedsReset = string.IsNullOrEmpty(secret)
+                });
+            }
+
+            // 5) 组装新配置：窗内不编辑的字段（折叠态/窗口位置等）沿用工作副本；
+            // LastDevice 若指向已被删设备则置 null
+            AppConfig result = AppConfigCloner.Clone(working);
+            result.Devices = devices;
+            result.Credentials = credentials;
+            result.RootPath = rootPath;
+            result.FolderNamePattern = folderPattern;
+            result.AutoClearClipboard = autoClearClipboard;
+            result.UiScalePercent = uiScalePercent;
+            result.CaptureMode = captureMode;
+            if (result.LastDevice != null && !devices.Contains(result.LastDevice))
+                result.LastDevice = null;
+
+            // 6) 落盘：失败如实上报，绝不带错误配置当作成功
+            SaveResult save;
+            try
+            {
+                save = store.Save(result);
+            }
+            catch (Exception ex)
+            {
+                return Fail("设置未保存：" + ex.Message, -1);
+            }
+            if (save == null || !save.Saved)
+                return Fail("设置未保存：" + (save != null ? save.Error : "未知错误"), -1);
+
+            return new Outcome
+            {
+                Saved = true,
+                Result = result,
+                ErrorGroup = -1,
+                CredentialErrorIndex = -1
+            };
+        }
+
+        private static Outcome Fail(string error, int group)
+        {
+            return new Outcome
+            {
+                Saved = false,
+                Error = error,
+                ErrorGroup = group,
+                CredentialErrorIndex = -1
+            };
         }
     }
 
@@ -214,6 +368,8 @@ namespace InspectionWidget
             public Label StatusLabel;
             public Button ClearButton;
             public Button DeleteButton;
+            public Button UpButton;
+            public Button DownButton;
             public string OriginalSecret;
             public bool IsNew;
             public bool Cleared;
@@ -335,16 +491,26 @@ namespace InspectionWidget
                 ForeColor = ErrorColor,
                 AutoSize = false,
                 AutoEllipsis = true,
-                Size = Z(524, 32),
+                Size = Z(428, 32),
                 Location = P(12, 450)
             };
             Controls.Add(_feedbackLabel);
+            // 「应用」（v1.0.3）：与保存同一套校验＋落盘＋即时生效，但成功后不关窗
+            var applyButton = new Button
+            {
+                Text = "应用",
+                Font = Font13,
+                Size = Z(84, 32),
+                Location = P(456, 446)
+            };
+            applyButton.Click += OnApplyClicked;
+            Controls.Add(applyButton);
             var saveButton = new Button
             {
                 Text = "保存",
                 Font = Font13,
                 Size = Z(84, 32),
-                Location = P(552, 446)
+                Location = P(548, 446)
             };
             saveButton.Click += OnSaveClicked;
             Controls.Add(saveButton);
@@ -353,7 +519,7 @@ namespace InspectionWidget
                 Text = "取消",
                 Font = Font13,
                 Size = Z(84, 32),
-                Location = P(644, 446)
+                Location = P(640, 446)
             };
             cancelButton.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(cancelButton);
@@ -579,7 +745,7 @@ namespace InspectionWidget
 
             var nameHeader = new Label { Text = "名称", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(16, 76) };
             var secretHeader = new Label { Text = "内容", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(174, 76) };
-            var statusHeader = new Label { Text = "状态", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(342, 76) };
+            var statusHeader = new Label { Text = "状态", Font = Font11, ForeColor = WeakTextColor, AutoSize = true, Location = P(312, 76) };
             panel.Controls.Add(nameHeader);
             panel.Controls.Add(secretHeader);
             panel.Controls.Add(statusHeader);
@@ -616,21 +782,28 @@ namespace InspectionWidget
             };
             row.NameBox = new TextBox { Font = Font13, Size = Z(150, 30), Text = title ?? string.Empty };
             // 内容框恒为空白：已存内容绝不回显；PasswordChar 掩码新输入
-            row.SecretBox = new TextBox { Font = Font13, Size = Z(160, 30), PasswordChar = '●' };
+            row.SecretBox = new TextBox { Font = Font13, Size = Z(130, 30), PasswordChar = '●' };
             row.SecretBox.TextChanged += delegate { RefreshRowStatus(row); };
-            row.StatusLabel = new Label { Font = Font11, AutoSize = false, Size = Z(120, 36) };
+            row.StatusLabel = new Label { Font = Font11, AutoSize = false, Size = Z(100, 36) };
             row.ClearButton = new Button { Text = "清除", Font = Font11, Size = Z(50, 30) };
             // 新增条目尚无已存密文可清，「清除」禁用；既有条目才可清除内容
             row.ClearButton.Enabled = !isNew;
             row.ClearButton.Click += delegate { OnCredentialClearClicked(row); };
             row.DeleteButton = new Button { Text = "删除", Font = Font11, Size = Z(50, 30) };
             row.DeleteButton.Click += delegate { OnCredentialDeleteClicked(row); };
+            // 上移/下移（v1.0.3，与设备组同一套排序交互）：行序即保存序、即主面板渲染序
+            row.UpButton = new Button { Text = "↑", Font = Font11, Size = Z(28, 30), TabStop = false };
+            row.UpButton.Click += delegate { MoveCredentialRow(row, -1); };
+            row.DownButton = new Button { Text = "↓", Font = Font11, Size = Z(28, 30), TabStop = false };
+            row.DownButton.Click += delegate { MoveCredentialRow(row, 1); };
 
             _credentialRowsPanel.Controls.Add(row.NameBox);
             _credentialRowsPanel.Controls.Add(row.SecretBox);
             _credentialRowsPanel.Controls.Add(row.StatusLabel);
             _credentialRowsPanel.Controls.Add(row.ClearButton);
             _credentialRowsPanel.Controls.Add(row.DeleteButton);
+            _credentialRowsPanel.Controls.Add(row.UpButton);
+            _credentialRowsPanel.Controls.Add(row.DownButton);
             _credentialRows.Add(row);
             RefreshRowStatus(row);
             return row;
@@ -644,9 +817,14 @@ namespace InspectionWidget
                 int y = i * S(46);
                 row.NameBox.Location = new Point(0, y);
                 row.SecretBox.Location = new Point(S(158), y);
-                row.StatusLabel.Location = new Point(S(326), y);
-                row.ClearButton.Location = new Point(S(452), y);
-                row.DeleteButton.Location = new Point(S(508), y);
+                row.StatusLabel.Location = new Point(S(296), y);
+                row.ClearButton.Location = new Point(S(404), y);
+                row.DeleteButton.Location = new Point(S(462), y);
+                row.UpButton.Location = new Point(S(520), y);
+                row.DownButton.Location = new Point(S(552), y);
+                // 边界禁用与设备侧一致：首行禁上移、末行禁下移
+                row.UpButton.Enabled = i > 0;
+                row.DownButton.Enabled = i < _credentialRows.Count - 1;
             }
         }
 
@@ -700,13 +878,27 @@ namespace InspectionWidget
             _credentialRowsPanel.Controls.Remove(row.StatusLabel);
             _credentialRowsPanel.Controls.Remove(row.ClearButton);
             _credentialRowsPanel.Controls.Remove(row.DeleteButton);
+            _credentialRowsPanel.Controls.Remove(row.UpButton);
+            _credentialRowsPanel.Controls.Remove(row.DownButton);
             row.NameBox.Dispose();
             row.SecretBox.Dispose();
             row.StatusLabel.Dispose();
             row.ClearButton.Dispose();
             row.DeleteButton.Dispose();
+            row.UpButton.Dispose();
+            row.DownButton.Dispose();
             LayoutCredentialRows();
             UpdateCredentialAddState();
+        }
+
+        /// <summary>凭据行上移/下移：交换行序后重排（行序即保存序）；边界由按钮禁用＋Move 的 no-op 双重兜底。</summary>
+        private void MoveCredentialRow(CredentialRow row, int delta)
+        {
+            int index = _credentialRows.IndexOf(row);
+            if (!ListReorder.Move(_credentialRows, index, delta))
+                return;
+            LayoutCredentialRows();
+            row.NameBox.Focus();
         }
 
         private void OnAddCredentialClicked(object sender, EventArgs e)
@@ -757,7 +949,7 @@ namespace InspectionWidget
 
             var folderHint = new Label
             {
-                Text = "示例：yyyy-MM-dd → 2026-11-03；巡检-yyyyMMdd → 巡检-20261103",
+                Text = "示例：巡检-yyyy-MM-dd（默认）→ 巡检-2026-11-03；yyyy年MM月dd日 → 2026年11月03日",
                 Font = Font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
@@ -873,7 +1065,7 @@ namespace InspectionWidget
         {
             using (var dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "选择巡检截图保存根目录";
+                dialog.Description = "选择截图保存根目录";
                 dialog.ShowNewFolderButton = true;
                 if (!string.IsNullOrEmpty(_editRootPath))
                     dialog.SelectedPath = _editRootPath;
@@ -906,7 +1098,7 @@ namespace InspectionWidget
 
             var versionBadge = new Label
             {
-                Text = "v1.0.2",
+                Text = "v1.0.3",
                 Font = Font13Bold,
                 ForeColor = Color.White,
                 BackColor = AccentColor,
@@ -996,117 +1188,115 @@ namespace InspectionWidget
 
         private void OnSaveClicked(object sender, EventArgs e)
         {
-            ClearFeedback();
-
-            // 1) 设备名整体校验（合法性 + 列表内查重）
-            List<string> devices = CurrentDeviceNames();
-            string deviceError = DeviceNameValidator.ValidateAll(devices);
-            if (deviceError != null)
-            {
-                ShowError(GroupDevices, "设备管理：设备名不合法——" + deviceError, _deviceListBox);
+            AppConfig result = TrySaveFromControls();
+            if (result == null)
                 return;
-            }
-
-            // 1.5) 日期文件夹名校验（v1.0.2）：不合法不许保存，错误落到本组
-            string folderPattern = (_folderPatternTextBox.Text ?? string.Empty).Trim();
-            string patternError = FolderNamePattern.Validate(folderPattern);
-            if (patternError != null)
-            {
-                ShowError(GroupStorage, "存储与通用：日期文件夹名——" + patternError, _folderPatternTextBox);
-                return;
-            }
-
-            // 路径长度：与 ScreenshotSaver 同口径——根目录\日期子目录（按当前模式）\设备名.png 全路径
-            if (!string.IsNullOrEmpty(_editRootPath))
-            {
-                string todayDir = Path.Combine(_editRootPath, FolderNamePattern.Format(folderPattern, DateTime.Now));
-                for (int i = 0; i < devices.Count; i++)
-                {
-                    string lengthError = DeviceNameValidator.ValidateFullPathLength(todayDir, devices[i] + ".png");
-                    if (lengthError != null)
-                    {
-                        ShowError(GroupDevices, "设备管理：设备「" + devices[i] + "」" + lengthError, _deviceListBox);
-                        return;
-                    }
-                }
-            }
-
-            // 2) 凭据：条数上限 → 逐行收集（名称必填；新内容在此刻才加密）
-            if (_credentialRows.Count > CredentialRowCollector.MaxCredentials)
-            {
-                ShowError(GroupCredentials, "凭据管理：凭据最多 " + CredentialRowCollector.MaxCredentials + " 条。", _addCredentialButton);
-                return;
-            }
-            var credentials = new List<CredentialEntry>();
-            for (int i = 0; i < _credentialRows.Count; i++)
-            {
-                CredentialRow row = _credentialRows[i];
-                var input = new CredentialRowCollector.RowInput
-                {
-                    Title = row.NameBox.Text,
-                    OriginalSecret = row.OriginalSecret,
-                    IsNew = row.IsNew,
-                    Cleared = row.Cleared,
-                    NewPlainText = row.SecretBox.Text
-                };
-                string error;
-                string secret = CredentialRowCollector.CollectSecret(input, _protector, out error);
-                if (error != null)
-                {
-                    Control focus = string.IsNullOrWhiteSpace(row.NameBox.Text) ? (Control)row.NameBox : row.SecretBox;
-                    ShowError(GroupCredentials,
-                        "凭据管理：第 " + (i + 1) + " 条凭据——" + error, focus);
-                    return;
-                }
-                credentials.Add(new CredentialEntry
-                {
-                    Title = row.NameBox.Text,
-                    EncryptedSecret = secret,
-                    // 密文为空（清除后/从未设置）运行时即需重设，与 MainForm 口径一致
-                    NeedsReset = string.IsNullOrEmpty(secret)
-                });
-            }
-
-            // 3) 组装新配置：窗内不编辑的字段（折叠态/窗口位置）沿用原配置值；
-            // LastDevice 若指向已被删设备则置 null
-            AppConfig result = AppConfigCloner.Clone(_working);
-            result.Devices = devices;
-            result.Credentials = credentials;
-            result.RootPath = _editRootPath;
-            result.FolderNamePattern = folderPattern;
-            result.AutoClearClipboard = _autoClearCheckBox.Checked;
-            result.UiScalePercent = _uiScaleComboBox.SelectedIndex >= 0
-                ? UiScale.PercentForIndex(_uiScaleComboBox.SelectedIndex)
-                : _working.UiScalePercent;
-            result.CaptureMode = _modePrintWindowRadio.Checked
-                ? CaptureMode.PrintWindowOnly
-                : (_modeBitBltRadio.Checked ? CaptureMode.BitBltOnly : CaptureMode.Auto);
-            if (result.LastDevice != null && !devices.Contains(result.LastDevice))
-                result.LastDevice = null;
-
-            // 4) 落盘：失败停留在窗内并明示，绝不带错误配置关窗
-            SaveResult save;
-            try
-            {
-                save = _store.Save(result);
-            }
-            catch (Exception ex)
-            {
-                ShowSaveError("设置未保存：" + ex.Message);
-                return;
-            }
-            if (save == null || !save.Saved)
-            {
-                ShowSaveError("设置未保存：" + (save != null ? save.Error : "未知错误"));
-                return;
-            }
-
             ResultConfig = result;
             EventHandler handler = Saved;
             if (handler != null)
                 handler(this, EventArgs.Empty);
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        /// <summary>
+        /// 「应用」：与保存走同一套校验＋落盘＋即时生效（Saved 事件），唯一区别是
+        /// 成功后不关窗——凭据行基线刷新为已保存态，停留在当前组方便继续改。
+        /// 校验失败与保存完全一致：弹错、不落盘、窗口保持打开。
+        /// </summary>
+        private void OnApplyClicked(object sender, EventArgs e)
+        {
+            AppConfig result = TrySaveFromControls();
+            if (result == null)
+                return;
+            ResultConfig = result;
+            EventHandler handler = Saved;
+            if (handler != null)
+                handler(this, EventArgs.Empty);
+            AcceptSavedCredentialBaseline(result);
+            ClearFeedback();
+        }
+
+        /// <summary>
+        /// 保存/应用共用入口：从控件收集入参 → SettingsSaveCoordinator 校验落盘。
+        /// 成功返回新配置；失败已按出错组别定位提示（落盘失败走 ShowSaveError）并返回 null。
+        /// </summary>
+        private AppConfig TrySaveFromControls()
+        {
+            ClearFeedback();
+
+            var inputs = new List<CredentialRowCollector.RowInput>();
+            foreach (CredentialRow row in _credentialRows)
+            {
+                inputs.Add(new CredentialRowCollector.RowInput
+                {
+                    Title = row.NameBox.Text,
+                    OriginalSecret = row.OriginalSecret,
+                    IsNew = row.IsNew,
+                    Cleared = row.Cleared,
+                    NewPlainText = row.SecretBox.Text
+                });
+            }
+            string folderPattern = (_folderPatternTextBox.Text ?? string.Empty).Trim();
+            int uiScalePercent = _uiScaleComboBox.SelectedIndex >= 0
+                ? UiScale.PercentForIndex(_uiScaleComboBox.SelectedIndex)
+                : _working.UiScalePercent;
+            CaptureMode mode = _modePrintWindowRadio.Checked
+                ? CaptureMode.PrintWindowOnly
+                : (_modeBitBltRadio.Checked ? CaptureMode.BitBltOnly : CaptureMode.Auto);
+
+            SettingsSaveCoordinator.Outcome outcome = SettingsSaveCoordinator.Execute(
+                _working, CurrentDeviceNames(), inputs, _editRootPath, folderPattern,
+                _autoClearCheckBox.Checked, uiScalePercent, mode, _protector, _store);
+            if (outcome.Saved)
+                return outcome.Result;
+
+            if (outcome.ErrorGroup < 0)
+            {
+                ShowSaveError(outcome.Error);
+                return null;
+            }
+            Control focus;
+            if (outcome.ErrorGroup == 0)
+            {
+                focus = _deviceListBox;
+            }
+            else if (outcome.ErrorGroup == 2)
+            {
+                focus = _folderPatternTextBox;
+            }
+            else if (outcome.CredentialErrorIndex >= 0
+                && outcome.CredentialErrorIndex < _credentialRows.Count)
+            {
+                CredentialRow row = _credentialRows[outcome.CredentialErrorIndex];
+                focus = outcome.CredentialErrorOnTitle ? (Control)row.NameBox : row.SecretBox;
+            }
+            else
+            {
+                focus = _addCredentialButton;
+            }
+            ShowError(outcome.ErrorGroup, outcome.Error, focus);
+            return null;
+        }
+
+        /// <summary>
+        /// 应用成功后把凭据行基线对齐已保存配置：新行转既有行、清除标记清掉、
+        /// 内容框清空（密文已落盘，下次保存按「留空保留」口径），避免继续编辑时误判。
+        /// </summary>
+        private void AcceptSavedCredentialBaseline(AppConfig saved)
+        {
+            for (int i = 0; i < _credentialRows.Count && i < saved.Credentials.Count; i++)
+            {
+                CredentialRow row = _credentialRows[i];
+                row.OriginalSecret = saved.Credentials[i].EncryptedSecret;
+                row.OriginalNeedsReset = saved.Credentials[i].NeedsReset;
+                row.IsNew = false;
+                row.Cleared = false;
+                row.SecretBox.Text = string.Empty;
+                row.SecretBox.Enabled = true;
+                row.ClearButton.Enabled = true;
+                RefreshRowStatus(row);
+            }
         }
     }
 }

@@ -59,6 +59,14 @@ namespace InspectionWidget.Capture
         /// <summary>缩放版设备区高度（每令牌先取整再组合）。</summary>
         public static int DeviceZoneHeight(int deviceCount, double factor)
         {
+            return DeviceZoneHeight(deviceCount, false, factor);
+        }
+
+        /// <summary>设备区高度（v1.0.3 折叠重载）：折叠时 0，与凭据区折叠口径一致。</summary>
+        public static int DeviceZoneHeight(int deviceCount, bool collapsed, double factor)
+        {
+            if (collapsed)
+                return 0;
             if (deviceCount <= 0)
                 return Scale(EmptyRowHeight, factor);
             return deviceCount * Scale(DeviceRowHeight, factor)
@@ -91,11 +99,20 @@ namespace InspectionWidget.Capture
         /// <summary>缩放版面板总高（ClientSize 高度）。</summary>
         public static int ComputeHeight(int deviceCount, int credentialCount, bool collapsed, double factor)
         {
+            return ComputeHeight(deviceCount, false, credentialCount, collapsed, factor);
+        }
+
+        /// <summary>
+        /// 双折叠版面板总高（v1.0.3）：截图区与凭据区各自可折叠、互不影响；
+        /// 两区都折叠时只剩标题栏＋两行分区标题＋底部状态区。
+        /// </summary>
+        public static int ComputeHeight(int deviceCount, bool deviceCollapsed, int credentialCount, bool credentialCollapsed, double factor)
+        {
             return Scale(TitleBarHeight, factor)
                 + Scale(SectionHeaderHeight, factor)
-                + DeviceZoneHeight(deviceCount, factor)
+                + DeviceZoneHeight(deviceCount, deviceCollapsed, factor)
                 + Scale(SectionHeaderHeight, factor)
-                + CredentialZoneHeight(credentialCount, collapsed, factor)
+                + CredentialZoneHeight(credentialCount, credentialCollapsed, factor)
                 + Scale(BottomStatusHeight, factor);
         }
 

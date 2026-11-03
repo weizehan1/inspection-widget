@@ -24,6 +24,7 @@ namespace InspectionWidget.Tests
             ErrorLogTests.RunAll();
             FolderNamePatternTests.RunAll();
             V102Tests.RunAll();
+            V103Tests.RunAll();
 
             Console.WriteLine("----------------------------------------");
             Console.WriteLine("用例总数：" + TestRunner.TotalCount

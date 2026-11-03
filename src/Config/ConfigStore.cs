@@ -40,7 +40,7 @@ namespace InspectionWidget.Config
         // 「可选字段」全集：文本扫描 JSON 是否含各字段名，缺任一即 Defaulted（简报既定口径）
         private static readonly string[] OptionalFieldNames =
         {
-            "RootPath", "Devices", "Credentials", "IsCredentialCollapsed",
+            "RootPath", "Devices", "Credentials", "IsCredentialCollapsed", "IsDeviceCollapsed",
             "AutoClearClipboard", "CaptureMode", "WindowLeft", "WindowTop", "LastDevice",
             "UiScalePercent", "FolderNamePattern", "TrayHintShown"
         };
@@ -166,7 +166,7 @@ namespace InspectionWidget.Config
             }
             if (string.IsNullOrEmpty(config.FolderNamePattern))
             {
-                // 日期文件夹模式缺失/被手改成空 → 自愈为默认 yyyy-MM-dd（自愈口径）
+                // 日期文件夹模式缺失/被手改成空 → 自愈为默认值（v1.0.3 起为 巡检-yyyy-MM-dd；已保存的非空值不迁移）
                 config.FolderNamePattern = FolderNamePattern.Default;
                 defaulted = true;
             }

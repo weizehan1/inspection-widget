@@ -87,7 +87,7 @@ namespace InspectionWidget.Tests
                     var saver = new ScreenshotSaver(dirs.Exe, dirs.Lad);
                     SaveResult result = saver.Save(bmp, dirs.Root, Device, Day1);
 
-                    string expected = Path.Combine(dirs.Root, "2026-11-02", Device + ".png");
+                    string expected = Path.Combine(dirs.Root, "巡检-2026-11-02", Device + ".png");
                     Assert.True(result.Saved, "应保存成功：" + result.Error);
                     Assert.False(result.UsedFallback);
                     Assert.Equal(expected, result.FullPath);
@@ -104,7 +104,7 @@ namespace InspectionWidget.Tests
                 using (var dirs = new TempDirs())
                 using (Bitmap bmp = MakeBitmap())
                 {
-                    string dateDir = Path.Combine(dirs.Root, "2026-11-02");
+                    string dateDir = Path.Combine(dirs.Root, "巡检-2026-11-02");
                     Directory.CreateDirectory(dateDir);
                     string existing = Path.Combine(dateDir, Device + ".png");
                     byte[] sentinel = new byte[] { 1, 2, 3, 4 };
@@ -129,7 +129,7 @@ namespace InspectionWidget.Tests
                 using (var dirs = new TempDirs())
                 using (Bitmap bmp = MakeBitmap())
                 {
-                    string dateDir = Path.Combine(dirs.Root, "2026-11-02");
+                    string dateDir = Path.Combine(dirs.Root, "巡检-2026-11-02");
                     Directory.CreateDirectory(dateDir);
                     File.WriteAllBytes(Path.Combine(dateDir, Device + ".png"), new byte[] { 9 });
                     File.WriteAllBytes(Path.Combine(dateDir, Device + "-1.png"), new byte[] { 9 });
@@ -154,12 +154,12 @@ namespace InspectionWidget.Tests
 
                     SaveResult first = saver.Save(bmp, dirs.Root, Device, clock.Now);
                     Assert.True(first.Saved, "第一天应保存成功：" + first.Error);
-                    Assert.Equal(Path.Combine(dirs.Root, "2026-11-02", Device + ".png"), first.FullPath);
+                    Assert.Equal(Path.Combine(dirs.Root, "巡检-2026-11-02", Device + ".png"), first.FullPath);
 
                     clock.Now = Day2;
                     SaveResult second = saver.Save(bmp, dirs.Root, Device, clock.Now);
                     Assert.True(second.Saved, "第二天应保存成功：" + second.Error);
-                    Assert.Equal(Path.Combine(dirs.Root, "2026-11-03", Device + ".png"), second.FullPath);
+                    Assert.Equal(Path.Combine(dirs.Root, "巡检-2026-11-03", Device + ".png"), second.FullPath);
                 }
             });
 
@@ -170,7 +170,7 @@ namespace InspectionWidget.Tests
                 {
                     string blockedRoot = BlockWithFile(dirs, "root-blocked");
                     // exe 暂存日期夹预置 base 名，验证暂存级同样顺延
-                    string fallbackDir = Path.Combine(dirs.Exe, "FallbackScreenshots", "2026-11-02");
+                    string fallbackDir = Path.Combine(dirs.Exe, "FallbackScreenshots", "巡检-2026-11-02");
                     Directory.CreateDirectory(fallbackDir);
                     File.WriteAllBytes(Path.Combine(fallbackDir, Device + ".png"), new byte[] { 7 });
 
@@ -195,7 +195,7 @@ namespace InspectionWidget.Tests
                     var saver = new ScreenshotSaver(blockedExe, dirs.Lad);
                     SaveResult result = saver.Save(bmp, blockedRoot, Device, Day1);
 
-                    string expected = Path.Combine(dirs.Lad, "InspectionWidget", "FallbackScreenshots", "2026-11-02", Device + ".png");
+                    string expected = Path.Combine(dirs.Lad, "InspectionWidget", "FallbackScreenshots", "巡检-2026-11-02", Device + ".png");
                     Assert.True(result.Saved, "应落三级暂存成功：" + result.Error);
                     Assert.True(result.UsedFallback);
                     Assert.Equal(expected, result.FullPath);
@@ -266,11 +266,11 @@ namespace InspectionWidget.Tests
                     // 深根目录本身不需真实存在：长度校验在建目录之前就会判该级失败。
                     string deepRoot = dirs.Root;
                     string segment = new string('d', 24);
-                    string primaryCandidate = Path.Combine(deepRoot, "2026-11-02", Device + ".png");
+                    string primaryCandidate = Path.Combine(deepRoot, "巡检-2026-11-02", Device + ".png");
                     while (primaryCandidate.Length <= 259)
                     {
                         deepRoot = Path.Combine(deepRoot, segment);
-                        primaryCandidate = Path.Combine(deepRoot, "2026-11-02", Device + ".png");
+                        primaryCandidate = Path.Combine(deepRoot, "巡检-2026-11-02", Device + ".png");
                     }
                     Assert.True(primaryCandidate.Length > 259,
                         "构造前提：主目录候选路径应超 259，实际 " + primaryCandidate.Length);
@@ -278,7 +278,7 @@ namespace InspectionWidget.Tests
                     var saver = new ScreenshotSaver(dirs.Exe, dirs.Lad);
                     SaveResult result = saver.Save(bmp, deepRoot, Device, Day1);
 
-                    string expected = Path.Combine(dirs.Exe, "FallbackScreenshots", "2026-11-02", Device + ".png");
+                    string expected = Path.Combine(dirs.Exe, "FallbackScreenshots", "巡检-2026-11-02", Device + ".png");
                     Assert.True(result.Saved, "主目录超限应进暂存并成功：" + result.Error);
                     Assert.True(result.UsedFallback);
                     Assert.Equal(expected, result.FullPath);

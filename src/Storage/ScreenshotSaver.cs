@@ -16,7 +16,7 @@ namespace InspectionWidget.Storage
     }
 
     /// <summary>
-    /// 截图保存与命名：目标目录 `&lt;根目录&gt;\yyyy-MM-dd`，文件名按
+    /// 截图保存与命名：目标目录 `&lt;根目录&gt;\日期文件夹（按 FolderNamePattern 模式生成）`，文件名按
     /// `设备名.png`、`设备名-1.png`… 顺延，以 FileMode.CreateNew 原子占用，绝不覆盖。
     /// 主目录写入失败走两级暂存：exe 目录、LocalAppData；三级全败返回「尚未保存」。
     /// 传入 Bitmap 的所有权始终在调用方：本类从不 Dispose 它，保存失败时
@@ -44,7 +44,7 @@ namespace InspectionWidget.Storage
             _localAppDataDir = localAppDataDir;
         }
 
-        /// <summary>旧签名：日期文件夹名按默认模式（yyyy-MM-dd），与 v1.0.2 前口径一致。</summary>
+        /// <summary>旧签名：日期文件夹名按当前默认模式（FolderNamePattern.Default）。</summary>
         public SaveResult Save(Bitmap image, string rootPath, string deviceName, DateTime captureDate)
         {
             return Save(image, rootPath, deviceName, captureDate, FolderNamePattern.Default);

@@ -4,13 +4,14 @@ namespace InspectionWidget.Config
 {
     /// <summary>
     /// 截图日期文件夹名模式（v1.0.2）：占位 yyyy/MM/dd 可混排固定文字，
-    /// 如「巡检-yyyyMMdd」「yyyy年MM月dd日」；默认与旧口径一致（yyyy-MM-dd）。
+    /// 如「巡检-yyyyMMdd」「yyyy年MM月dd日」；默认「巡检-yyyy-MM-dd」
+    /// （v1.0.3 改定，原为 yyyy-MM-dd；只影响缺省/自愈，已保存的值不迁移）。
     /// 格式化与校验均为纯逻辑：保存落盘与「打开今日文件夹」共用 Format，
     /// 设置保存与 Saver 兜底共用 Validate。
     /// </summary>
     public static class FolderNamePattern
     {
-        public const string Default = "yyyy-MM-dd";
+        public const string Default = "巡检-yyyy-MM-dd";
 
         // Windows 文件名非法字符显式清单（不用 Path.GetInvalidFileNameChars：
         // Linux/Mono 下该集合只有 '/' 与 '\0'，会把 Windows 非法模式放行）。

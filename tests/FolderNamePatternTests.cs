@@ -19,10 +19,10 @@ namespace InspectionWidget.Tests
         public static void RunAll()
         {
             // ---------- 格式化 ----------
-            TestRunner.Run("文件夹模式：Default 常量为 yyyy-MM-dd", () =>
-                Assert.Equal("yyyy-MM-dd", FolderNamePattern.Default));
-            TestRunner.Run("文件夹模式：默认模式与旧口径一致（2026-11-03）", () =>
-                Assert.Equal("2026-11-03", FolderNamePattern.Format(FolderNamePattern.Default, Day)));
+            TestRunner.Run("文件夹模式：Default 常量为 巡检-yyyy-MM-dd（v1.0.3 改定）", () =>
+                Assert.Equal("巡检-yyyy-MM-dd", FolderNamePattern.Default));
+            TestRunner.Run("文件夹模式：默认模式格式化（巡检-2026-11-03）", () =>
+                Assert.Equal("巡检-2026-11-03", FolderNamePattern.Format(FolderNamePattern.Default, Day)));
             TestRunner.Run("文件夹模式：默认模式补零（2026-01-05）", () =>
                 Assert.Equal("2026-01-05", FolderNamePattern.Format("yyyy-MM-dd", new DateTime(2026, 1, 5))));
             TestRunner.Run("文件夹模式：混排固定文字 巡检-yyyyMMdd", () =>
@@ -35,8 +35,8 @@ namespace InspectionWidget.Tests
                 Assert.Equal("巡检照片", FolderNamePattern.Format("巡检照片", Day)));
             TestRunner.Run("文件夹模式：null/空模式按默认格式化", () =>
             {
-                Assert.Equal("2026-11-03", FolderNamePattern.Format(null, Day));
-                Assert.Equal("2026-11-03", FolderNamePattern.Format("", Day));
+                Assert.Equal("巡检-2026-11-03", FolderNamePattern.Format(null, Day));
+                Assert.Equal("巡检-2026-11-03", FolderNamePattern.Format("", Day));
             });
 
             // ---------- 校验 ----------
@@ -70,8 +70,8 @@ namespace InspectionWidget.Tests
             });
 
             // ---------- 配置层 ----------
-            TestRunner.Run("文件夹模式配置：CreateDefault 为 yyyy-MM-dd", () =>
-                Assert.Equal("yyyy-MM-dd", AppConfig.CreateDefault().FolderNamePattern));
+            TestRunner.Run("文件夹模式配置：CreateDefault 为 巡检-yyyy-MM-dd", () =>
+                Assert.Equal("巡检-yyyy-MM-dd", AppConfig.CreateDefault().FolderNamePattern));
             TestRunner.Run("文件夹模式配置：往返保留自定义模式", () =>
             {
                 string dir = ConfigStoreTests.MakeTempDir();
@@ -96,7 +96,7 @@ namespace InspectionWidget.Tests
                         "{\"RootPath\":\"D:/shots\",\"Devices\":[\"设备甲\"]}");
                     LoadResult r = ConfigStoreTests.MakeStore(dir).Load();
                     Assert.Equal(ConfigLoadKind.Defaulted, r.Kind);
-                    Assert.Equal("yyyy-MM-dd", r.Config.FolderNamePattern);
+                    Assert.Equal("巡检-yyyy-MM-dd", r.Config.FolderNamePattern);
                     Assert.Equal("设备甲", r.Config.Devices[0]);
                 }
                 finally { ConfigStoreTests.Cleanup(dir); }
@@ -109,7 +109,7 @@ namespace InspectionWidget.Tests
                     File.WriteAllText(ConfigStoreTests.ConfigFile(dir),
                         "{\"RootPath\":\"D:/shots\",\"Devices\":[\"设备甲\"],\"FolderNamePattern\":\"\"}");
                     LoadResult r = ConfigStoreTests.MakeStore(dir).Load();
-                    Assert.Equal("yyyy-MM-dd", r.Config.FolderNamePattern);
+                    Assert.Equal("巡检-yyyy-MM-dd", r.Config.FolderNamePattern);
                 }
                 finally { ConfigStoreTests.Cleanup(dir); }
             });
@@ -155,7 +155,7 @@ namespace InspectionWidget.Tests
                     {
                         StorageSaveResult r = saver.Save(bmp, root, "设备A", Day, "../evil");
                         Assert.True(r.Saved, r.Error);
-                        Assert.Equal(Path.Combine(root, "2026-11-03", "设备A.png"), r.FullPath);
+                        Assert.Equal(Path.Combine(root, "巡检-2026-11-03", "设备A.png"), r.FullPath);
                         Assert.False(Directory.Exists(Path.Combine(baseDir, "evil")));
                     }
                 }

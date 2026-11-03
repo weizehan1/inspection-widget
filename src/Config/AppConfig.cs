@@ -43,6 +43,10 @@ namespace InspectionWidget.Config
         [DataMember]
         public bool IsCredentialCollapsed { get; set; }
 
+        /// <summary>截图（设备）分区是否折叠（v1.0.3），默认 false；与凭据区折叠互不影响。</summary>
+        [DataMember]
+        public bool IsDeviceCollapsed { get; set; }
+
         /// <summary>复制凭据后 30 秒自动清空剪贴板，默认 true（缺字段时靠 OnDeserializing 兜底）。</summary>
         [DataMember]
         public bool AutoClearClipboard { get; set; }
@@ -63,7 +67,7 @@ namespace InspectionWidget.Config
         [DataMember]
         public int UiScalePercent { get; set; }
 
-        /// <summary>截图日期文件夹名模式（v1.0.2）：默认 yyyy-MM-dd；缺字段/空值在加载时自愈为默认。</summary>
+        /// <summary>截图日期文件夹名模式（v1.0.2 引入）：默认见 FolderNamePattern.Default（v1.0.3 起为 巡检-yyyy-MM-dd）；缺字段/空值在加载时自愈为默认，已保存值不迁移。</summary>
         [DataMember]
         public string FolderNamePattern { get; set; }
 
@@ -78,6 +82,7 @@ namespace InspectionWidget.Config
         {
             AutoClearClipboard = true;
             IsCredentialCollapsed = false;
+            IsDeviceCollapsed = false;
             CaptureMode = CaptureMode.Auto;
             UiScalePercent = UiScale.DefaultPercent;
             FolderNamePattern = global::InspectionWidget.Config.FolderNamePattern.Default;
@@ -95,6 +100,7 @@ namespace InspectionWidget.Config
                 Devices = new List<string> { "设备1", "设备2" },
                 Credentials = new List<CredentialEntry>(),
                 IsCredentialCollapsed = false,
+                IsDeviceCollapsed = false,
                 AutoClearClipboard = true,
                 CaptureMode = CaptureMode.Auto,
                 WindowLeft = null,

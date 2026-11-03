@@ -118,6 +118,7 @@ namespace InspectionWidget
         private Panel _credentialHeaderPanel;
         private Label _credentialHeaderLabel;
         private Label _credentialArrowLabel;
+        private Label _deviceArrowLabel;
         private Panel _credentialZonePanel;
         private Label _feedbackLabel;
         private Label _rootLabel;
@@ -255,7 +256,7 @@ namespace InspectionWidget
             _hooks.CancelRequested += OnHookCancelRequested;
             _hooks.TimeoutElapsed += OnHookTimeoutElapsed;
 
-            Text = "巡检截图";
+            Text = "巡检助手";
             FormBorderStyle = FormBorderStyle.None;
             TopMost = true;
             // v1.0.2 口径改定（2026-11-03 用户实机反馈）：不再进任务栏，常驻系统托盘。
@@ -301,7 +302,7 @@ namespace InspectionWidget
             _titleBarPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.TitleBarHeight) };
             var titleLabel = _titleLabel = new Label
             {
-                Text = "巡检截图",
+                Text = "巡检助手",
                 Font = font13Bold,
                 ForeColor = PrimaryTextColor,
                 AutoSize = true,
@@ -380,6 +381,19 @@ namespace InspectionWidget
                 Location = new Point(SideMargin, 5)
             };
             deviceHeaderPanel.Controls.Add(_deviceHeaderLabel);
+            // 截图区折叠箭头（v1.0.3，与凭据区同一套交互：点标题行任意处切换）
+            _deviceArrowLabel = new Label
+            {
+                Text = "˅",
+                Font = font13,
+                ForeColor = WeakTextColor,
+                AutoSize = true,
+                Location = new Point(PanelLayout.PanelWidth - 26, 5)
+            };
+            deviceHeaderPanel.Controls.Add(_deviceArrowLabel);
+            deviceHeaderPanel.Click += OnDeviceHeaderClicked;
+            _deviceHeaderLabel.Click += OnDeviceHeaderClicked;
+            _deviceArrowLabel.Click += OnDeviceHeaderClicked;
             Controls.Add(deviceHeaderPanel);
             deviceHeaderPanel.Name = "DeviceHeaderPanel";
             _deviceHeaderPanel = deviceHeaderPanel;
@@ -512,6 +526,8 @@ namespace InspectionWidget
 
             _deviceHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
             _deviceHeaderLabel.Location = new Point(margin, M(5));
+            _deviceArrowLabel.Font = Font13;
+            _deviceArrowLabel.Location = new Point(w - M(26), M(5));
 
             _deviceZonePanel.Width = w;
 
@@ -536,14 +552,15 @@ namespace InspectionWidget
         {
             int devices = _config != null && _config.Devices != null ? _config.Devices.Count : 0;
             int credentials = _config != null && _config.Credentials != null ? _config.Credentials.Count : 0;
-            bool collapsed = _config != null && _config.IsCredentialCollapsed;
-            return PanelLayout.ComputeHeight(devices, credentials, collapsed, ScaleFactor);
+            bool deviceCollapsed = _config != null && _config.IsDeviceCollapsed;
+            bool credentialCollapsed = _config != null && _config.IsCredentialCollapsed;
+            return PanelLayout.ComputeHeight(devices, deviceCollapsed, credentials, credentialCollapsed, ScaleFactor);
         }
 
         /// <summary>按区高依次摆放各分区（ClientSize 须已按 ComputeCurrentHeight 设好）。</summary>
         private void LayoutSections()
         {
-            int deviceZone = PanelLayout.DeviceZoneHeight(_config.Devices.Count, ScaleFactor);
+            int deviceZone = PanelLayout.DeviceZoneHeight(_config.Devices.Count, _config.IsDeviceCollapsed, ScaleFactor);
             int credentialZone = PanelLayout.CredentialZoneHeight(_config.Credentials.Count, _config.IsCredentialCollapsed, ScaleFactor);
             int total = ComputeCurrentHeight();
 
@@ -652,6 +669,7 @@ namespace InspectionWidget
             RebuildDeviceButtons();
             RebuildCredentialControls();
             UpdateCredentialHeader();
+            UpdateDeviceHeader();
             UpdateRootLabel();
             RefreshStateVisuals();
 
@@ -688,6 +706,11 @@ namespace InspectionWidget
                 _deviceHint.Dispose();
                 _deviceHint = null;
             }
+
+            // 截图区折叠（v1.0.3）：区高为 0，不建按钮；展开时照常重建。
+            // 折叠只影响显示，选窗等进行中状态与此无关。
+            if (_config.IsDeviceCollapsed)
+                return;
 
             if (_config.Devices.Count == 0)
             {
@@ -789,6 +812,24 @@ namespace InspectionWidget
         private void UpdateCredentialHeader()
         {
             _credentialArrowLabel.Text = _config.IsCredentialCollapsed ? "›" : "˅";
+        }
+
+        private void UpdateDeviceHeader()
+        {
+            _deviceArrowLabel.Text = _config.IsDeviceCollapsed ? "›" : "˅";
+        }
+
+        /// <summary>
+        /// 截图区折叠切换（v1.0.3，与凭据区同一套）：翻转状态 → BestEffort 保存 →
+        /// 重建设备区 → 更新箭头 → Bottom 锚定重算高度。折叠不触碰选窗进行中状态。
+        /// </summary>
+        private void OnDeviceHeaderClicked(object sender, EventArgs e)
+        {
+            _config.IsDeviceCollapsed = !_config.IsDeviceCollapsed;
+            SaveBestEffort(); // 失败不阻塞 UI（SaveBestEffort 内部处理）
+            RebuildDeviceButtons();
+            UpdateDeviceHeader();
+            ApplyHeightAnchored();
         }
 
         private void UpdateRootLabel()
@@ -1455,7 +1496,7 @@ namespace InspectionWidget
 
             using (var dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "选择巡检截图保存根目录，只需选这一次";
+                dialog.Description = "选择截图保存根目录，只需选这一次";
                 dialog.ShowNewFolderButton = true;
                 if (dialog.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dialog.SelectedPath))
                 {
@@ -1547,7 +1588,7 @@ namespace InspectionWidget
             _trayIcon = new NotifyIcon
             {
                 Icon = Icon,
-                Text = "巡检截图",
+                Text = "巡检助手",
                 ContextMenuStrip = menu,
                 Visible = true
             };
@@ -1583,7 +1624,7 @@ namespace InspectionWidget
                 _config.TrayHintShown = true;
                 SaveBestEffort();
                 if (_trayIcon != null)
-                    _trayIcon.ShowBalloonTip(3000, "巡检截图", "已最小化到托盘，点图标恢复", ToolTipIcon.Info);
+                    _trayIcon.ShowBalloonTip(3000, "巡检助手", "已最小化到托盘，点图标恢复", ToolTipIcon.Info);
             }
         }
 

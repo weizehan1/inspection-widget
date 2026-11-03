@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.2` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.3` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -25,19 +25,19 @@
 - 点设备按钮进入选窗状态，再点任意程序窗口，只截该窗口本身；
 - 首选 PrintWindow 抓图，窗口被遮挡也能截完整；抓不到时自动回退屏幕拷贝（截图瞬间面板自动隐藏，不会把自己截进去）；
 - Esc、右键、再点一次已选设备，三种方式都能取消；30 秒无操作自动退出选窗；
-- 截图存为「根目录\日期文件夹\设备名.png」，同设备同日重名自动顺延 `-1`、`-2`，永不覆盖；日期文件夹名可自定义（默认 `yyyy-MM-dd`，可在设置里改成如「巡检-yyyyMMdd」）；
+- 截图存为「根目录\日期文件夹\设备名.png」，同设备同日重名自动顺延 `-1`、`-2`，永不覆盖；日期文件夹名可自定义（默认 `巡检-yyyy-MM-dd`，可在设置里改成如「yyyy年MM月dd日」）；
 - 根目录不可写时自动暂存到备用目录并明确提示，不丢图；保存失败保留图片可点提示重试。
 
 **凭据**
 
-- 凭据按实际条数渲染（一行一个单列），上限 10 条，可增减、改名，与设备同一套维护方式；
+- 凭据按实际条数渲染（一行一个单列），上限 10 条，可增减、改名、上下排序（顺序即面板按钮顺序），与设备同一套维护方式；
 - 点凭据按钮即复制到剪贴板；复制后 30 秒自动清空，且清空前核对剪贴板序列号与本次复制令牌——30 秒内你复制了别的内容，不会误删；程序退出时若倒计时未到，先清再退；
 - 内容在设置里掩码输入、不回显，面板上只显示名字；
-- 凭据区可折叠（点分区标题收起/展开），折叠状态会记住。
+- 截图区与凭据区都可折叠（点分区标题收起/展开），折叠状态会记住。
 
 **设置与数据**
 
-- 设置窗口四组：设备管理 / 凭据管理 / 存储与通用 / 关于，统一「保存」制，校验不过不许关窗；
+- 设置窗口四组：设备管理 / 凭据管理 / 存储与通用 / 关于，统一保存制（「保存」落盘并关窗、「应用」落盘不关窗继续改），校验不过不落盘；
 - 设置窗口在屏幕中央打开；界面缩放可在 100%–200% 间选（高分辨率屏不再小得看不清）；
 - 面板高度随设备、凭据实际数量伸缩，底边锚定在右下角不跳位；
 - 配置文件损坏自动备份原件再恢复默认，不会把好配置冲掉；
@@ -71,8 +71,8 @@
 | 分组 | 管什么 |
 | --- | --- |
 | 设备管理 | 设备增删、改名、拖动或上下箭头排序；删除只删名单，不删已截的历史图片 |
-| 凭据管理 | 凭据增删、改名、改内容、清除单条；内容掩码不回显，留空保存表示不改，解不开的条目标「需重新设置」 |
-| 存储与通用 | 截图保存根目录（随时可改）、日期文件夹名（默认 `yyyy-MM-dd`，占位可混排固定文字，含非法字符会被拦下）、当前实际生效的配置文件路径、剪贴板 30 秒自动清空开关、截图模式（自动 / 仅屏幕拷贝等）、界面缩放 |
+| 凭据管理 | 凭据增删、改名、改内容、清除单条、上下排序；内容掩码不回显，留空保存表示不改，解不开的条目标「需重新设置」 |
+| 存储与通用 | 截图保存根目录（随时可改）、日期文件夹名（默认 `巡检-yyyy-MM-dd`，占位可混排固定文字，含非法字符会被拦下）、当前实际生效的配置文件路径、剪贴板 30 秒自动清空开关、截图模式（自动 / 仅屏幕拷贝等）、界面缩放 |
 | 关于 | 产品名与版本、仓库链接、技术构成、配置文件与截图根目录位置 |
 
 配置文件位置：默认存 `%LocalAppData%\InspectionWidget\config.json`；若 exe 同目录已有 `config.json`，优先用 exe 旁边的这一份（便携用法）。
@@ -120,6 +120,8 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.0.3 | 2026-11-03 | 主界面短名改为「巡检助手」（主面板标题、托盘提示、最小化气泡；产品全名与 exe 名不变）；凭据支持 ↑/↓ 上下排序（顺序持久化、即主面板渲染顺序）；主面板「截图」区新增与凭据区一致的折叠（配置新增 `IsDeviceCollapsed` 持久化，两区互不影响；口径更正：本条最初误解为「最小化窗口自动还原截图」，2026-11-03 用户看图澄清为分区折叠）；日期文件夹名默认改为 `巡检-yyyy-MM-dd`（仅默认值与缺字段自愈，已保存配置不迁移）；设置窗口新增「应用」按钮（与保存共用校验＋落盘、成功不关窗）；发版步骤改为幂等（同名 Release 已存在时自动 `--clobber` 补挂 exe）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 322,048 字节，SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
+| v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | 新增应用图标（exe/窗口/托盘同源）；标题栏加关闭按钮（✕）；exe 交付名定为 `InspectionWidget.exe`；设置按钮改用 Segoe UI Symbol 标准齿轮字形（缺字体时代码绘制位图兜底）；日期文件夹名可自定义（`FolderNamePattern`，默认 yyyy-MM-dd，保存校验拦截非法模式）；最小化改走系统托盘（面板不再进任务栏，托盘恢复/退出，首次隐藏气泡提示一次；覆盖白皮书原「进任务栏不进托盘」口径，2026-11-03 实机反馈改定）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 318,464 字节，SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
 | v1.0.1 | 2026-11-03 | 设置窗口改为居中打开；新增界面缩放（100%–200%）；配置文件默认改存 `%LocalAppData%\InspectionWidget`（exe 旁有 config.json 时优先用旁边的）；接入 GitHub Actions 自动构建 |
 | v1.0.0 | 2026-11-02 | 首个版本：截图、凭据、设置四组与全部核心口径落地；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 83,456 字节，SHA256 `597ab0ee1f1e6eabac0a4ad65b2f0e592ca59c50f21d9dcd82f84239d8d24e79` |
@@ -134,7 +136,7 @@ bash build.sh
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.0.2` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.0.3` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 
@@ -151,19 +153,19 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 - Click a device button to enter window-picking mode, then click any program window — only that window itself is captured.
 - Captures with PrintWindow first, so a window comes out complete even when covered by others; if that fails, it falls back to a screen copy automatically (the panel hides itself for the instant of capture, so it never photographs itself).
 - Cancel three ways: Esc, right-click, or clicking the selected device again; picking mode also exits on its own after 30 seconds without a click.
-- Shots are saved as `root folder\date folder\device name.png`; duplicates for the same device on the same day are numbered `-1`, `-2`, … and never overwritten. The date folder name is customizable (default `yyyy-MM-dd`; change it in Settings, e.g. to `巡检-yyyyMMdd`).
+- Shots are saved as `root folder\date folder\device name.png`; duplicates for the same device on the same day are numbered `-1`, `-2`, … and never overwritten. The date folder name is customizable (default `巡检-yyyy-MM-dd`; change it in Settings, e.g. to `yyyy年MM月dd日`).
 - If the root folder isn't writable, the shot is parked in a fallback folder with a clear notice, so no image is lost; if saving fails, the image is kept and the notice can be clicked to retry.
 
 **Credentials**
 
-- Credentials are rendered by actual count (one per row, single column), up to 10 entries; they can be added, removed and renamed, and are maintained the same way as devices.
+- Credentials are rendered by actual count (one per row, single column), up to 10 entries; they can be added, removed, renamed and reordered (the order is the order the panel buttons render in), and are maintained the same way as devices.
 - Click a credential button to copy it to the clipboard. The clipboard is cleared automatically after 30 seconds, and before clearing, the clipboard sequence number and a per-copy token are verified — if you copied something else in the meantime, it is left untouched. If you quit while the countdown is still running, the clipboard is cleared first, then the app exits.
 - Credential contents are typed into a masked field in Settings and never echoed; the panel shows names only.
-- The credentials section can be collapsed (click its header to fold/unfold), and the collapsed state is remembered.
+- Both the screenshot (devices) section and the credentials section can be collapsed (click a section header to fold/unfold), and the collapsed states are remembered.
 
 **Settings & data**
 
-- The Settings window has four groups — Devices / Credentials / Storage & General / About — all using a save-to-apply model: if validation fails, the window won't close.
+- The Settings window has four groups — Devices / Credentials / Storage & General / About — all using a save-to-apply model (Save writes and closes; Apply writes and stays open so you can keep editing): if validation fails, nothing is written.
 - The Settings window opens centered on screen; UI scaling from 100%–200% keeps things readable on high-resolution displays.
 - The panel's height adjusts to the actual number of devices and credentials, with its bottom edge anchored at the bottom-right corner so it never jumps around.
 - A corrupted configuration file is backed up first, then reset to defaults — an intact configuration is never silently clobbered.
@@ -197,8 +199,8 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 | Group | What it manages |
 | --- | --- |
 | Devices | Add, remove and rename devices; reorder by dragging or with the up/down arrows. Deleting removes only the list entry, never the shots already taken |
-| Credentials | Add, remove and rename credentials; change an entry's content or clear a single entry. Contents are masked and never echoed; saving with the field left blank means "unchanged"; entries that can't be decrypted are marked "Needs re-entry" |
-| Storage & General | Screenshot root folder (changeable at any time); date folder name (default `yyyy-MM-dd`, date placeholders can be mixed with fixed text, and patterns containing illegal characters are rejected); the config file path actually in effect; the 30-second clipboard auto-clear toggle; capture mode (automatic / screen-copy only, etc.); UI scaling |
+| Credentials | Add, remove, rename and reorder credentials; change an entry's content or clear a single entry. Contents are masked and never echoed; saving with the field left blank means "unchanged"; entries that can't be decrypted are marked "Needs re-entry" |
+| Storage & General | Screenshot root folder (changeable at any time); date folder name (default `巡检-yyyy-MM-dd`, date placeholders can be mixed with fixed text, and patterns containing illegal characters are rejected); the config file path actually in effect; the 30-second clipboard auto-clear toggle; capture mode (automatic / screen-copy only, etc.); UI scaling |
 | About | Product name and version, repository link, tech stack, and where the config file and screenshot root folder are located |
 
 Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; if a `config.json` already sits next to the exe, that one takes precedence (portable usage).
