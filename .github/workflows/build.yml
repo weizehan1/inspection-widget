@@ -28,6 +28,13 @@ jobs:
       - name: 检出源码
         uses: actions/checkout@v5
 
+      # 应用图标 assets/app.ico 是二进制文件，在仓库中以 base64 文本（assets/app.ico.base64.txt）存放，构建前还原。
+      - name: 还原应用图标
+        shell: pwsh
+        run: |
+          $b64 = Get-Content "assets/app.ico.base64.txt" -Raw
+          [IO.File]::WriteAllBytes("assets/app.ico", [Convert]::FromBase64String($b64))
+
       # 不用 microsoft/setup-msbuild（仍基于已弃用的 Node 20，会报警告）：
       # runner 自带 vswhere，直接定位 VS2022 的 MSBuild.exe。
       - name: 定位 MSBuild
@@ -58,8 +65,8 @@ jobs:
       - name: 上传产物（单个 exe）
         uses: actions/upload-artifact@v5
         with:
-          name: InspectionWidget
-          path: src/bin/Release/InspectionWidget.exe
+          name: 巡检助手
+          path: src/bin/Release/巡检助手.exe
           if-no-files-found: error
 
       # 用 runner 自带的 gh 命令行发版，不再引第三方 action（避免其运行时版本弃用警告）。
@@ -68,4 +75,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create ${{ github.ref_name }} "src/bin/Release/InspectionWidget.exe" --title ${{ github.ref_name }} --notes "自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget"
+        run: gh release create ${{ github.ref_name }} "src/bin/Release/巡检助手.exe" --title ${{ github.ref_name }} --notes "自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget"
