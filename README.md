@@ -46,7 +46,7 @@
 
 ### 快速开始
 
-1. 拿到 `巡检助手.exe`（正式版为内嵌清单的单文件；若拿到的是带同名 `.manifest` 的版本，两个文件放同一目录即可）。
+1. 拿到 `InspectionWidget.exe`（正式版为内嵌清单的单文件；若拿到的是带同名 `.manifest` 的版本，两个文件放同一目录即可）。
 2. 双击运行，在管理员确认框点「是」（程序以管理员身份运行，才能截管理员窗口）。
 3. 若弹出「Windows 已保护你的电脑」（SmartScreen），点「更多信息」→「仍要运行」。本程序未做商业签名，属预期现象；若单位策略直接禁止运行，不要改系统策略。
 4. 首次打开会请你选一次截图保存根目录，选完记住，之后不再问。
@@ -85,7 +85,7 @@
 
 ### 构建
 
-**自动构建（GitHub Actions）**：推送源码后由 `.github/workflows/build.yml` 在 Windows 环境用 MSBuild 构建 Release 并跑测试；产物为内嵌应用清单的单文件 `巡检助手.exe`，从 Actions 产物或 Release 中下载。打 `v*` 版本标签时自动生成 GitHub Release 并附 exe——见 [build.yml](.github/workflows/build.yml)。
+**自动构建（GitHub Actions）**：推送源码后由 `.github/workflows/build.yml` 在 Windows 环境用 MSBuild 构建 Release 并跑测试；产物为内嵌应用清单的单文件 `InspectionWidget.exe`，从 Actions 产物或 Release 中下载。打 `v*` 版本标签时自动生成 GitHub Release 并附 exe——见 [build.yml](.github/workflows/build.yml)。
 
 **本地构建（Windows，正式版）**：Visual Studio 2022 勾选「.NET 桌面开发」工作负载与 .NET Framework 4.8 目标包，打开 `InspectionWidget.sln`，Release 配置生成。零第三方包，无需还原 NuGet。
 
@@ -120,7 +120,7 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
-| v1.0.2 | 2026-11-03 | 新增应用图标（exe/窗口/托盘同源）；标题栏加关闭按钮（✕）；exe 改名「巡检助手.exe」；设置按钮改用 Segoe UI Symbol 标准齿轮字形（缺字体时代码绘制位图兜底）；日期文件夹名可自定义（`FolderNamePattern`，默认 yyyy-MM-dd，保存校验拦截非法模式）；最小化改走系统托盘（面板不再进任务栏，托盘恢复/退出，首次隐藏气泡提示一次；覆盖白皮书原「进任务栏不进托盘」口径，2026-11-03 实机反馈改定）；Linux/Mono 本机构建产物 `build/巡检助手.exe` 为 318,464 字节，SHA256 `f9482d184f0350a1d2a7f0c24e236dfc666fb560321d6a873a861e9bdebc9a5d` |
+| v1.0.2 | 2026-11-03 | 新增应用图标（exe/窗口/托盘同源）；标题栏加关闭按钮（✕）；exe 交付名定为 `InspectionWidget.exe`；设置按钮改用 Segoe UI Symbol 标准齿轮字形（缺字体时代码绘制位图兜底）；日期文件夹名可自定义（`FolderNamePattern`，默认 yyyy-MM-dd，保存校验拦截非法模式）；最小化改走系统托盘（面板不再进任务栏，托盘恢复/退出，首次隐藏气泡提示一次；覆盖白皮书原「进任务栏不进托盘」口径，2026-11-03 实机反馈改定）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 318,464 字节，SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
 | v1.0.1 | 2026-11-03 | 设置窗口改为居中打开；新增界面缩放（100%–200%）；配置文件默认改存 `%LocalAppData%\InspectionWidget`（exe 旁有 config.json 时优先用旁边的）；接入 GitHub Actions 自动构建 |
 | v1.0.0 | 2026-11-02 | 首个版本：截图、凭据、设置四组与全部核心口径落地；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 83,456 字节，SHA256 `597ab0ee1f1e6eabac0a4ad65b2f0e592ca59c50f21d9dcd82f84239d8d24e79` |
 
@@ -172,7 +172,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 
 ### Quick start
 
-1. Get `巡检助手.exe` (Inspection Assistant) — the official build is a single file with the application manifest embedded; if you received a build with a matching `.manifest` file next to it, just keep the two files in the same folder.
+1. Get `InspectionWidget.exe` — the official build is a single file with the application manifest embedded; if you received a build with a matching `.manifest` file next to it, just keep the two files in the same folder.
 2. Double-click to run, and answer "Yes" to the administrator prompt (the app runs elevated so it can capture elevated windows).
 3. If "Windows protected your PC" (SmartScreen) appears, click "More info" → "Run anyway". The app carries no commercial code signature, so this is expected; if your organization's policy blocks it outright, do not change system policy to work around that.
 4. On first launch you will be asked to pick the screenshot root folder once; the choice is remembered and you won't be asked again.
@@ -211,7 +211,7 @@ Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; 
 
 ### Build
 
-**Automatic builds (GitHub Actions)**: pushing source triggers `.github/workflows/build.yml`, which builds the Release configuration with MSBuild on a Windows runner and runs the test suite. The result is a single-file `巡检助手.exe` (Inspection Assistant) with the application manifest embedded, downloadable from the Actions artifacts or from Releases. Pushing a `v*` tag automatically creates a GitHub Release with the exe attached — see [build.yml](.github/workflows/build.yml).
+**Automatic builds (GitHub Actions)**: pushing source triggers `.github/workflows/build.yml`, which builds the Release configuration with MSBuild on a Windows runner and runs the test suite. The result is a single-file `InspectionWidget.exe` with the application manifest embedded, downloadable from the Actions artifacts or from Releases. Pushing a `v*` tag automatically creates a GitHub Release with the exe attached — see [build.yml](.github/workflows/build.yml).
 
 **Local build (Windows, official)**: Visual Studio 2022 with the ".NET desktop development" workload and the .NET Framework 4.8 targeting pack; open `InspectionWidget.sln` and build the Release configuration. Zero third-party packages, no NuGet restore needed.
 
@@ -246,7 +246,7 @@ Platform-independent logic is covered by automated tests throughout (191 passing
 
 | Version | Date | Notes |
 | --- | --- | --- |
-| v1.0.2 | 2026-11-03 | New app icon (one source for the exe, window and tray icons); close button (✕) added to the title bar; exe renamed to `巡检助手.exe`; the settings button now uses the standard gear glyph from Segoe UI Symbol (with a code-drawn bitmap fallback when the font is unavailable); date folder names are customizable (`FolderNamePattern`, default `yyyy-MM-dd`, invalid patterns rejected at save time); minimize now goes to the system tray (the panel no longer appears in the taskbar; restore/exit from the tray, with a balloon tip the first time it hides — superseding the white paper's original "taskbar, not tray" decision, changed on 2026-11-03 based on hands-on feedback); the Linux/Mono local build `build/巡检助手.exe` is 318,464 bytes, SHA256 `f9482d184f0350a1d2a7f0c24e236dfc666fb560321d6a873a861e9bdebc9a5d` |
+| v1.0.2 | 2026-11-03 | New app icon (one source for the exe, window and tray icons); close button (✕) added to the title bar; the exe ships as `InspectionWidget.exe`; the settings button now uses the standard gear glyph from Segoe UI Symbol (with a code-drawn bitmap fallback when the font is unavailable); date folder names are customizable (`FolderNamePattern`, default `yyyy-MM-dd`, invalid patterns rejected at save time); minimize now goes to the system tray (the panel no longer appears in the taskbar; restore/exit from the tray, with a balloon tip the first time it hides — superseding the white paper's original "taskbar, not tray" decision, changed on 2026-11-03 based on hands-on feedback); the Linux/Mono local build `build/InspectionWidget.exe` is 318,464 bytes, SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
 | v1.0.1 | 2026-11-03 | Settings window now opens centered; UI scaling added (100%–200%); the config file now defaults to `%LocalAppData%\InspectionWidget` (a `config.json` next to the exe still takes precedence); GitHub Actions automated builds |
 | v1.0.0 | 2026-11-02 | First release: capture, credentials, the four Settings groups and all core behaviors in place; the Linux/Mono local build `build/InspectionWidget.exe` is 83,456 bytes, SHA256 `597ab0ee1f1e6eabac0a4ad65b2f0e592ca59c50f21d9dcd82f84239d8d24e79` |
 

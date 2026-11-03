@@ -29,12 +29,12 @@ else
     xbuild /p:Configuration=Release /p:Platform=AnyCPU /p:LangVersion=7.2 "$PROJECT"
 fi
 
-# 收集产物：程序集名为 ASCII「InspectionWidget」（见 csproj 注释），
-# 在这里更名为中文交付名「巡检助手.exe」，manifest 同名跟随。
+# 收集产物：程序集名与交付名同为「InspectionWidget」（见 csproj 注释），直接收集，
+# manifest 同名跟随；顺带清理 build/ 里可能残留的旧中文交付名产物。
 mkdir -p "$OUT_DIR"
-rm -f "$OUT_DIR/InspectionWidget.exe" "$OUT_DIR/InspectionWidget.exe.manifest"
-cp "src/bin/Release/InspectionWidget.exe" "$OUT_DIR/巡检助手.exe"
-cp "app.manifest" "$OUT_DIR/巡检助手.exe.manifest"
+rm -f "$OUT_DIR/InspectionWidget.exe" "$OUT_DIR/InspectionWidget.exe.manifest" "$OUT_DIR/巡检助手.exe" "$OUT_DIR/巡检助手.exe.manifest"
+cp "src/bin/Release/InspectionWidget.exe" "$OUT_DIR/InspectionWidget.exe"
+cp "app.manifest" "$OUT_DIR/InspectionWidget.exe.manifest"
 echo "产物已放入 $OUT_DIR/："
 ls -la "$OUT_DIR"
 
