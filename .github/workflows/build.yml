@@ -65,8 +65,8 @@ jobs:
       - name: 上传产物（单个 exe）
         uses: actions/upload-artifact@v5
         with:
-          name: 巡检助手
-          path: src/bin/Release/巡检助手.exe
+          name: InspectionWidget
+          path: src/bin/Release/InspectionWidget.exe
           if-no-files-found: error
 
       # 用 runner 自带的 gh 命令行发版，不再引第三方 action（避免其运行时版本弃用警告）。
@@ -75,4 +75,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create ${{ github.ref_name }} "src/bin/Release/巡检助手.exe" --title ${{ github.ref_name }} --notes "自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget"
+        run: gh release create ${{ github.ref_name }} "src/bin/Release/InspectionWidget.exe" --title ${{ github.ref_name }} --notes "自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget"
