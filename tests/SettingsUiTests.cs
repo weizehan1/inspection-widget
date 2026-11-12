@@ -25,6 +25,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：设置窗五页与关键按钮/网格可创建", () =>
             {
+                Console.WriteLine("[START] 设置窗五页与关键按钮/网格可创建");
                 using (var env = new UiEnv())
                 {
                     SettingsForm form = env.Form;
@@ -45,15 +46,25 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：新增空白设备行后应用失败，Saved 不触发且草稿保留", () =>
             {
+                Console.WriteLine("[START] 新增空白设备行");
                 using (var env = new UiEnv())
                 {
+                    Console.WriteLine("[STEP] UiEnv 已显示");
                     int saved = 0;
                     env.Form.Saved += delegate { saved++; };
                     var editor = (DeviceEditorControl)env.Field(env.Form, "_deviceEditor");
+                    Console.WriteLine("[STEP] 准备调用 AddDevice");
                     env.Invoke(editor, "AddDevice");
+                    Console.WriteLine("[STEP] AddDevice 返回");
                     Assert.Equal(3, ((SettingsDraft)env.Field(env.Form, "_draft")).Devices.Count);
+                    Assert.Equal(3, editor.Grid.Rows.Count);
+                    Assert.Equal("1", editor.Grid.Rows[0].HeaderCell.Value as string);
+                    Assert.Equal("2", editor.Grid.Rows[1].HeaderCell.Value as string);
+                    Assert.Equal("3", editor.Grid.Rows[2].HeaderCell.Value as string);
 
+                    Console.WriteLine("[STEP] 准备调用 ApplyInternal");
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
+                    Console.WriteLine("[STEP] ApplyInternal 返回：" + applied);
                     Assert.False(applied);
                     Assert.Equal(0, saved);
                     Assert.True(env.Config.Devices.Count >= 1);
@@ -63,6 +74,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：改名后直接应用，LastDevice 跟随且一次提交一次 Saved", () =>
             {
+                Console.WriteLine("[START] 改名后直接应用");
                 using (var env = new UiEnv())
                 {
                     int saved = 0;
@@ -91,6 +103,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：设备改名输入后按 Esc 取消，草稿与保存仍为原名", () =>
             {
+                Console.WriteLine("[START] 设备改名 Esc 取消");
                 using (var env = new UiEnv())
                 {
                     var draft = (SettingsDraft)env.Field(env.Form, "_draft");
@@ -130,6 +143,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：重复名阻止应用，原草稿输入保留且磁盘不变", () =>
             {
+                Console.WriteLine("[START] 重复名阻止应用");
                 using (var env = new UiEnv())
                 {
                     int saved = 0;
@@ -146,6 +160,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：非法设备名阻止切页，不丢输入", () =>
             {
+                Console.WriteLine("[START] 非法设备名阻止切页");
                 using (var env = new UiEnv())
                 {
                     var draft = (SettingsDraft)env.Field(env.Form, "_draft");
@@ -160,6 +175,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：应用后继续修改再关闭，磁盘保留最后一次应用", () =>
             {
+                Console.WriteLine("[START] 应用后继续修改再关闭");
                 using (var env = new UiEnv())
                 {
                     var draft = (SettingsDraft)env.Field(env.Form, "_draft");
@@ -176,6 +192,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：凭据清除可撤销，NeedsReset 保留到提交结果", () =>
             {
+                Console.WriteLine("[START] 凭据清除可撤销");
                 using (var env = new UiEnv())
                 {
                     var draft = (SettingsDraft)env.Field(env.Form, "_draft");
@@ -197,6 +214,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：导入前校验保留当前凭据明文输入", () =>
             {
+                Console.WriteLine("[START] 导入前校验保留凭据输入");
                 using (var env = new UiEnv())
                 {
                     var rows = (IList)env.Field(env.Form, "_credentialRows");
@@ -216,6 +234,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：设置窗口按 200% 初始化缩放且布局已应用", () =>
             {
+                Console.WriteLine("[START] 200% 初始化缩放");
                 using (var env = new UiEnv(200))
                 {
                     Assert.Equal(2.0,
@@ -229,6 +248,7 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("UI：设置窗与导入预览不叠加系统 DPI 自动缩放", () =>
             {
+                Console.WriteLine("[START] 系统 DPI 不叠加");
                 using (var env = new UiEnv(150, 1.5))
                 {
                     Assert.Equal(AutoScaleMode.None, env.Form.AutoScaleMode);

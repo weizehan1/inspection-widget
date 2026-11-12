@@ -107,7 +107,7 @@ namespace InspectionWidget
             _grid.CellBeginEdit += OnCellBeginEdit;
             _grid.CellValidating += OnCellValidating;
             _grid.CellEndEdit += OnCellEndEdit;
-            _grid.CellValueChanged += delegate { if (!_loading) RaiseChanged(); };
+            _grid.CellValueChanged += OnCellValueChanged;
             _grid.SelectionChanged += delegate { UpdateButtons(); };
             _grid.DataError += OnDataError;
             root.Controls.Add(_grid, 0, 1);
@@ -325,6 +325,16 @@ namespace InspectionWidget
             RaiseChanged();
         }
 
+        private void OnCellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            // 行头序号、列头及行/列删除也会触发 CellValueChanged；这些不是设备名
+            // 数据变化。若不过滤，下面更新 HeaderCell.Value 会再次进入本事件，
+            // 在 Windows 上形成无界递归并导致 StackOverflowException。
+            if (_loading || e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+            RaiseChanged();
+        }
+
         private void OnDataError(object sender, DataGridViewDataErrorEventArgs e)
         {
             e.ThrowException = false;
@@ -350,7 +360,14 @@ namespace InspectionWidget
             _countLabel.Text = "共 " + _draft.Devices.Count + " 台设备";
             UpdateButtons();
             for (int i = 0; i < _grid.Rows.Count; i++)
-                _grid.Rows[i].HeaderCell.Value = (i + 1).ToString();
+            {
+                string rowNumber = (i + 1).ToString();
+                if (!string.Equals(_grid.Rows[i].HeaderCell.Value as string, rowNumber,
+                    StringComparison.Ordinal))
+                {
+                    _grid.Rows[i].HeaderCell.Value = rowNumber;
+                }
+            }
         }
 
         private void UpdateButtons()
