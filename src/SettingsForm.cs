@@ -957,7 +957,7 @@ namespace InspectionWidget
             layout.Controls.Add(product);
             var version = new Label
             {
-                Text = "v1.0.3 · 零第三方依赖",
+                Text = "v1.0.4 · 零第三方依赖",
                 Font = UiTheme.BodyBoldFont,
                 ForeColor = UiTheme.AccentColor,
                 AutoSize = true,

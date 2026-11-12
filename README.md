@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.3（本地设置/配置改造）` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.4` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -103,7 +103,7 @@ bash build.sh
 
 ### 验证状态
 
-当前本地候选的可执行验证记录在 `work/settings-config-ux/verification.md`。默认纯逻辑测试由现有 TestRunner 覆盖设备草稿、导入导出、原子写、锁、恢复备份和写保护；显式加 `--windows-ui` 时，非 Windows 环境会报告窗体用例未执行并返回退出码 2，不能计为通过。Windows 专属的设备编辑保存链、真实设置窗体、DPAPI、剪贴板、托盘、截图引擎、100/150/200% 缩放及 1366×768/1920×1080 工作区仍需在 Windows 实机复验。
+Windows 发布工作流执行 MSBuild Release 构建、342 条纯逻辑测试和 11 条 WinForms 控件测试，通过后上传单文件 exe。纯逻辑覆盖设备草稿、导入导出、原子写、锁、恢复备份和写保护。显式加 `--windows-ui` 时，非 Windows 环境会报告窗体用例未执行并返回退出码 2。DPAPI 跨用户、真实剪贴板、托盘、截图引擎、多显示器及系统 DPI/工作区组合仍需人工实机验收。
 
 ### 目录结构
 
@@ -124,7 +124,7 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
-| v1.0.3（本地设置/配置改造） | 2026-11-12 | 设置页改为五组与单列设备表格；设备/凭据编辑统一进入草稿，底栏为应用/保存并关闭/取消，成功保存即时刷新主面板；新增配置与备份页、普通导出、本机完整备份、导入预览与合并/替换、原子配置写入、导入恢复备份、损坏备份与读取失败写保护；补充默认纯逻辑回归。当前为独立分支本地构建，Windows 正式验收未完成，未推送/打标签/发 Release。 |
+| v1.0.4 | 2026-11-12 | 设备管理改为单列可编辑表格，改名直接保存，Esc 放弃当前编辑。应用后即时刷新主面板。新增配置导入导出、设备合并与替换预览、可选本机 DPAPI 完整备份。配置采用原子保存、导入前备份及读取失败保护。整理五页设置、滚动和缩放布局，修复设备表格事件递归与取消编辑问题，增加 Windows 窗体 CI。 |
 | v1.0.3 | 2026-11-03 | 主界面短名改为「巡检助手」（主面板标题、托盘提示、最小化气泡；产品全名与 exe 名不变）；凭据支持 ↑/↓ 上下排序（顺序持久化、即主面板渲染顺序）；主面板「截图」区新增与凭据区一致的折叠（配置新增 `IsDeviceCollapsed` 持久化，两区互不影响；口径更正：本条最初误解为「最小化窗口自动还原截图」，2026-11-03 用户看图澄清为分区折叠）；日期文件夹名默认改为 `巡检-yyyy-MM-dd`（仅默认值与缺字段自愈，已保存配置不迁移）；设置窗口新增「应用」按钮（与保存共用校验＋落盘、成功不关窗）；发版步骤改为幂等（同名 Release 已存在时自动 `--clobber` 补挂 exe）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 322,048 字节，SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | 新增应用图标（exe/窗口/托盘同源）；标题栏加关闭按钮（✕）；exe 交付名定为 `InspectionWidget.exe`；设置按钮改用 Segoe UI Symbol 标准齿轮字形（缺字体时代码绘制位图兜底）；日期文件夹名可自定义（`FolderNamePattern`，默认 yyyy-MM-dd，保存校验拦截非法模式）；最小化改走系统托盘（面板不再进任务栏，托盘恢复/退出，首次隐藏气泡提示一次；覆盖白皮书原「进任务栏不进托盘」口径，2026-11-03 实机反馈改定）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 318,464 字节，SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
@@ -141,7 +141,7 @@ bash build.sh
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.0.3 (local settings/config update)` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.0.4` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 
@@ -236,7 +236,7 @@ The script restores `assets/app.ico` from `assets/app.ico.base64.txt` when neede
 
 ### Verification status
 
-Executable verification records for the current local candidate are in `work/settings-config-ux/verification.md`. The default TestRunner covers the settings draft, import/export, atomic writes, locking, recovery backups and write protection. With `--windows-ui`, a non-Windows host reports the form cases as not run and exits with code 2; this is not a pass. Windows-only validation still required includes the device edit/save chain, the real Settings form, DPAPI, the clipboard, the tray, the capture engine, 100%/150%/200% scaling, and the 1366×768 and 1920×1080 work areas.
+The Windows release workflow builds Release with MSBuild, runs 342 pure-logic tests and 11 WinForms control tests, then uploads the single-file executable after success. Pure-logic coverage includes the settings draft, import/export, atomic writes, locking, recovery backups and write protection. On non-Windows systems, `--windows-ui` reports the UI cases as unexecuted and exits with code 2. Cross-user DPAPI, the real clipboard, tray behavior, capture, multiple monitors and system DPI/work-area combinations still require manual checks.
 
 ### Project layout
 
@@ -257,7 +257,7 @@ Executable verification records for the current local candidate are in `work/set
 
 | Version | Date | Notes |
 | --- | --- | --- |
-| v1.0.3 (local settings/config update) | 2026-11-12 | Settings now has five pages and a single-column device grid; device and credential edits share one draft; the footer is Apply / Save & Close / Cancel, and a successful save refreshes the main panel immediately; added Configuration & Backup, ordinary export, full local backup, import preview with merge/replace, atomic configuration writes, import recovery backups, corruption-backup and read-failure write protection; added default pure-logic regressions. This is a local build on an independent branch; Windows acceptance is incomplete and nothing was pushed, tagged or released. |
+| v1.0.4 | 2026-11-12 | Added an editable device grid with direct save and Esc cancellation, plus immediate refresh after Apply. Added configuration import/export, device merge and replacement previews, optional local DPAPI backups, atomic saves, pre-import recovery backups and read-failure protection. Refined the five Settings pages, scrolling and scaling, fixed recursive grid events and edit cancellation, and added Windows UI CI. |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | New app icon (one source for the exe, window and tray icons); close button (✕) added to the title bar; the exe ships as `InspectionWidget.exe`; the settings button now uses the standard gear glyph from Segoe UI Symbol (with a code-drawn bitmap fallback when the font is unavailable); date folder names are customizable (`FolderNamePattern`, default `yyyy-MM-dd`, invalid patterns rejected at save time); minimize now goes to the system tray (the panel no longer appears in the taskbar; restore/exit from the tray, with a balloon tip the first time it hides — superseding the white paper's original "taskbar, not tray" decision, changed on 2026-11-03 based on hands-on feedback); the Linux/Mono local build `build/InspectionWidget.exe` is 318,464 bytes, SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
 | v1.0.1 | 2026-11-03 | Settings window now opens centered; UI scaling added (100%–200%); the config file now defaults to `%LocalAppData%\InspectionWidget` (a `config.json` next to the exe still takes precedence); GitHub Actions automated builds |
