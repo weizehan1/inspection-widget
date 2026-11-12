@@ -117,11 +117,14 @@ namespace InspectionWidget.Tests
                     Assert.NotNull(box, "应进入真实文本框编辑态");
 
                     box.Text = "临时改名";
-                    grid.CancelEdit();
+                    Assert.True(env.SendEscape(), "编辑态 Esc 应由设置窗处理");
                     Application.DoEvents();
-                    Assert.False(grid.IsCurrentCellInEditMode, "Esc 后必须退出编辑态");
+                    Console.WriteLine("[STEP] 第一次取消：" + editor.LastCancelDiagnostic);
+                    Assert.False(grid.IsCurrentCellInEditMode,
+                        "Esc 后必须退出编辑态：" + editor.LastCancelDiagnostic);
                     Assert.Equal("设备A", draft.Devices[0].Name);
                     Assert.Equal("设备A", draft.LastDevice);
+                    Assert.Equal("设备A", env.Load().Config.Devices[0]);
 
                     box = null;
                     grid.CurrentCell = grid.Rows[0].Cells[0];
@@ -130,10 +133,14 @@ namespace InspectionWidget.Tests
                     box = grid.EditingControl as TextBox;
                     Assert.NotNull(box, "非法输入前应能再次进入编辑态");
                     box.Text = "CON";
-                    grid.CancelEdit();
+                    Assert.True(env.SendEscape(), "非法输入时 Esc 也应由设置窗处理");
                     Application.DoEvents();
-                    Assert.False(grid.IsCurrentCellInEditMode, "非法输入 Esc 也应退出编辑态");
+                    Console.WriteLine("[STEP] 第二次取消：" + editor.LastCancelDiagnostic);
+                    Assert.False(grid.IsCurrentCellInEditMode,
+                        "非法输入 Esc 也应退出编辑态：" + editor.LastCancelDiagnostic);
                     Assert.Equal("设备A", draft.Devices[0].Name);
+                    Assert.Equal("设备A", draft.LastDevice);
+                    Assert.Equal("设备A", env.Load().Config.Devices[0]);
 
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
                     Assert.True(applied, "应用失败，反馈：" + env.FeedbackText());
@@ -343,6 +350,19 @@ namespace InspectionWidget.Tests
             {
                 Label label = (Label)Field(Form, "_feedbackLabel");
                 return label == null ? "(无反馈标签)" : label.Text;
+            }
+
+            public bool SendEscape()
+            {
+                var message = new Message
+                {
+                    Msg = 0x0100,
+                    WParam = (IntPtr)Keys.Escape
+                };
+                MethodInfo method = typeof(SettingsForm).GetMethod("ProcessCmdKey",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (method == null) throw new AssertException("找不到 ProcessCmdKey");
+                return (bool)method.Invoke(Form, new object[] { message, Keys.Escape });
             }
 
             public void CloseWithoutPrompt()

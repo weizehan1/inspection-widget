@@ -19,6 +19,7 @@ namespace InspectionWidget
         private readonly Button _upButton;
         private readonly Button _downButton;
         private bool _loading;
+        private bool _cancellingEdit;
         private string _editOldName;
 
         public event Action DraftChanged;
@@ -156,6 +157,9 @@ namespace InspectionWidget
             get { return _grid; }
         }
 
+        /// <summary>最近一次取消单元格编辑的实际结果，供 UI 测试和故障定位使用。</summary>
+        public string LastCancelDiagnostic { get; private set; }
+
         public bool CommitEdit(out string error)
         {
             error = null;
@@ -178,6 +182,80 @@ namespace InspectionWidget
                 return false;
             }
             return ValidateDraft(true, out error);
+        }
+
+        /// <summary>
+        /// 结束当前设备单元格编辑并丢弃输入。Windows 上 CancelEdit 偶尔只丢弃
+        /// 绑定值而仍停留在编辑态；此时先把编辑控件文本恢复为原值再 EndEdit，
+        /// 避免把取消内容提交。取消期间不校验、不触发改名和 dirty。
+        /// </summary>
+        public bool CancelCurrentEdit()
+        {
+            if (!_grid.IsCurrentCellInEditMode)
+            {
+                _editOldName = null;
+                LastCancelDiagnostic = "CancelEdit=skipped; EndEdit=false; editing=false";
+                return true;
+            }
+
+            string original = _editOldName;
+            int rowIndex = _grid.CurrentRow != null ? _grid.CurrentRow.Index : -1;
+            bool cancelCalled = false;
+            bool endCalled = false;
+            _cancellingEdit = true;
+            try
+            {
+                Control editingControl = _grid.EditingControl;
+                if (editingControl != null)
+                    editingControl.Text = original ?? string.Empty;
+
+                _grid.CancelEdit();
+                cancelCalled = true;
+
+                if (_grid.IsCurrentCellInEditMode)
+                {
+                    // CancelEdit 没有退出编辑态：恢复进入编辑时的文本再 EndEdit。
+                    // 此时 OnCellValidating 会跳过校验，确保非法输入也能安全退出。
+                    editingControl = _grid.EditingControl;
+                    if (editingControl != null)
+                        editingControl.Text = original ?? string.Empty;
+                    else if (_grid.CurrentCell != null)
+                        _grid.CurrentCell.Value = original;
+                    _grid.EndEdit();
+                    endCalled = true;
+                }
+
+                // 个别 Windows 组合只丢弃编辑控件文本而未回滚绑定值。取消完成后
+                // 以进入编辑时的值覆盖模型和单元格，保证草稿与显示一致。
+                if (!_grid.IsCurrentCellInEditMode && rowIndex >= 0
+                    && rowIndex < _draft.Devices.Count)
+                {
+                    DeviceDraftItem item = _draft.Devices[rowIndex];
+                    if (item != null && !string.Equals(item.Name, original, StringComparison.Ordinal))
+                        item.Name = original;
+                    if (rowIndex < _grid.Rows.Count)
+                        _grid.Rows[rowIndex].Cells[0].Value = original;
+                }
+            }
+            catch (Exception ex)
+            {
+                LastCancelDiagnostic = "取消设备编辑失败：" + ex.Message;
+                return false;
+            }
+            finally
+            {
+                _cancellingEdit = false;
+                _editOldName = null;
+                if (_grid.CurrentRow != null)
+                    _grid.CurrentRow.ErrorText = string.Empty;
+                if (_grid.CurrentCell != null)
+                    _grid.CurrentCell.ErrorText = string.Empty;
+            }
+
+            bool editing = _grid.IsCurrentCellInEditMode;
+            LastCancelDiagnostic = "CancelEdit=" + cancelCalled
+                + "; EndEdit=" + endCalled + "; editing=" + editing;
+            return !editing;
         }
 
         /// <summary>提交前校验：草稿操作允许空行，真正保存时不允许。</summary>
@@ -299,6 +377,9 @@ namespace InspectionWidget
 
         private void OnCellValidating(object sender, DataGridViewCellValidatingEventArgs e)
         {
+            if (_cancellingEdit)
+                return;
+
             string proposed = e.FormattedValue == null ? string.Empty : e.FormattedValue.ToString();
             if (string.IsNullOrWhiteSpace(proposed))
                 return;
@@ -321,6 +402,14 @@ namespace InspectionWidget
 
         private void OnCellEndEdit(object sender, DataGridViewCellEventArgs e)
         {
+            if (_cancellingEdit)
+            {
+                _editOldName = null;
+                if (e.RowIndex >= 0)
+                    _grid.Rows[e.RowIndex].ErrorText = string.Empty;
+                return;
+            }
+
             string newName = _draft.Devices[e.RowIndex] == null
                 ? null : _draft.Devices[e.RowIndex].Name;
             if (!string.Equals(_editOldName, newName, StringComparison.Ordinal))
@@ -335,7 +424,7 @@ namespace InspectionWidget
             // 行头序号、列头及行/列删除也会触发 CellValueChanged；这些不是设备名
             // 数据变化。若不过滤，下面更新 HeaderCell.Value 会再次进入本事件，
             // 在 Windows 上形成无界递归并导致 StackOverflowException。
-            if (_loading || e.RowIndex < 0 || e.ColumnIndex < 0)
+            if (_loading || _cancellingEdit || e.RowIndex < 0 || e.ColumnIndex < 0)
                 return;
             RaiseChanged();
         }

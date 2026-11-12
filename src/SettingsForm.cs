@@ -426,8 +426,13 @@ namespace InspectionWidget
                         e.Cancel = true;
                         return;
                     }
-                    if (pendingDeviceEdit)
-                        _deviceEditor.Grid.CancelEdit();
+                    if (pendingDeviceEdit && !_deviceEditor.CancelCurrentEdit())
+                    {
+                        ShowError(GroupDevices, _deviceEditor.LastCancelDiagnostic,
+                            _deviceEditor.Grid);
+                        e.Cancel = true;
+                        return;
+                    }
                 }
             }
             base.OnFormClosing(e);
@@ -445,7 +450,9 @@ namespace InspectionWidget
             if (keyData == Keys.Escape && _deviceEditor != null
                 && _deviceEditor.Grid.IsCurrentCellInEditMode)
             {
-                _deviceEditor.Grid.CancelEdit();
+                if (!_deviceEditor.CancelCurrentEdit())
+                    ShowError(GroupDevices, _deviceEditor.LastCancelDiagnostic,
+                        _deviceEditor.Grid);
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
