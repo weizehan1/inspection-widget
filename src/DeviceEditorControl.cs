@@ -84,7 +84,10 @@ namespace InspectionWidget
                 RowHeadersVisible = true,
                 MultiSelect = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                EditMode = DataGridViewEditMode.EditOnEnter,
+                // EditOnEnter 会在 EndEdit/CancelEdit 后因当前单元格仍被选中而立即
+                // 重新进入编辑，使 CommitEdit 的 IsCurrentCellInEditMode 检查误判。
+                // 保留 F2/输入触发编辑，双击与 Enter 由下方显式接线。
+                EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2,
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
                 Font = UiTheme.BodyFont,
@@ -108,6 +111,8 @@ namespace InspectionWidget
             _grid.CellValidating += OnCellValidating;
             _grid.CellEndEdit += OnCellEndEdit;
             _grid.CellValueChanged += OnCellValueChanged;
+            _grid.CellDoubleClick += OnCellDoubleClick;
+            _grid.KeyDown += OnGridKeyDown;
             _grid.SelectionChanged += delegate { UpdateButtons(); };
             _grid.DataError += OnDataError;
             root.Controls.Add(_grid, 0, 1);
@@ -333,6 +338,24 @@ namespace InspectionWidget
             if (_loading || e.RowIndex < 0 || e.ColumnIndex < 0)
                 return;
             RaiseChanged();
+        }
+
+        private void OnCellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && !_grid.IsCurrentCellInEditMode)
+                _grid.BeginEdit(true);
+        }
+
+        private void OnGridKeyDown(object sender, KeyEventArgs e)
+        {
+            // Enter 在非编辑态直接进入编辑；编辑态仍交给网格原生提交/移动行为。
+            if (e.KeyCode == Keys.Enter && !_grid.IsCurrentCellInEditMode
+                && _grid.CurrentCell != null)
+            {
+                _grid.BeginEdit(true);
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+            }
         }
 
         private void OnDataError(object sender, DataGridViewDataErrorEventArgs e)

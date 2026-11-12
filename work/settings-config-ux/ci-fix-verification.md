@@ -66,3 +66,19 @@ a521254cf11230c66138bbadeb8acabe4b3cc9e9d34a6342081044005bdb7892  src/DeviceEdit
 ```
 
 工作树未提交；未推送、未修改 PR、未触发新的 CI。构建生成的 `assets/app.ico` 与 `/tmp/iw-ci-fix-*.log` 已清理。
+
+## 4. 第二轮 Windows CI 剩余失败
+
+Windows CI run `43153846399`、job `130969085101`：递归已消失，实际执行 353 条，350 条通过，3 条窗体用例失败。
+
+1. “改名后直接应用”的 `Assert.True(applied)` 返回 `false`。断言现在附带 `_feedbackLabel.Text`，下一轮可直接看到真实拒绝原因。
+2. “设备改名 Esc 取消”在 `grid.CancelEdit()` 后仍报告 `IsCurrentCellInEditMode=true`。根因是 `EditMode=EditOnEnter` 会在编辑结束后因当前单元格仍被选中而立即重新进入编辑，导致 `CommitEdit` 的检查误判。
+3. “导入前校验保留凭据输入”报 `找不到字段：NameBox`。`CredentialRow.NameBox` 是 public 字段，而测试辅助只查 `Instance | NonPublic`。
+
+本轮修正：
+
+- 网格改为 `DataGridViewEditMode.EditOnKeystrokeOrF2`，保留输入与 F2 编辑；显式接线双击和 Enter 进入编辑，编辑态内的提交/移动仍交给原生行为。
+- 测试辅助的字段查找加入 `BindingFlags.Public`，public 的 `NameBox`/`SecretBox` 可正常读取。
+- 关键 `applied` 断言附带实际反馈文本；未删除、跳过或放宽任何窗体用例及语义断言。
+
+复跑 Mono：退出码 `0`，主工程 `35 Warning(s), 0 Error(s)`，测试工程 `3 Warning(s), 0 Error(s)`，默认测试 `342 / 342` 通过，`git diff --check` 通过。macOS 上 `--windows-ui` 仍为退出码 `2`、跳过 11 条，不计为 Windows 通过；最终结果以主审推送后的 Windows CI 为准。

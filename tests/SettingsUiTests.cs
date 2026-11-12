@@ -65,7 +65,7 @@ namespace InspectionWidget.Tests
                     Console.WriteLine("[STEP] 准备调用 ApplyInternal");
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
                     Console.WriteLine("[STEP] ApplyInternal 返回：" + applied);
-                    Assert.False(applied);
+                    Assert.False(applied, "不应应用成功，反馈：" + env.FeedbackText());
                     Assert.Equal(0, saved);
                     Assert.True(env.Config.Devices.Count >= 1);
                     Assert.True(((Label)env.Field(env.Form, "_feedbackLabel")).Text.Contains("第"));
@@ -92,7 +92,7 @@ namespace InspectionWidget.Tests
                     grid.EndEdit();
 
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
-                    Assert.True(applied);
+                    Assert.True(applied, "应用失败，反馈：" + env.FeedbackText());
                     Assert.Equal(1, saved);
                     Assert.Equal("新名", draft.Devices[0].Name);
                     Assert.Equal("新名", draft.LastDevice);
@@ -136,7 +136,7 @@ namespace InspectionWidget.Tests
                     Assert.Equal("设备A", draft.Devices[0].Name);
 
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
-                    Assert.True(applied);
+                    Assert.True(applied, "应用失败，反馈：" + env.FeedbackText());
                     Assert.Equal("设备A", env.Load().Config.Devices[0]);
                 }
             });
@@ -151,7 +151,7 @@ namespace InspectionWidget.Tests
                     var draft = (SettingsDraft)env.Field(env.Form, "_draft");
                     draft.Devices[0].Name = "设备B";
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
-                    Assert.False(applied);
+                    Assert.False(applied, "不应应用成功，反馈：" + env.FeedbackText());
                     Assert.Equal(0, saved);
                     Assert.Equal("设备B", draft.Devices[0].Name);
                     Assert.Equal("设备A", env.Load().Config.Devices[0]);
@@ -207,7 +207,7 @@ namespace InspectionWidget.Tests
                     Assert.False(draft.Credentials[0].Cleared);
 
                     bool applied = (bool)env.Invoke(env.Form, "ApplyInternal", false);
-                    Assert.True(applied);
+                    Assert.True(applied, "应用失败，反馈：" + env.FeedbackText());
                     Assert.True(env.Form.ResultConfig.Credentials[0].NeedsReset);
                 }
             });
@@ -317,7 +317,7 @@ namespace InspectionWidget.Tests
             public object Field(object target, string name)
             {
                 FieldInfo field = target.GetType().GetField(name,
-                    BindingFlags.Instance | BindingFlags.NonPublic);
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (field == null) throw new AssertException("找不到字段：" + name);
                 return field.GetValue(target);
             }
@@ -337,6 +337,12 @@ namespace InspectionWidget.Tests
                     AuthoritativePath = Path.Combine(_dir, "config.json"),
                     IsFallback = false
                 }, delegate { return true; }).Load();
+            }
+
+            public string FeedbackText()
+            {
+                Label label = (Label)Field(Form, "_feedbackLabel");
+                return label == null ? "(无反馈标签)" : label.Text;
             }
 
             public void CloseWithoutPrompt()
