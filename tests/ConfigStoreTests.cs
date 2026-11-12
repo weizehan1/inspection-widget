@@ -8,6 +8,37 @@ namespace InspectionWidget.Tests
     /// <summary>ConfigStore 序列化 / 自愈 / 原子写（临时目录，测后清理）。锁与路径判定在各自用例组。</summary>
     public static class ConfigStoreTests
     {
+        private sealed class RecordingBackups : ConfigStore.IConfigBackupOperations
+        {
+            public byte[] CorruptBytes;
+            public byte[] PreImportBytes;
+            public bool ThrowCorrupt;
+            public bool ThrowPreImport;
+            public Action OnCorrupt;
+
+            public string WriteCorruptBackup(string target, byte[] bytes)
+            {
+                CorruptBytes = bytes == null ? null : (byte[])bytes.Clone();
+                if (OnCorrupt != null)
+                    OnCorrupt();
+                if (ThrowCorrupt)
+                    throw new IOException("模拟损坏备份失败");
+                string path = Path.Combine(Path.GetDirectoryName(target), "config.corrupt.test.json");
+                File.WriteAllBytes(path, bytes ?? new byte[0]);
+                return path;
+            }
+
+            public string WritePreImportBackup(string target, byte[] bytes)
+            {
+                PreImportBytes = bytes == null ? null : (byte[])bytes.Clone();
+                if (ThrowPreImport)
+                    throw new IOException("模拟导入备份失败");
+                string path = Path.Combine(Path.GetDirectoryName(target), "config.preimport.test.json");
+                File.WriteAllBytes(path, bytes ?? new byte[0]);
+                return path;
+            }
+        }
+
         public static void RunAll()
         {
             TestRunner.Run("存储：缺文件 → Missing + 默认配置", () =>
@@ -26,6 +57,25 @@ namespace InspectionWidget.Tests
                     Assert.NotNull(r.Config.Credentials);
                 }
                 finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：首次读取时目标目录不存在 → 建目录后 Missing", () =>
+            {
+                string parent = MakeTempDir();
+                string dir = Path.Combine(parent, "nested", "InspectionWidget");
+                try
+                {
+                    var store = new ConfigStore(new ConfigPaths
+                    {
+                        AuthoritativePath = Path.Combine(dir, "config.json"),
+                        IsFallback = true
+                    }, delegate(string d) { return true; });
+                    LoadResult result = store.Load();
+                    Assert.Equal(ConfigLoadKind.Missing, result.Kind);
+                    Assert.True(Directory.Exists(dir));
+                    Assert.False(store.WriteProtection.IsProtected);
+                }
+                finally { Cleanup(parent); }
             });
 
             TestRunner.Run("存储：Save→Load 往返全字段不丢且 Kind=Ok", () =>
@@ -94,6 +144,53 @@ namespace InspectionWidget.Tests
                     Assert.Equal("设备乙", r.Config.Devices[1]);
                     Assert.Equal("设备甲", r.Config.LastDevice);
                     Assert.NotNull(r.Config.Credentials);
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("重读配置：自动清空开关变化才重建守卫，失败读取不换服务", () =>
+            {
+                var on = new AppConfig { AutoClearClipboard = true };
+                var off = new AppConfig { AutoClearClipboard = false };
+                Assert.True(ConfigStore.ShouldRebuildClipboardGuard(on, off));
+                Assert.True(ConfigStore.ShouldRebuildClipboardGuard(off, on));
+                Assert.False(ConfigStore.ShouldRebuildClipboardGuard(on, on));
+                Assert.False(ConfigStore.ShouldRebuildClipboardGuard(off, off));
+
+                var failed = new LoadResult
+                {
+                    Kind = ConfigLoadKind.IoErrorKept,
+                    Config = off
+                };
+                Assert.False(ConfigStore.ShouldRebuildClipboardGuard(failed, on));
+                var loaded = new LoadResult
+                {
+                    Kind = ConfigLoadKind.Ok,
+                    Config = off
+                };
+                Assert.True(ConfigStore.ShouldRebuildClipboardGuard(loaded, on));
+            });
+
+            TestRunner.Run("保存协调：设置候选拒绝非法 RootPath 且原文件不变", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    ConfigStore store = MakeStore(dir);
+                    Assert.True(store.Save(AppConfig.CreateDefault()).Saved);
+                    byte[] before = File.ReadAllBytes(ConfigFile(dir));
+
+                    SettingsSaveCoordinator.Outcome outcome = SettingsSaveCoordinator.Execute(
+                        AppConfig.CreateDefault(),
+                        new System.Collections.Generic.List<string> { "设备1" },
+                        new System.Collections.Generic.List<CredentialRowCollector.RowInput>(),
+                        "C:\\shots:bad", "巡检-yyyy-MM-dd", true, 100, CaptureMode.Auto,
+                        new FakeProtector(), store);
+                    Assert.False(outcome.Saved);
+                    Assert.Equal(2, outcome.ErrorGroup);
+                    Assert.True(outcome.Error.Contains("冒号"), outcome.Error);
+                    Assert.Equal(Convert.ToBase64String(before),
+                        Convert.ToBase64String(File.ReadAllBytes(ConfigFile(dir))));
                 }
                 finally { Cleanup(dir); }
             });
@@ -248,6 +345,118 @@ namespace InspectionWidget.Tests
                     Assert.Equal(ConfigLoadKind.Defaulted, r.Kind);
                     Assert.Equal(100, r.Config.UiScalePercent);
                     Assert.Equal("设备甲", r.Config.Devices[0]);
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：缺文件时也先取得锁，锁占用返回保护而不是 Missing", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    ConfigStore store = MakeStore(dir);
+                    using (var held = new FileStream(ConfigFile(dir) + ".lock",
+                        FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                    {
+                        LoadResult blocked = store.Load();
+                        Assert.Equal(ConfigLoadKind.IoErrorKept, blocked.Kind);
+                        Assert.True(store.WriteProtection.IsProtected);
+                    }
+                    LoadResult missing = store.Load();
+                    Assert.Equal(ConfigLoadKind.Missing, missing.Kind);
+                    Assert.False(store.WriteProtection.IsProtected);
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：导入恢复备份失败时正式字节不变、不发布候选", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    var backups = new RecordingBackups { ThrowPreImport = true };
+                    var paths = new ConfigPaths
+                    {
+                        AuthoritativePath = ConfigFile(dir),
+                        IsFallback = false
+                    };
+                    var store = new ConfigStore(paths,
+                        delegate(string d) { return true; }, new AtomicConfigWriter(), backups);
+                    AppConfig before = AppConfig.CreateDefault();
+                    before.Devices.Clear();
+                    before.Devices.Add("原配置");
+                    Assert.True(store.Save(before).Saved);
+                    byte[] beforeBytes = File.ReadAllBytes(ConfigFile(dir));
+                    string revision = store.CurrentRevision;
+
+                    AppConfig candidate = AppConfig.CreateDefault();
+                    candidate.Devices.Clear();
+                    candidate.Devices.Add("新候选");
+                    SaveResult result = store.Save(candidate, new ConfigSaveOptions
+                    {
+                        ExpectedRevision = revision,
+                        CreatePreImportBackup = true
+                    });
+
+                    Assert.False(result.Saved);
+                    Assert.True(result.Error.Contains("恢复备份失败"), result.Error);
+                    Assert.Equal(Convert.ToBase64String(beforeBytes),
+                        Convert.ToBase64String(File.ReadAllBytes(ConfigFile(dir))));
+                    Assert.Equal(revision, store.CurrentRevision);
+                    Assert.Equal(0, Directory.GetFiles(dir, "config.preimport.*.json").Length);
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：损坏备份失败进入写保护且原文件不被覆盖", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    string corrupt = "不是 JSON {{{";
+                    File.WriteAllText(ConfigFile(dir), corrupt);
+                    var backups = new RecordingBackups { ThrowCorrupt = true };
+                    var paths = new ConfigPaths
+                    {
+                        AuthoritativePath = ConfigFile(dir),
+                        IsFallback = false
+                    };
+                    var store = new ConfigStore(paths,
+                        delegate(string d) { return true; }, new AtomicConfigWriter(), backups);
+
+                    LoadResult result = store.Load();
+                    Assert.Equal(ConfigLoadKind.IoErrorKept, result.Kind);
+                    Assert.True(store.WriteProtection.IsProtected);
+                    Assert.Equal(corrupt, File.ReadAllText(ConfigFile(dir)));
+                }
+                finally { Cleanup(dir); }
+            });
+
+            TestRunner.Run("存储：损坏备份使用读取时字节，备份期间目标改写也不误取", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    string corrupt = "原始损坏字节";
+                    File.WriteAllText(ConfigFile(dir), corrupt);
+                    var backups = new RecordingBackups();
+                    backups.OnCorrupt = delegate
+                    {
+                        File.WriteAllText(ConfigFile(dir), "{\"Devices\":[]}");
+                    };
+                    var paths = new ConfigPaths
+                    {
+                        AuthoritativePath = ConfigFile(dir),
+                        IsFallback = false
+                    };
+                    var store = new ConfigStore(paths,
+                        delegate(string d) { return true; }, new AtomicConfigWriter(), backups);
+
+                    LoadResult result = store.Load();
+                    Assert.Equal(ConfigLoadKind.CorruptBackedUp, result.Kind);
+                    Assert.Equal(corrupt,
+                        System.Text.Encoding.UTF8.GetString(backups.CorruptBytes));
+                    Assert.Equal(corrupt, File.ReadAllText(result.BackupPath));
                 }
                 finally { Cleanup(dir); }
             });

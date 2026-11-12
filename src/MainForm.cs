@@ -39,19 +39,42 @@ namespace InspectionWidget
         // 界面缩放（v1.0.1）：度量一律经 M() 按当前配置档位缩放，布局公式在 PanelLayout。
         private double ScaleFactor
         {
-            get { return _config == null ? 1.0 : UiScale.Factor(_config.UiScalePercent); }
+            get
+            {
+                if (_config == null) return 1.0;
+                double system;
+                try
+                {
+                    system = Math.Max(1.0, DeviceDpi / 96.0);
+                }
+                catch
+                {
+                    system = 1.0;
+                }
+                return UiScale.Factor(_config.UiScalePercent) * system;
+            }
         }
 
         private int M(int value) { return PanelLayout.Scale(value, ScaleFactor); }
 
         private int PanelWidthNow { get { return PanelLayout.ScaledPanelWidth(ScaleFactor); } }
 
-        private int ContentWidthNow { get { return PanelWidthNow - M(SideMargin) * 2; } }
+        private int ContentWidthNow
+        {
+            get
+            {
+                return Math.Max(1, PanelWidthNow - M(SideMargin) * 2
+                    - SystemInformation.VerticalScrollBarWidth);
+            }
+        }
 
         private readonly ConfigStore _store;
         private readonly PanelStateMachine _stateMachine;
         private readonly HookManager _hooks;
         private AppConfig _config;
+        private string _configRevision = string.Empty;
+        private bool _configWriteProtected;
+        private string _configLoadError;
 
         // ---------- 凭据模块（Task 6） ----------
 
@@ -107,6 +130,7 @@ namespace InspectionWidget
         private Button _minimizeButton;
         private Button _closeButton;
         private ToolTip _titleToolTip;
+        private ToolTip _deviceToolTip;
         private Font _fontGear;
         private Bitmap _gearImage;
         private bool _settingsUsesGearImage;
@@ -114,6 +138,7 @@ namespace InspectionWidget
         // 系统托盘（v1.0.2）：常驻 NotifyIcon，最小化 = 隐藏到托盘，托盘恢复/退出。
         private NotifyIcon _trayIcon;
         private Label _deviceHeaderLabel;
+        private Panel _scrollHost;
         private Panel _deviceZonePanel;
         private Panel _credentialHeaderPanel;
         private Label _credentialHeaderLabel;
@@ -236,6 +261,7 @@ namespace InspectionWidget
                 }
                 if (_rootToolTip != null) _rootToolTip.Dispose();
                 if (_titleToolTip != null) _titleToolTip.Dispose();
+                if (_deviceToolTip != null) _deviceToolTip.Dispose();
                 if (_trayIcon != null) _trayIcon.Dispose();
                 if (_feedbackTimer != null) _feedbackTimer.Dispose();
                 if (_font13 != null) _font13.Dispose();
@@ -264,6 +290,7 @@ namespace InspectionWidget
             StartPosition = FormStartPosition.Manual;
             BackColor = PanelBackColor;
             DoubleBuffered = true;
+            AutoScaleMode = AutoScaleMode.None;
 
             // 应用图标（v1.0.2）：与 exe 图标同源（嵌入资源），任务栏/Alt-Tab 不再是默认图标
             Icon appIcon = AppIcon.Load();
@@ -275,6 +302,9 @@ namespace InspectionWidget
 
             LoadResult load = _store.Load();
             _config = load.Config != null ? load.Config : AppConfig.CreateDefault();
+            _configRevision = load.Revision ?? string.Empty;
+            _configWriteProtected = load.Kind == ConfigLoadKind.IoErrorKept;
+            _configLoadError = load.Error;
             EnsureConfigLists();
             RebuildClipboardGuard();
 
@@ -285,9 +315,43 @@ namespace InspectionWidget
 
             // 加载/刷新配置的同一入口：名单校验 + 动态按钮 + 可用性 + 常驻提示
             RefreshConfigState();
+            if (_configWriteProtected)
+                ShowConfigLoadErrorFeedback();
 
             Shown += OnFirstShown;
             FormClosing += OnFormClosing;
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            if (_config == null)
+                return;
+            ApplyScaleToStaticLayout();
+            ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
+            LayoutSections();
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            if (_config == null)
+                return;
+            int scrollPosition = _scrollHost != null ? _scrollHost.VerticalScroll.Value : 0;
+            ApplyScaleToStaticLayout();
+            RebuildDeviceButtons();
+            RebuildCredentialControls();
+            RefreshStateVisuals();
+            ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
+            LayoutSections();
+            if (_scrollHost != null)
+            {
+                int max = Math.Max(0,
+                    _scrollHost.VerticalScroll.Maximum - _scrollHost.ClientSize.Height);
+                _scrollHost.VerticalScroll.Value = Math.Min(scrollPosition, max);
+                _scrollHost.PerformLayout();
+            }
+            ClampToWorkingArea();
         }
 
         // ---------- 静态骨架 ----------
@@ -319,6 +383,7 @@ namespace InspectionWidget
             // 标题栏右侧三按钮（v1.0.2）：设置（槽 2）/ 最小化（槽 1）/ 关闭（槽 0），
             // 位置统一走 PanelLayout.TitleBarButtonX，缩放重排在 ApplyScaleToStaticLayout。
             _titleToolTip = new ToolTip();
+            _deviceToolTip = new ToolTip();
             var settingsButton = _settingsButton = new Button
             {
                 Text = "⚙",
@@ -331,6 +396,7 @@ namespace InspectionWidget
             };
             settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += OnSettingsClicked;
+            settingsButton.AccessibleName = "打开设置";
             _titleToolTip.SetToolTip(settingsButton, "设置");
             var minimizeButton = _minimizeButton = new Button
             {
@@ -344,6 +410,7 @@ namespace InspectionWidget
             };
             minimizeButton.FlatAppearance.BorderSize = 0;
             minimizeButton.Click += OnMinimizeClicked;
+            minimizeButton.AccessibleName = "最小化到托盘";
             _titleToolTip.SetToolTip(minimizeButton, "最小化");
             var closeButton = _closeButton = new Button
             {
@@ -358,6 +425,7 @@ namespace InspectionWidget
             closeButton.FlatAppearance.BorderSize = 0;
             // 关闭 = Close()：走既有 FormClosing（先清剪贴板→停钩→存位置），不另写退出路径
             closeButton.Click += delegate { Close(); };
+            closeButton.AccessibleName = "退出巡检助手";
             _titleToolTip.SetToolTip(closeButton, "关闭");
 
             _titleBarPanel.Controls.Add(titleLabel);
@@ -369,6 +437,14 @@ namespace InspectionWidget
             AttachDragHandlers(titleLabel);
             AttachDragHandlers(dateLabel);
             Controls.Add(_titleBarPanel);
+
+            _scrollHost = new Panel
+            {
+                BackColor = PanelBackColor,
+                AutoScroll = true,
+                Name = "ScrollableSections"
+            };
+            Controls.Add(_scrollHost);
 
             // 设备区标题行
             var deviceHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.SectionHeaderHeight) };
@@ -394,13 +470,13 @@ namespace InspectionWidget
             deviceHeaderPanel.Click += OnDeviceHeaderClicked;
             _deviceHeaderLabel.Click += OnDeviceHeaderClicked;
             _deviceArrowLabel.Click += OnDeviceHeaderClicked;
-            Controls.Add(deviceHeaderPanel);
+            _scrollHost.Controls.Add(deviceHeaderPanel);
             deviceHeaderPanel.Name = "DeviceHeaderPanel";
             _deviceHeaderPanel = deviceHeaderPanel;
 
             // 设备区
             _deviceZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.PanelWidth };
-            Controls.Add(_deviceZonePanel);
+            _scrollHost.Controls.Add(_deviceZonePanel);
 
             // 凭据区标题行（整行点击折叠）
             _credentialHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.SectionHeaderHeight) };
@@ -425,11 +501,11 @@ namespace InspectionWidget
             _credentialHeaderPanel.Click += OnCredentialHeaderClicked;
             credentialHeaderLabel.Click += OnCredentialHeaderClicked;
             _credentialArrowLabel.Click += OnCredentialHeaderClicked;
-            Controls.Add(_credentialHeaderPanel);
+            _scrollHost.Controls.Add(_credentialHeaderPanel);
 
             // 凭据区
             _credentialZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.PanelWidth };
-            Controls.Add(_credentialZonePanel);
+            _scrollHost.Controls.Add(_credentialZonePanel);
 
             // 底部状态区：反馈行 + 根目录行
             var bottomPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.BottomStatusHeight) };
@@ -439,6 +515,7 @@ namespace InspectionWidget
                 Font = font13,
                 ForeColor = SecondaryTextColor,
                 AutoSize = false,
+                AutoEllipsis = true,
                 Size = new Size(ContentWidthNow, 24),
                 Location = new Point(SideMargin, 4)
             };
@@ -525,6 +602,7 @@ namespace InspectionWidget
             _closeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 0, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
 
             _deviceHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
+            _deviceHeaderLabel.Font = Font13;
             _deviceHeaderLabel.Location = new Point(margin, M(5));
             _deviceArrowLabel.Font = Font13;
             _deviceArrowLabel.Location = new Point(w - M(26), M(5));
@@ -554,18 +632,19 @@ namespace InspectionWidget
             int credentials = _config != null && _config.Credentials != null ? _config.Credentials.Count : 0;
             bool deviceCollapsed = _config != null && _config.IsDeviceCollapsed;
             bool credentialCollapsed = _config != null && _config.IsCredentialCollapsed;
-            return PanelLayout.ComputeHeight(devices, deviceCollapsed, credentials, credentialCollapsed, ScaleFactor);
+            int desired = PanelLayout.ComputeHeight(devices, deviceCollapsed, credentials, credentialCollapsed, ScaleFactor);
+            int workingHeight = Screen.FromControl(this).WorkingArea.Height;
+            return PanelLayout.ClampHeight(desired, workingHeight, M(8));
         }
 
-        /// <summary>按区高依次摆放各分区（ClientSize 须已按 ComputeCurrentHeight 设好）。</summary>
+        /// <summary>标题与底栏固定；中间内容放滚动宿主，长设备/凭据列表不再顶出工作区。</summary>
         private void LayoutSections()
         {
             int deviceZone = PanelLayout.DeviceZoneHeight(_config.Devices.Count, _config.IsDeviceCollapsed, ScaleFactor);
             int credentialZone = PanelLayout.CredentialZoneHeight(_config.Credentials.Count, _config.IsCredentialCollapsed, ScaleFactor);
-            int total = ComputeCurrentHeight();
 
             _titleBarPanel.Location = new Point(0, 0);
-            int y = M(PanelLayout.TitleBarHeight);
+            int y = 0;
             _deviceHeaderPanel.Location = new Point(0, y);
             y += M(PanelLayout.SectionHeaderHeight);
             _deviceZonePanel.Location = new Point(0, y);
@@ -576,7 +655,14 @@ namespace InspectionWidget
             _credentialZonePanel.Location = new Point(0, y);
             _credentialZonePanel.Height = credentialZone;
             y += credentialZone;
-            _bottomPanel.Location = new Point(0, total - M(PanelLayout.BottomStatusHeight));
+
+            int titleHeight = M(PanelLayout.TitleBarHeight);
+            int bottomHeight = M(PanelLayout.BottomStatusHeight);
+            int scrollHeight = Math.Max(0, ClientSize.Height - titleHeight - bottomHeight);
+            _scrollHost.Location = new Point(0, titleHeight);
+            _scrollHost.Size = new Size(PanelWidthNow, scrollHeight);
+            _scrollHost.AutoScrollMinSize = new Size(PanelWidthNow, y);
+            _bottomPanel.Location = new Point(0, ClientSize.Height - bottomHeight);
         }
 
         /// <summary>高度变化统一入口：先按 Bottom 锚定算 Top，再改尺寸与分区布局。</summary>
@@ -599,23 +685,40 @@ namespace InspectionWidget
             var size = new Size(PanelWidthNow, ClientSize.Height);
             if (_config.WindowLeft.HasValue && _config.WindowTop.HasValue)
             {
-                var candidate = new Rectangle(_config.WindowLeft.Value, _config.WindowTop.Value, size.Width, size.Height);
-                long candidateArea = (long)candidate.Width * candidate.Height;
-                foreach (Screen screen in Screen.AllScreens)
+                Point location;
+                var candidate = new Rectangle(_config.WindowLeft.Value,
+                    _config.WindowTop.Value, size.Width, size.Height);
+                if (PanelLayout.TryChooseVisibleWindowLocation(
+                    WorkingAreas(), candidate, out location))
                 {
-                    // 恢复判据：与某个屏幕 WorkingArea 的相交面积至少过半才恢复，
-                    // 避免换屏/改分辨率后只剩一角在屏内也被恢复（审查 M-1）。
-                    Rectangle overlap = Rectangle.Intersect(screen.WorkingArea, candidate);
-                    long overlapArea = (long)overlap.Width * overlap.Height;
-                    if (overlapArea * 2 >= candidateArea)
-                    {
-                        Location = candidate.Location;
-                        return;
-                    }
+                    Location = location;
+                    return;
                 }
             }
             Rectangle wa = Screen.PrimaryScreen.WorkingArea;
             Location = new Point(wa.Right - size.Width, wa.Bottom - size.Height);
+        }
+
+        private static List<Rectangle> WorkingAreas()
+        {
+            var areas = new List<Rectangle>();
+            foreach (Screen screen in Screen.AllScreens)
+                areas.Add(screen.WorkingArea);
+            return areas;
+        }
+
+        private void ApplyConfiguredWindowPositionIfVisible()
+        {
+            if (!_config.WindowLeft.HasValue || !_config.WindowTop.HasValue)
+                return;
+            Point location;
+            var candidate = new Rectangle(_config.WindowLeft.Value,
+                _config.WindowTop.Value, ClientSize.Width, ClientSize.Height);
+            if (PanelLayout.TryChooseVisibleWindowLocation(
+                WorkingAreas(), candidate, out location))
+            {
+                Location = location;
+            }
         }
 
         // ---------- 配置加载/刷新同一入口（含 Minor-5 名单校验接线） ----------
@@ -625,12 +728,48 @@ namespace InspectionWidget
         /// </summary>
         public void ReloadConfig()
         {
+            RetryConfigLoad();
+        }
+
+        /// <summary>
+        /// 读取失败后的显式重试。成功才重建运行态并解除写入保护；
+        /// 失败继续保留原文件，绝不让旧默认草稿覆盖。
+        /// </summary>
+        private bool RetryConfigLoad()
+        {
             LoadResult load = _store.Load();
-            _config = load.Config != null ? load.Config : AppConfig.CreateDefault();
+            if (load.Kind == ConfigLoadKind.IoErrorKept)
+            {
+                _configWriteProtected = true;
+                _configLoadError = load.Error;
+                ShowConfigLoadErrorFeedback();
+                return false;
+            }
+
+            AppConfig next = load.Config ?? AppConfig.CreateDefault();
+            bool autoClearChanged = ConfigStore.ShouldRebuildClipboardGuard(_config, next);
+            _configWriteProtected = false;
+            _configLoadError = null;
+            _configRevision = load.Revision ?? string.Empty;
+            _config = next;
             EnsureConfigLists();
+            // 重读可能带回另一份 AutoClearClipboard；服务与配置必须同代。
+            // 开关未变时保留原 Guard，避免清掉尚未到期的剪贴板计时。
+            if (autoClearChanged)
+                RebuildClipboardGuard();
             ApplyScaleToStaticLayout();
             RefreshConfigState();
             ApplyHeightAnchored();
+            if (load.Kind == ConfigLoadKind.CorruptBackedUp)
+            {
+                ShowPersistentFeedback("配置损坏已备份并恢复默认："
+                    + (load.BackupPath ?? "备份路径未知"), ErrorColor);
+            }
+            else
+            {
+                ShowSuccessFeedback("配置已重新读取");
+            }
+            return true;
         }
 
         private void EnsureConfigLists()
@@ -673,7 +812,11 @@ namespace InspectionWidget
             UpdateRootLabel();
             RefreshStateVisuals();
 
-            if (_deviceListError != null)
+            if (_configWriteProtected)
+            {
+                ShowConfigLoadErrorFeedback();
+            }
+            else if (_deviceListError != null)
             {
                 ShowDeviceListErrorFeedback();
             }
@@ -689,7 +832,12 @@ namespace InspectionWidget
         /// <summary>截图是否可用：名单无误且已设置根目录。</summary>
         private bool ScreenshotAvailable
         {
-            get { return _deviceListError == null && !string.IsNullOrEmpty(_config.RootPath); }
+            get
+            {
+                return !_configWriteProtected
+                    && _deviceListError == null
+                    && !string.IsNullOrEmpty(_config.RootPath);
+            }
         }
 
         private void RebuildDeviceButtons()
@@ -736,9 +884,11 @@ namespace InspectionWidget
                 };
                 button.FlatAppearance.BorderColor = BorderColor;
                 button.FlatAppearance.BorderSize = 1;
+                button.AccessibleName = "设备：" + device;
                 button.Click += OnDeviceButtonClicked;
                 _deviceButtons.Add(button);
                 _deviceZonePanel.Controls.Add(button);
+                _deviceToolTip.SetToolTip(button, device);
             }
         }
 
@@ -779,6 +929,7 @@ namespace InspectionWidget
                 };
                 button.FlatAppearance.BorderColor = BorderColor;
                 button.FlatAppearance.BorderSize = 1;
+                button.AccessibleName = "凭据：" + entry.Title;
                 button.Click += OnCredentialButtonClicked;
                 _credentialControls.Add(button);
                 _credentialZonePanel.Controls.Add(button);
@@ -834,9 +985,16 @@ namespace InspectionWidget
 
         private void UpdateRootLabel()
         {
+            if (_configWriteProtected)
+            {
+                _rootLabel.Text = "配置读取失败，点击此处重试（保存已暂停）";
+                _rootLabel.ForeColor = ErrorColor;
+                return;
+            }
             _rootLabel.Text = string.IsNullOrEmpty(_config.RootPath)
                 ? "尚未设置保存目录"
                 : "保存到：" + _config.RootPath;
+            _rootLabel.ForeColor = WeakTextColor;
         }
 
         // ---------- 交互 ----------
@@ -897,28 +1055,52 @@ namespace InspectionWidget
 
         private void OnSettingsClicked(object sender, EventArgs e)
         {
-            // 设置窗口（Task 7）：保存制——窗内对传入配置深拷贝编辑，本方在
-            // Saved 后才以 ResultConfig 替换当前配置并全量刷新；取消零副作用。
-            AppConfig savedConfig = null;
-            using (var form = new SettingsForm(_config, _store, _protector))
-            {
-                form.Saved += delegate { savedConfig = form.ResultConfig; };
-                form.ShowDialog(this);
-            }
-            if (savedConfig == null)
+            if (_configWriteProtected && !RetryConfigLoad())
                 return;
 
-            _config = savedConfig;
-            EnsureConfigLists();
-            ApplyScaleToStaticLayout();
-            RebuildClipboardGuard();
-            RefreshConfigState();
-            ApplyHeightAnchored();
-            ShowSuccessFeedback("设置已保存");
+            double systemDpiScale;
+            try
+            {
+                systemDpiScale = Math.Max(1.0, DeviceDpi / 96.0);
+            }
+            catch
+            {
+                systemDpiScale = 1.0;
+            }
+            using (var form = new SettingsForm(_config, _store, _protector, systemDpiScale))
+            {
+                form.Saved += delegate
+                {
+                    // 成功落盘即刷新运行态，不等 ShowDialog 返回；一次提交只走一次。
+                    bool autoClearChanged =
+                        ConfigStore.ShouldRebuildClipboardGuard(_config, form.ResultConfig);
+                    _config = AppConfigCloner.Clone(form.ResultConfig);
+                    _configRevision = _store.CurrentRevision;
+                    _configWriteProtected = false;
+                    _configLoadError = null;
+                    EnsureConfigLists();
+                    ApplyScaleToStaticLayout();
+                    // 未改变自动清空档位时保留 Guard 的未到期计时，避免刚复制的
+                    // 凭据因一次无关保存而失去 30 秒自动清空保护。
+                    if (autoClearChanged)
+                        RebuildClipboardGuard();
+                    RefreshConfigState();
+                    ApplyHeightAnchored();
+                    ApplyConfiguredWindowPositionIfVisible();
+                    ShowSuccessFeedback("设置已应用");
+                };
+                form.ShowDialog(this);
+            }
         }
 
         private void OnRootLabelClicked(object sender, EventArgs e)
         {
+            if (_configWriteProtected)
+            {
+                if (RetryConfigLoad())
+                    ShowSuccessFeedback("配置读取已恢复，保存已解除保护");
+                return;
+            }
             if (string.IsNullOrEmpty(_config.RootPath))
             {
                 // 未设根目录与「今日目录不存在」是两回事，文案须准确（审查 M-5）
@@ -1469,6 +1651,14 @@ namespace InspectionWidget
             ShowPersistentFeedback("设备名单有问题：" + _deviceListError + "，请到设置中修正", ErrorColor);
         }
 
+        private void ShowConfigLoadErrorFeedback()
+        {
+            string detail = string.IsNullOrEmpty(_configLoadError)
+                ? "配置读取失败，原文件已保留。"
+                : _configLoadError;
+            ShowPersistentFeedback("保存已暂停：" + detail + " 点根目录行重试读取。", ErrorColor);
+        }
+
         private void ShowFeedbackInternal(string text, Color color, bool persistent)
         {
             ShowFeedbackInternal(text, color, persistent, 2000);
@@ -1480,6 +1670,8 @@ namespace InspectionWidget
             _feedbackPersistent = persistent;
             _feedbackLabel.Text = text;
             _feedbackLabel.ForeColor = color;
+            if (_rootToolTip != null)
+                _rootToolTip.SetToolTip(_feedbackLabel, text);
             _feedbackTimer.Stop();
             _feedbackTimer.Interval = milliseconds;
             if (!persistent)
@@ -1492,6 +1684,11 @@ namespace InspectionWidget
         {
             if (_rootPromptShown) return;
             _rootPromptShown = true;
+            if (_configWriteProtected)
+            {
+                ShowConfigLoadErrorFeedback();
+                return;
+            }
             if (!string.IsNullOrEmpty(_config.RootPath)) return;
 
             using (var dialog = new FolderBrowserDialog())
@@ -1561,7 +1758,34 @@ namespace InspectionWidget
         {
             if (!_dragging) return;
             _dragging = false;
+            // 跨屏拖动后工作区可能变小；先钳制位置和尺寸，再保存最终坐标。
+            ClampToWorkingArea();
             SaveWindowPosition();
+        }
+
+        /// <summary>
+        /// 按窗体当前所在屏幕的工作区重新限制尺寸与位置；尺寸变化后保留底边。
+        /// 选窗等待中不重建钩子，只调整 Bounds 并让钩子使用当前矩形。
+        /// </summary>
+        private void ClampToWorkingArea()
+        {
+            if (_config == null) return;
+            Rectangle work = Screen.FromControl(this).WorkingArea;
+            Size clamped = PanelLayout.ClampPanelSize(
+                work, PanelWidthNow, ClientSize.Height, M(8));
+            int width = clamped.Width;
+            int height = clamped.Height;
+            if (width != ClientSize.Width || height != ClientSize.Height)
+            {
+                int bottom = Bottom;
+                ClientSize = new Size(width, height);
+                Location = new Point(Left,
+                    PanelLayout.ComputeTop(bottom, height, work.Top));
+            }
+            Location = PanelLayout.ClampLocationToWorkingArea(work, Size, Location);
+            LayoutSections();
+            if (_stateMachine.State == PanelState.Waiting)
+                _hooks.UpdateSelfBounds(Bounds);
         }
 
         private void SaveWindowPosition()
@@ -1688,9 +1912,21 @@ namespace InspectionWidget
 
         private SaveResult SaveBestEffortResult()
         {
+            if (_configWriteProtected || _store.WriteProtection.IsProtected)
+                return new SaveResult
+                {
+                    Saved = false,
+                    Error = "配置处于读取失败保护状态，保存已暂停。"
+                };
             try
             {
-                return _store.Save(_config);
+                SaveResult result = _store.Save(_config, new ConfigSaveOptions
+                {
+                    ExpectedRevision = _configRevision
+                });
+                if (result != null && result.Saved)
+                    _configRevision = result.Revision ?? _configRevision;
+                return result;
             }
             catch
             {

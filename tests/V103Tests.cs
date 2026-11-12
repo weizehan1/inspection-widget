@@ -351,6 +351,28 @@ namespace InspectionWidget.Tests
                 }
                 finally { ConfigStoreTests.Cleanup(dir); }
             });
+
+            // ---------- 选窗钩子矩形更新 ----------
+
+            TestRunner.Run("钩子：未运行时不新建会话，更新自身矩形返回 false", () =>
+            {
+                using (var hooks = new HookManager())
+                {
+                    Assert.False(hooks.IsRunning);
+                    Assert.False(hooks.UpdateSelfBounds(new System.Drawing.Rectangle(10, 10, 320, 480)));
+                    Assert.False(hooks.IsRunning, "更新矩形不得隐式启动会话");
+                }
+            });
+
+            TestRunner.Run("钩子：已释放后更新自身矩形抛 ObjectDisposedException", () =>
+            {
+                var hooks = new HookManager();
+                hooks.Dispose();
+                Assert.Throws<ObjectDisposedException>(delegate
+                {
+                    hooks.UpdateSelfBounds(new System.Drawing.Rectangle(0, 0, 1, 1));
+                });
+            });
         }
     }
 }

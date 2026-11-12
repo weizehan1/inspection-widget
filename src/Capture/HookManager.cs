@@ -131,6 +131,23 @@ namespace InspectionWidget.Capture
             return session.Id;
         }
 
+        /// <summary>
+        /// 更新进行中会话的自身矩形（DPI 或工作区变化后调用）。
+        /// 不新建会话、不重置 30 秒超时；未运行返回 false。
+        /// </summary>
+        public bool UpdateSelfBounds(Rectangle selfBounds)
+        {
+            lock (_lock)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException("HookManager");
+                if (_session == null || _session.TeardownRequested)
+                    return false;
+                _session.SelfBounds = selfBounds;
+                return true;
+            }
+        }
+
         /// <summary>成对卸载并停线程，幂等；未运行直接返回。</summary>
         public void Stop()
         {

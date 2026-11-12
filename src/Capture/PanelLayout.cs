@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 
 namespace InspectionWidget.Capture
@@ -126,6 +127,30 @@ namespace InspectionWidget.Capture
         }
 
         /// <summary>
+        /// 面板高受当前工作区限制：长列表交给内容区滚动，标题与底栏保持可见。
+        /// margin 为工作区上下预留，结果不小于 0。
+        /// </summary>
+        public static int ClampHeight(int desiredHeight, int workingAreaHeight, int margin)
+        {
+            int max = Math.Max(0, workingAreaHeight - Math.Max(0, margin));
+            if (desiredHeight < 0)
+                desiredHeight = 0;
+            return Math.Min(desiredHeight, max);
+        }
+
+        /// <summary>
+        /// 面板落到当前工作区时的最终尺寸：宽度和高度都不得超过工作区，
+        /// 高度再受 margin 约束；用于拖动跨屏与 DPI 变化后的统一钳制。
+        /// </summary>
+        public static Size ClampPanelSize(
+            Rectangle workingArea, int desiredWidth, int desiredHeight, int margin)
+        {
+            int width = Math.Max(0, Math.Min(desiredWidth, workingArea.Width));
+            int height = ClampHeight(desiredHeight, workingArea.Height, margin);
+            return new Size(width, height);
+        }
+
+        /// <summary>
         /// 把窗体居中放到工作区中央（设置窗口打开位置，纯函数）：
         /// 窗体大于工作区时钳制到工作区左上角，不溢出。
         /// </summary>
@@ -133,6 +158,49 @@ namespace InspectionWidget.Capture
         {
             int x = workingArea.Left + Math.Max(0, (workingArea.Width - formSize.Width) / 2);
             int y = workingArea.Top + Math.Max(0, (workingArea.Height - formSize.Height) / 2);
+            return new Point(x, y);
+        }
+
+        /// <summary>
+        /// 恢复窗口位置时要求候选矩形与任一工作区相交面积至少过半；
+        /// 命中则返回候选左上角，否则返回 false 让调用方保留当前位置。
+        /// </summary>
+        public static bool TryChooseVisibleWindowLocation(
+            IList<Rectangle> workingAreas, Rectangle candidate, out Point location)
+        {
+            location = candidate.Location;
+            long candidateArea = (long)candidate.Width * candidate.Height;
+            if (workingAreas == null || candidateArea <= 0)
+                return false;
+            for (int i = 0; i < workingAreas.Count; i++)
+            {
+                Rectangle overlap = Rectangle.Intersect(workingAreas[i], candidate);
+                long overlapArea = (long)overlap.Width * overlap.Height;
+                if (overlapArea * 2 >= candidateArea)
+                {
+                    location = ClampLocationToWorkingArea(
+                        workingAreas[i], candidate.Size, candidate.Location);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 把候选左上角钳制到指定工作区；窗体大于工作区时对齐工作区左上，
+        /// 保证导入或旧配置里的坐标不会让面板跑出屏幕。
+        /// </summary>
+        public static Point ClampLocationToWorkingArea(
+            Rectangle workingArea, Size formSize, Point location)
+        {
+            int maxX = workingArea.Right - formSize.Width;
+            int maxY = workingArea.Bottom - formSize.Height;
+            int x = maxX >= workingArea.Left
+                ? Math.Min(Math.Max(location.X, workingArea.Left), maxX)
+                : workingArea.Left;
+            int y = maxY >= workingArea.Top
+                ? Math.Min(Math.Max(location.Y, workingArea.Top), maxY)
+                : workingArea.Top;
             return new Point(x, y);
         }
     }

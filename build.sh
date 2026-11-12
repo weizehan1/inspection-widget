@@ -9,6 +9,52 @@ cd "$(dirname "$0")"
 PROJECT="src/InspectionWidget.csproj"
 OUT_DIR="build"
 
+# 应用图标源文件以 base64 文本入库；构建前按需还原。
+# 已有合法 .ico（文件头 00 00 01 00）时保留，不覆盖；解码失败即退出。
+restore_app_icon() {
+    local icon="assets/app.ico"
+    local b64="assets/app.ico.base64.txt"
+    local header=""
+    if [ -s "$icon" ]; then
+        header=$(od -An -tx1 -N4 "$icon" 2>/dev/null | tr -d ' \n')
+        if [ "$header" = "00000100" ]; then
+            echo "应用图标已存在且有效，保留：$icon"
+            return 0
+        fi
+    fi
+    if [ ! -s "$b64" ]; then
+        echo "错误：缺少 $b64，无法还原应用图标。" >&2
+        return 1
+    fi
+
+    local tmp="assets/.app.ico.restore.$$"
+    rm -f "$tmp"
+    if base64 --decode "$b64" > "$tmp" 2>/dev/null; then
+        :
+    elif base64 -d "$b64" > "$tmp" 2>/dev/null; then
+        :
+    elif base64 -D "$b64" > "$tmp" 2>/dev/null; then
+        :
+    elif command -v openssl >/dev/null 2>&1 \
+        && openssl base64 -d -A -in "$b64" -out "$tmp" 2>/dev/null; then
+        :
+    else
+        rm -f "$tmp"
+        echo "错误：当前平台没有可用的 base64 解码工具，无法还原应用图标。" >&2
+        return 1
+    fi
+    header=$(od -An -tx1 -N4 "$tmp" 2>/dev/null | tr -d ' \n')
+    if [ "$header" != "00000100" ]; then
+        rm -f "$tmp"
+        echo "错误：还原出的 app.ico 不是有效 ICO。" >&2
+        return 1
+    fi
+    mv -f "$tmp" "$icon"
+    echo "已还原应用图标：$icon"
+}
+
+restore_app_icon
+
 # 选择构建工具：msbuild 优先，否则 xbuild
 if command -v msbuild >/dev/null 2>&1; then
     BUILDER="msbuild"
@@ -20,7 +66,7 @@ else
 fi
 
 echo "使用构建工具：$BUILDER"
-echo "构建 $PROJECT（Release）..."
+echo "构建 ${PROJECT}（Release）..."
 if [ "$BUILDER" = "msbuild" ]; then
     msbuild /p:Configuration=Release /p:Platform=AnyCPU "$PROJECT"
 else
@@ -48,7 +94,7 @@ for candidate in tests/*.csproj; do
 done
 
 if [ -n "$TEST_PROJECT" ]; then
-    echo "发现测试工程 $TEST_PROJECT，构建中..."
+    echo "发现测试工程 ${TEST_PROJECT}，构建中..."
     if [ "$BUILDER" = "msbuild" ]; then
         msbuild /p:Configuration=Release /p:Platform=AnyCPU "$TEST_PROJECT"
     else
