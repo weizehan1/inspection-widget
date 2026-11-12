@@ -15,6 +15,9 @@ on:
       - main
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -51,7 +54,7 @@ jobs:
 
       # tests 工程未包含在 .sln 中，需单独构建；
       # 它是控制台 exe、自带极简测试框架，Main 以失败数决定退出码（0=全过，1=有失败），
-      # 用例均为纯逻辑（含 System.Drawing 位图逻辑，不弹真实窗体），可在 runner 上直接运行。
+      # 默认入口只跑纯逻辑；Windows 窗体用例由下一步 --windows-ui 在 STA 线程执行。
       - name: 构建测试工程（Release）
         shell: pwsh
         run: '& $env:MSBUILD_PATH tests\InspectionWidget.Tests.csproj /p:Configuration=Release /p:Platform=AnyCPU'
@@ -61,6 +64,14 @@ jobs:
         run: |
           & tests\bin\Release\InspectionWidget.Tests.exe
           if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码 $LASTEXITCODE" }
+
+      - name: 运行 Windows 窗体测试
+        shell: pwsh
+        run: |
+          & tests\bin\Release\InspectionWidget.Tests.exe --windows-ui
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows UI tests failed, exit code $LASTEXITCODE"
+          }
 
       - name: 上传产物（单个 exe）
         uses: actions/upload-artifact@v5

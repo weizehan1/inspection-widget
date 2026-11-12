@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.3` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.0.3（本地设置/配置改造）` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -37,10 +37,13 @@
 
 **设置与数据**
 
-- 设置窗口四组：设备管理 / 凭据管理 / 存储与通用 / 关于，统一保存制（「保存」落盘并关窗、「应用」落盘不关窗继续改），校验不过不落盘；
-- 设置窗口在屏幕中央打开；界面缩放可在 100%–200% 间选（高分辨率屏不再小得看不清）；
+- 设置窗口五组：设备管理 / 凭据管理 / 截图与存储 / 配置与备份 / 关于。「应用」落盘但保持窗口，「保存并关闭」落盘后关窗，「取消」只放弃最近一次应用之后的草稿；校验不过不落盘；
+- 设备页是单列可编辑表格，行序就是主面板按钮顺序；支持新增空白草稿行、删除、上移、下移和 Enter/Esc 单元格编辑。空名单合法，空白设备行在保存前必须补齐或移除；
+- 设置窗口按当前工作区居中并限制尺寸，内容可滚动；可在 100%–200% 间选界面缩放，主面板应用后立即重排，设置窗口自身下次打开生效；
+- 配置与备份页支持普通导出（不含凭据）和本机完整备份（保留 DPAPI 密文）。导入先读取、校验并预览，默认仅合并设备，也可明确选择替换参与字段和凭据；预览只改草稿，应用或保存后才写正式配置；
+- 配置写入使用同目录临时文件、刷盘和原子替换；导入提交先写 `config.preimport.<时间戳>.<唯一后缀>.json` 原字节备份，备份失败就停止提交。读取失败时进入写保护，原文件保留，主面板和设置入口都可重试读取；
 - 面板高度随设备、凭据实际数量伸缩，底边锚定在右下角不跳位；
-- 配置文件损坏自动备份原件再恢复默认，不会把好配置冲掉；
+- 配置文件损坏时先按同一份读取字节备份原件，再返回默认配置；备份失败则进入保护态，不静默覆盖；
 - 单实例运行，重复双击不会开两个；手动打开，不开机自启；
 - 面板不进任务栏、常驻系统托盘：标题栏「—」只是隐藏到托盘（点托盘图标恢复），标题栏「✕」或托盘右键「退出」才真正退出程序（2026-11-03 实机反馈改定，原口径为进任务栏不进托盘）。
 
@@ -60,7 +63,7 @@
 2. 点要截的那个程序窗口；
 3. 截图自动保存，面板底部会显示「✓ 已保存 设备名.png」。点错目标时按 Esc、点右键或再点一次该设备名取消；点到已最小化的窗口会提示先还原。
 
-**复制凭据**：点面板上的凭据按钮即复制，去目标处粘贴即可；30 秒后剪贴板自动清空（此开关在「存储与通用」里，可关）。
+**复制凭据**：点面板上的凭据按钮即复制，去目标处粘贴即可；30 秒后剪贴板自动清空（此开关在「截图与存储」里，可关）。
 
 **打开今日文件夹**：点面板底部常驻的根目录行，打开当天的日期文件夹。
 
@@ -70,9 +73,10 @@
 
 | 分组 | 管什么 |
 | --- | --- |
-| 设备管理 | 设备增删、改名、拖动或上下箭头排序；删除只删名单，不删已截的历史图片 |
-| 凭据管理 | 凭据增删、改名、改内容、清除单条、上下排序；内容掩码不回显，留空保存表示不改，解不开的条目标「需重新设置」 |
-| 存储与通用 | 截图保存根目录（随时可改）、日期文件夹名（默认 `巡检-yyyy-MM-dd`，占位可混排固定文字，含非法字符会被拦下）、当前实际生效的配置文件路径、剪贴板 30 秒自动清空开关、截图模式（自动 / 仅屏幕拷贝等）、界面缩放 |
+| 设备管理 | 单列可编辑表格内新增、改名、删除、上移、下移；行序即面板顺序。删除只删名单，不删已截的历史图片 |
+| 凭据管理 | 凭据增删、改名、改内容、清除单条、上下排序；内容掩码不回显，留空保存表示不改，清除可在当前草稿撤销，解不开的条目标「需重新设置」 |
+| 截图与存储 | 截图保存根目录（随时可改）、日期文件夹名（默认 `巡检-yyyy-MM-dd`，占位可混排固定文字，含非法字符会被拦下）、当前日期文件夹完整路径预览、当前配置文件路径、剪贴板 30 秒自动清空开关、截图模式（自动 / 仅屏幕拷贝等）、界面缩放 |
+| 配置与备份 | 普通导出、本机完整备份、导入预览与草稿合并；导入不绕过校验，确认前不写盘 |
 | 关于 | 产品名与版本、仓库链接、技术构成、配置文件与截图根目录位置 |
 
 配置文件位置：默认存 `%LocalAppData%\InspectionWidget\config.json`；若 exe 同目录已有 `config.json`，优先用 exe 旁边的这一份（便携用法）。
@@ -85,21 +89,21 @@
 
 ### 构建
 
-**自动构建（GitHub Actions）**：推送源码后由 `.github/workflows/build.yml` 在 Windows 环境用 MSBuild 构建 Release 并跑测试；产物为内嵌应用清单的单文件 `InspectionWidget.exe`，从 Actions 产物或 Release 中下载。打 `v*` 版本标签时自动生成 GitHub Release 并附 exe——见 [build.yml](.github/workflows/build.yml)。
+**自动构建（GitHub Actions）**：推送源码后由 `.github/workflows/build.yml` 在 Windows 环境用 MSBuild 构建 Release 并跑测试；产物为内嵌应用清单的 `InspectionWidget.exe`，从 Actions 产物或 Release 中下载。打 `v*` 版本标签时自动生成 GitHub Release 并附 exe——见 [build.yml](.github/workflows/build.yml)。本轮改造未推送、未打标签、未创建 Release。
 
 **本地构建（Windows，正式版）**：Visual Studio 2022 勾选「.NET 桌面开发」工作负载与 .NET Framework 4.8 目标包，打开 `InspectionWidget.sln`，Release 配置生成。零第三方包，无需还原 NuGet。
 
-**本地构建（Linux，开发自检）**：安装 Mono（mono-devel、libgdiplus）后在仓库根目录执行：
+**本地构建（macOS/Linux，开发自检）**：安装可用的 Mono（含 msbuild 或 xbuild、libgdiplus）后在仓库根目录执行：
 
 ```bash
 bash build.sh
 ```
 
-脚本以 Release 配置构建主工程与测试工程并运行全部测试，产物放入 `build/`。注意 Mono 构建的 exe 应用图标已内嵌（与 MSBuild 一致），但清单仍为外置 `.manifest` 形式，正式交付以 Actions 或 VS2022 构建为准。
+脚本会先从 `assets/app.ico.base64.txt` 按需还原图标，再以 Release 配置构建主工程与测试工程并运行默认纯逻辑测试，产物放入 `build/`。注意 Mono 构建的清单仍为外置 `.manifest` 形式，正式 Windows 交付以 Actions 或 VS2022 的 MSBuild 构建为准；Mono 构建和默认测试不能替代 Windows 窗体、DPI、DPAPI、剪贴板或管理员窗口验收。
 
 ### 验证状态
 
-平台无关逻辑有自动化测试全程覆盖（v1.0.0 时 191 条全过）；15 项验收中「重名顺延与暂存兜底」「配置损坏自愈」「保存故障兜底」已验证，其余涉及管理员窗口抓图、DPAPI、真实剪贴板、150% 缩放、连截稳定性等 Windows 专属行为的项目，须在 Windows 实机逐项确认。
+当前本地候选的可执行验证记录在 `work/settings-config-ux/verification.md`。默认纯逻辑测试由现有 TestRunner 覆盖设备草稿、导入导出、原子写、锁、恢复备份和写保护；显式加 `--windows-ui` 时，非 Windows 环境会报告窗体用例未执行并返回退出码 2，不能计为通过。Windows 专属的设备编辑保存链、真实设置窗体、DPAPI、剪贴板、托盘、截图引擎、100/150/200% 缩放及 1366×768/1920×1080 工作区仍需在 Windows 实机复验。
 
 ### 目录结构
 
@@ -107,12 +111,12 @@ bash build.sh
 | --- | --- |
 | `src/` | 主程序源码：`MainForm.cs`（主面板）、`SettingsForm.cs`（设置窗口）、`Program.cs`（入口与单实例） |
 | `src/Capture/` | 选窗钩子、窗口识别、截图引擎、面板布局与状态机 |
-| `src/Config/` | 配置模型、读写与损坏自愈、设备名校验、界面缩放 |
+| `src/Config/` | 配置模型、草稿、交换格式、原子写、恢复备份、写保护、设备名校验、界面缩放 |
 | `src/Credentials/` | DPAPI 加解密、凭据服务、剪贴板守卫（30 秒自动清空） |
 | `src/Storage/` | 截图保存、命名顺延与暂存回退 |
 | `src/Native/` | Win32 API 声明 |
 | `tests/` | 自动化测试工程（与主工程同跑 `build.sh`） |
-| `assets/` | 应用图标源文件（`app.ico` 多尺寸图标与 `app-icon.png` 预览图） |
+| `assets/` | 应用图标源文件（`app.ico.base64.txt` 入库，构建时还原 `app.ico`；`app-icon.png` 为预览图） |
 | `build/` | 构建产物（exe 与试用说明） |
 | `.github/workflows/` | GitHub Actions 自动构建与发版 |
 
@@ -120,6 +124,7 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.0.3（本地设置/配置改造） | 2026-11-12 | 设置页改为五组与单列设备表格；设备/凭据编辑统一进入草稿，底栏为应用/保存并关闭/取消，成功保存即时刷新主面板；新增配置与备份页、普通导出、本机完整备份、导入预览与合并/替换、原子配置写入、导入恢复备份、损坏备份与读取失败写保护；补充默认纯逻辑回归。当前为独立分支本地构建，Windows 正式验收未完成，未推送/打标签/发 Release。 |
 | v1.0.3 | 2026-11-03 | 主界面短名改为「巡检助手」（主面板标题、托盘提示、最小化气泡；产品全名与 exe 名不变）；凭据支持 ↑/↓ 上下排序（顺序持久化、即主面板渲染顺序）；主面板「截图」区新增与凭据区一致的折叠（配置新增 `IsDeviceCollapsed` 持久化，两区互不影响；口径更正：本条最初误解为「最小化窗口自动还原截图」，2026-11-03 用户看图澄清为分区折叠）；日期文件夹名默认改为 `巡检-yyyy-MM-dd`（仅默认值与缺字段自愈，已保存配置不迁移）；设置窗口新增「应用」按钮（与保存共用校验＋落盘、成功不关窗）；发版步骤改为幂等（同名 Release 已存在时自动 `--clobber` 补挂 exe）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 322,048 字节，SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | 新增应用图标（exe/窗口/托盘同源）；标题栏加关闭按钮（✕）；exe 交付名定为 `InspectionWidget.exe`；设置按钮改用 Segoe UI Symbol 标准齿轮字形（缺字体时代码绘制位图兜底）；日期文件夹名可自定义（`FolderNamePattern`，默认 yyyy-MM-dd，保存校验拦截非法模式）；最小化改走系统托盘（面板不再进任务栏，托盘恢复/退出，首次隐藏气泡提示一次；覆盖白皮书原「进任务栏不进托盘」口径，2026-11-03 实机反馈改定）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 318,464 字节，SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
@@ -136,7 +141,7 @@ bash build.sh
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.0.3` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.0.3 (local settings/config update)` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 
@@ -165,10 +170,13 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 
 **Settings & data**
 
-- The Settings window has four groups — Devices / Credentials / Storage & General / About — all using a save-to-apply model (Save writes and closes; Apply writes and stays open so you can keep editing): if validation fails, nothing is written.
-- The Settings window opens centered on screen; UI scaling from 100%–200% keeps things readable on high-resolution displays.
+- The Settings window has five groups: Devices / Credentials / Capture & Storage / Configuration & Backup / About. Apply writes and keeps the window open; Save & Close writes and closes; Cancel discards only changes made since the last successful Apply. Validation failures write nothing.
+- The Devices page is a single-column editable grid whose row order is the main-panel button order. It supports adding a blank draft row, deleting, moving up/down, and Enter/Esc cell editing. An empty list is valid, while a blank device row must be completed or removed before saving.
+- The Settings window is sized to the current work area, remains scrollable, and offers 100%–200% UI scaling. The main panel reflows immediately after Apply; the Settings window itself uses the new scale the next time it opens.
+- Configuration & Backup supports an ordinary export without credentials and a full local backup that preserves DPAPI ciphertext. Imports are read, validated and previewed before any change: the default is to merge only the device list, while participating settings and credentials can be replaced explicitly. Preview changes only the draft; the authoritative configuration is written only by Apply or Save & Close.
+- Configuration writes use a same-directory temporary file, flush and atomic replacement. An import commit first writes a byte-for-byte `config.preimport.<timestamp>.<unique>.json` recovery copy; if that backup fails, the commit stops. A read failure enters write protection so the original file is preserved, with a retry entry point on both the panel and Settings.
 - The panel's height adjusts to the actual number of devices and credentials, with its bottom edge anchored at the bottom-right corner so it never jumps around.
-- A corrupted configuration file is backed up first, then reset to defaults — an intact configuration is never silently clobbered.
+- A corrupted configuration file is backed up from the same bytes used for the failed read, then defaults are returned. If the backup itself fails, the app enters protection rather than silently overwriting the file.
 - Single instance: double-clicking again won't open a second copy. The app is launched manually and never starts with Windows.
 - The panel stays out of the taskbar and lives in the system tray: the title-bar "—" only hides it to the tray (click the tray icon to bring it back), while the title-bar "✕" or "Exit" in the tray context menu actually quits the app (changed on 2026-11-03 based on hands-on feedback, superseding the original "taskbar button, no tray" decision).
 
@@ -188,7 +196,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 2. Click the program window you want to capture;
 3. The shot is saved automatically and the panel footer shows "✓ Saved device name.png". If you clicked the wrong target, press Esc, right-click, or click the same device name again to cancel; clicking a minimized window prompts you to restore it first.
 
-**Copying a credential**: click the credential button on the panel, then paste where you need it; the clipboard is cleared automatically after 30 seconds (this can be turned off under "Storage & General").
+**Copying a credential**: click the credential button on the panel, then paste where you need it; the clipboard is cleared automatically after 30 seconds (this can be turned off under "Capture & Storage").
 
 **Opening today's folder**: click the root-folder line pinned at the bottom of the panel to open that day's date folder.
 
@@ -198,9 +206,10 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 
 | Group | What it manages |
 | --- | --- |
-| Devices | Add, remove and rename devices; reorder by dragging or with the up/down arrows. Deleting removes only the list entry, never the shots already taken |
-| Credentials | Add, remove, rename and reorder credentials; change an entry's content or clear a single entry. Contents are masked and never echoed; saving with the field left blank means "unchanged"; entries that can't be decrypted are marked "Needs re-entry" |
-| Storage & General | Screenshot root folder (changeable at any time); date folder name (default `巡检-yyyy-MM-dd`, date placeholders can be mixed with fixed text, and patterns containing illegal characters are rejected); the config file path actually in effect; the 30-second clipboard auto-clear toggle; capture mode (automatic / screen-copy only, etc.); UI scaling |
+| Devices | Add, rename, remove and move devices up/down in a single-column editable grid; row order is panel order. Deleting removes only the list entry, never the shots already taken |
+| Credentials | Add, remove, rename, change content, clear a single entry and reorder credentials. Contents are masked and never echoed; leaving an existing field blank means "unchanged"; a clear can be undone within the current draft, and undecryptable entries are marked "Needs re-entry" |
+| Capture & Storage | Screenshot root folder (changeable at any time); date folder name (default `巡检-yyyy-MM-dd`, date placeholders can be mixed with fixed text, and patterns containing illegal characters are rejected); full path preview for today's date folder; the config file path actually in effect; the 30-second clipboard auto-clear toggle; capture mode; UI scaling |
+| Configuration & Backup | Ordinary export, full local backup, import preview, and merge/replace into the draft. Imports never bypass validation and nothing is written to the authoritative file before confirmation |
 | About | Product name and version, repository link, tech stack, and where the config file and screenshot root folder are located |
 
 Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; if a `config.json` already sits next to the exe, that one takes precedence (portable usage).
@@ -213,21 +222,21 @@ Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; 
 
 ### Build
 
-**Automatic builds (GitHub Actions)**: pushing source triggers `.github/workflows/build.yml`, which builds the Release configuration with MSBuild on a Windows runner and runs the test suite. The result is a single-file `InspectionWidget.exe` with the application manifest embedded, downloadable from the Actions artifacts or from Releases. Pushing a `v*` tag automatically creates a GitHub Release with the exe attached — see [build.yml](.github/workflows/build.yml).
+**Automatic builds (GitHub Actions)**: pushing source triggers `.github/workflows/build.yml`, which builds the Release configuration with MSBuild on a Windows runner and runs the test suite. The result is an `InspectionWidget.exe` with the application manifest embedded, downloadable from the Actions artifacts or from Releases. Pushing a `v*` tag automatically creates a GitHub Release with the exe attached — see [build.yml](.github/workflows/build.yml). This round was not pushed, tagged or released.
 
 **Local build (Windows, official)**: Visual Studio 2022 with the ".NET desktop development" workload and the .NET Framework 4.8 targeting pack; open `InspectionWidget.sln` and build the Release configuration. Zero third-party packages, no NuGet restore needed.
 
-**Local build (Linux, developer self-check)**: install Mono (mono-devel, libgdiplus), then run from the repository root:
+**Local build (macOS/Linux, developer self-check)**: install a working Mono toolchain (msbuild or xbuild, plus libgdiplus), then run from the repository root:
 
 ```bash
 bash build.sh
 ```
 
-The script builds the main project and the test project in the Release configuration, runs all tests, and places the outputs in `build/`. Note: Mono builds do embed the application icon (same as MSBuild), but the manifest remains an external `.manifest` file; use an Actions or VS2022 build for official delivery.
+The script restores `assets/app.ico` from `assets/app.ico.base64.txt` when needed, builds the main and test projects in the Release configuration, runs the default pure-logic tests, and places the outputs in `build/`. Mono builds leave the manifest as an external `.manifest` file; use an MSBuild build from Actions or VS2022 for official Windows delivery. Mono builds and default tests do not replace Windows validation of forms, DPI, DPAPI, the clipboard, or elevated-window capture.
 
 ### Verification status
 
-Platform-independent logic is covered by automated tests throughout (191 passing at v1.0.0). Of the 15 acceptance items, "duplicate naming with fallback parking", "corrupted-config self-healing" and "save-failure fallback" are verified; the remaining items involve Windows-only behavior — capturing elevated windows, DPAPI, the real clipboard, 150% scaling, stability over repeated captures — and must be confirmed one by one on a real Windows machine.
+Executable verification records for the current local candidate are in `work/settings-config-ux/verification.md`. The default TestRunner covers the settings draft, import/export, atomic writes, locking, recovery backups and write protection. With `--windows-ui`, a non-Windows host reports the form cases as not run and exits with code 2; this is not a pass. Windows-only validation still required includes the device edit/save chain, the real Settings form, DPAPI, the clipboard, the tray, the capture engine, 100%/150%/200% scaling, and the 1366×768 and 1920×1080 work areas.
 
 ### Project layout
 
@@ -235,12 +244,12 @@ Platform-independent logic is covered by automated tests throughout (191 passing
 | --- | --- |
 | `src/` | Main program source: `MainForm.cs` (main panel), `SettingsForm.cs` (settings window), `Program.cs` (entry point and single-instance guard) |
 | `src/Capture/` | Window-picking hook, window identification, capture engine, panel layout and state machine |
-| `src/Config/` | Config model, load/save with corruption self-healing, device-name validation, UI scaling |
+| `src/Config/` | Config model, settings draft, interchange format, atomic writes, recovery backups, write protection, device-name validation and UI scaling |
 | `src/Credentials/` | DPAPI encryption/decryption, credential service, clipboard guard (30-second auto-clear) |
 | `src/Storage/` | Screenshot saving, duplicate numbering and fallback parking |
 | `src/Native/` | Win32 API declarations |
 | `tests/` | Automated test project (built and run together with the main project via `build.sh`) |
-| `assets/` | App icon sources (`app.ico`, a multi-size icon, and the `app-icon.png` preview) |
+| `assets/` | App icon sources (`app.ico.base64.txt` is versioned and `app.ico` is restored during build; `app-icon.png` is a preview) |
 | `build/` | Build outputs (the exe and the trial guide) |
 | `.github/workflows/` | GitHub Actions automated build & release |
 
@@ -248,6 +257,8 @@ Platform-independent logic is covered by automated tests throughout (191 passing
 
 | Version | Date | Notes |
 | --- | --- | --- |
+| v1.0.3 (local settings/config update) | 2026-11-12 | Settings now has five pages and a single-column device grid; device and credential edits share one draft; the footer is Apply / Save & Close / Cancel, and a successful save refreshes the main panel immediately; added Configuration & Backup, ordinary export, full local backup, import preview with merge/replace, atomic configuration writes, import recovery backups, corruption-backup and read-failure write protection; added default pure-logic regressions. This is a local build on an independent branch; Windows acceptance is incomplete and nothing was pushed, tagged or released. |
+| v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | New app icon (one source for the exe, window and tray icons); close button (✕) added to the title bar; the exe ships as `InspectionWidget.exe`; the settings button now uses the standard gear glyph from Segoe UI Symbol (with a code-drawn bitmap fallback when the font is unavailable); date folder names are customizable (`FolderNamePattern`, default `yyyy-MM-dd`, invalid patterns rejected at save time); minimize now goes to the system tray (the panel no longer appears in the taskbar; restore/exit from the tray, with a balloon tip the first time it hides — superseding the white paper's original "taskbar, not tray" decision, changed on 2026-11-03 based on hands-on feedback); the Linux/Mono local build `build/InspectionWidget.exe` is 318,464 bytes, SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |
 | v1.0.1 | 2026-11-03 | Settings window now opens centered; UI scaling added (100%–200%); the config file now defaults to `%LocalAppData%\InspectionWidget` (a `config.json` next to the exe still takes precedence); GitHub Actions automated builds |
 | v1.0.0 | 2026-11-02 | First release: capture, credentials, the four Settings groups and all core behaviors in place; the Linux/Mono local build `build/InspectionWidget.exe` is 83,456 bytes, SHA256 `597ab0ee1f1e6eabac0a4ad65b2f0e592ca59c50f21d9dcd82f84239d8d24e79` |

@@ -149,6 +149,82 @@ namespace InspectionWidget.Tests
                 Assert.Equal(100, pt.X);
                 Assert.Equal(50, pt.Y);
             });
+            TestRunner.Run("可见位置：至少半屏相交才恢复", () =>
+            {
+                var areas = new[]
+                {
+                    new System.Drawing.Rectangle(0, 0, 1920, 1040)
+                };
+                System.Drawing.Point location;
+                Assert.True(PanelLayout.TryChooseVisibleWindowLocation(
+                    areas, new System.Drawing.Rectangle(500, 200, 230, 400),
+                    out location));
+                Assert.Equal(500, location.X);
+                Assert.Equal(200, location.Y);
+                Assert.False(PanelLayout.TryChooseVisibleWindowLocation(
+                    areas, new System.Drawing.Rectangle(1910, 1000, 230, 400),
+                    out location));
+            });
+            TestRunner.Run("可见位置：副屏偏移与空输入", () =>
+            {
+                var areas = new[]
+                {
+                    new System.Drawing.Rectangle(0, 0, 1920, 1040),
+                    new System.Drawing.Rectangle(1920, 0, 1920, 1040)
+                };
+                System.Drawing.Point location;
+                Assert.True(PanelLayout.TryChooseVisibleWindowLocation(
+                    areas, new System.Drawing.Rectangle(2000, 100, 400, 300),
+                    out location));
+                Assert.Equal(2000, location.X);
+                Assert.False(PanelLayout.TryChooseVisibleWindowLocation(
+                    null, new System.Drawing.Rectangle(0, 0, 100, 100),
+                    out location));
+                Assert.False(PanelLayout.TryChooseVisibleWindowLocation(
+                    areas, new System.Drawing.Rectangle(0, 0, 0, 100),
+                    out location));
+            });
+            TestRunner.Run("可见位置：半屏相交也会把窗口坐标钳回工作区", () =>
+            {
+                var areas = new[]
+                {
+                    new System.Drawing.Rectangle(0, 0, 1920, 1040)
+                };
+                System.Drawing.Point location;
+                Assert.True(PanelLayout.TryChooseVisibleWindowLocation(
+                    areas, new System.Drawing.Rectangle(1700, 800, 300, 300),
+                    out location));
+                Assert.Equal(1620, location.X);
+                Assert.Equal(740, location.Y);
+            });
+
+            TestRunner.Run("工作区钳制：150% 面板在 1366x768 与 1920x1080 内完整可达", () =>
+            {
+                int width = PanelLayout.ScaledPanelWidth(1.5);
+                int desired = PanelLayout.ComputeHeight(10, false, 10, false, 1.5);
+                var small = new System.Drawing.Rectangle(0, 0, 1366, 768);
+                System.Drawing.Size size = PanelLayout.ClampPanelSize(
+                    small, width, desired, 12);
+                Assert.Equal(width, size.Width);
+                Assert.Equal(756, size.Height);
+
+                System.Drawing.Point at = PanelLayout.ClampLocationToWorkingArea(
+                    small, size, new System.Drawing.Point(1200, 700));
+                Assert.Equal(1021, at.X);
+                Assert.Equal(12, at.Y);
+                Assert.True(at.X >= small.Left && at.X + size.Width <= small.Right);
+                Assert.True(at.Y >= small.Top && at.Y + size.Height <= small.Bottom);
+
+                var large = new System.Drawing.Rectangle(1920, 0, 1920, 1080);
+                System.Drawing.Size largeSize = PanelLayout.ClampPanelSize(
+                    large, width, desired, 12);
+                Assert.Equal(width, largeSize.Width);
+                Assert.Equal(1068, largeSize.Height);
+                System.Drawing.Point largeAt = PanelLayout.ClampLocationToWorkingArea(
+                    large, largeSize, new System.Drawing.Point(4000, 1200));
+                Assert.Equal(1920 + 1920 - width, largeAt.X);
+                Assert.Equal(12, largeAt.Y);
+            });
         }
     }
 }
