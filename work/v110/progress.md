@@ -63,4 +63,12 @@ Codex 使用独立 agent-browser 会话 `v110-preview-b66b41a8b0e7` 在 1440x980
 追加需求：设置已点过设备隐藏或保留对勾，默认隐藏（仅计划模式），可临时查看已点过补截；不改变完整清单/进度/完成通知口径。
 接手前 Codex 登记 P1 三类测试，整仓构建退出1，`QuickLinkTests.cs(150,35)` CS0012，测试工程缺 System.Xml 引用；日志 `/tmp/opencode/inspection-v110/pre-hydrogen-build.log`。此为待接手修复缺口，不把旧375/375当新代码通过。
 完整接手前源码/未提交diff/哈希备份 `/tmp/opencode/inspection-v110/pre-hydrogen-20261114-164501/`；不清除未提交工作。执行说明 `work/v110/hydrogen-handoff.md`。
-Hydrogen 执行实例已启动：`acc0783b-7da0-46fb-8153-63da84b19d83`，provider/model=`antigravity/gemini-4-hydrogen-high`，workspace=`wks_fa6054276984b28d`。独占源码实现与共享构建，后续由完成通知驱动复核，不轮询。
+Hydrogen 执行实例：`acc0783b-7da0-46fb-8153-63da84b19d83`，provider/model=`antigravity/gemini-4-hydrogen-high`，workspace=`wks_fa6054276984b28d`。已交付剩余实现和报告。
+
+## 候选版独立验证与审计
+
+Codex 已独立运行 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib bash build.sh`，退出0，433/433通过；日志 `/tmp/opencode/inspection-v110/codex-candidate-build.log`。
+产物哈希与执行者记录一致：exe `22f487d7a99e834b0890ce3156793fd904e32d2141d6391d2c79cb8e370317ed`；Mono外置manifest仍须配套，尚未称Windows单文件发布。
+实现已固定为候选提交 `96165980503e3c764eb4a45811afdbbad54b0553`。Windows UI 11条与实机交互未验收；下一步独立Hydrogen审计，不以实现者自查替代。
+独立审计实例已启动：`6350a12e-db4f-4ff1-9e95-692e8d5c4199`，新上下文，同一指定 Hydrogen 模型，只读产品源码；范围与输出见 `work/v110/hydrogen-audit-brief.md`。重点真实 UI 接线、异常恢复、计划关闭时的实际目录与通知时机。
+Codex 结构化验证报告 `/tmp/opencode/inspection-v110/codex-candidate-tests.json`、`candidate-artifacts.json`。Paseo list_hosts 仅有当前 Mac，无注册 Windows 主机，现场 Windows 实测入口暂不可用；不将其当作通过。
