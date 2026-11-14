@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.0` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.1` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -24,7 +24,7 @@
 
 - 点设备按钮进入选窗状态，再点任意程序窗口，只截该窗口本身；
 - 首选 PrintWindow 抓图，窗口被遮挡也能截完整；抓不到时自动回退屏幕拷贝（截图瞬间面板自动隐藏，不会把自己截进去）；
-- Esc、右键、再点一次已选设备，三种方式都能取消；30 秒无操作自动退出选窗；
+- Esc、右键可随时取消，未开启「点完即隐藏已点过的设备」时再点一次已选设备也能取消；30 秒无操作自动退出选窗；
 - 截图存为「根目录\日期文件夹\设备名.png」，同设备同日重名自动顺延 `-1`、`-2`，永不覆盖；日期文件夹名可自定义（默认 `巡检-yyyy-MM-dd`，可在设置里改成如「yyyy年MM月dd日」）；
 - 根目录不可写时自动暂存到备用目录并明确提示，不丢图；保存失败保留图片可点提示重试。
 
@@ -37,7 +37,7 @@
 **凭据**
 
 - 凭据改为 2 列紧凑按钮（上限 10 条），支持增删、改名、上下排序（顺序即面板按钮顺序）；
-- 点凭据按钮即复制到剪贴板，当前已复制条目展示高亮与 30 秒清空提示；清空前核对剪贴板序列号与本次复制令牌——30 秒内你复制了别的内容，不会误删；程序退出时若倒计时未到，先清再退；
+- 点凭据按钮即复制到剪贴板，当前已复制条目展示高亮且分组栏实时显示 30 秒倒计时提示；清空前核对剪贴板序列号与本次复制令牌——30 秒内你复制了别的内容，不会误删；程序退出时若倒计时未到，先清再退；
 - 内容在设置里掩码输入、不回显，面板上只显示名字；
 - 截图设备区与凭据区都可折叠（点分区标题收起/展开），折叠状态会记住。
 
@@ -67,7 +67,7 @@
 
 1. 点面板上的设备名（按钮变蓝，进入等待点击状态）；
 2. 点要截的那个程序窗口；
-3. 截图自动保存，面板底部会显示「✓ 已保存 设备名.png」。点错目标时按 Esc、点右键或再点一次该设备名取消；点到已最小化的窗口会提示先还原。
+3. 截图自动保存，面板底部会显示「✓ 已保存 设备名.png」。点错目标时按 Esc 或点右键取消（未开启隐藏已点过设备时，再点一次该设备名也可取消）；点到已最小化的窗口会提示先还原。
 
 **复制凭据**：点面板上的凭据按钮即复制，去目标处粘贴即可；30 秒后剪贴板自动清空（此开关在「截图与存储」里，可关）。
 
@@ -83,7 +83,7 @@
 | 凭据 | 凭据增删、改名、改内容、清除单条、上下排序；内容掩码不回显，留空保存表示不改，清除可在当前草稿撤销，解不开的条目标「需重新设置」 |
 | 快捷链接 | 增删改、排序、启用/停用最多 12 条 `http://` / `https://` 网址，校验不合法时定位到具体行与字段 |
 | 存储与显示 | 截图根目录、日期文件夹名与实时预览、配置路径、剪贴板自动清空开关、截图模式、界面缩放、今日巡检计划开关与「隐藏已点过设备 / 全部显示」策略 |
-| 配置备份 | 普通导出、本机完整备份、导入预览与草稿合并/替换；以及产品版本（v1.1.0）、路径信息等关于卡片 |
+| 配置备份 | 普通导出、本机完整备份、导入预览与草稿合并/替换；以及产品版本（v1.1.1）、路径信息等关于卡片 |
 
 配置文件位置：默认存 `%LocalAppData%\InspectionWidget\config.json`；若 exe 同目录已有 `config.json`，优先用 exe 旁边的这一份（便携用法）。
 
@@ -95,7 +95,7 @@
 
 ### 构建
 
-**自动构建（GitHub Actions）**：推送源码到 `main` 后由 `.github/workflows/build.yml` 在 `windows-latest` 上用 MSBuild 构建 Release、运行 **439 条纯逻辑与集成测试 + 19 条 Windows 窗体用例（共 458 条）**，校验 `requireAdministrator` / `PerMonitorV2` 清单内嵌与 SHA-256，并留存全部构建与测试日志；推送 `v*` 标签且上述门禁通过后，校验标签版本一致性并幂等发布 GitHub Release（附单文件 exe 与 `.sha256`）——见 [build.yml](.github/workflows/build.yml)。
+**自动构建（GitHub Actions）**：推送源码到 `main` 后由 `.github/workflows/build.yml` 在 `windows-latest` 上用 MSBuild 构建 Release、运行 **443 条纯逻辑与集成测试 + 21 条 Windows 窗体用例（共 464 条）**，校验 `requireAdministrator` / `PerMonitorV2` 清单内嵌与 SHA-256，并留存全部构建与测试日志；推送 `v*` 标签且上述门禁通过后，校验标签版本一致性并幂等发布 GitHub Release（附单文件 exe 与 `.sha256`）——见 [build.yml](.github/workflows/build.yml)。
 
 **本地构建（Windows，正式版）**：Visual Studio 2022 勾选「.NET 桌面开发」工作负载与 .NET Framework 4.8 目标包，打开 `InspectionWidget.sln`，Release 配置生成。零第三方包，无需还原 NuGet。
 
@@ -109,7 +109,7 @@ bash build.sh
 
 ### 验证状态
 
-截至本次发版准备提交前，已在 macOS Mono 环境通过 **439 条纯逻辑与方案 B 集成测试**（覆盖设备草稿、快捷链接、今日巡检计划与隐藏过滤、损坏进度只读保护与备份恢复、导入导出、原子写与锁）。显式加 `--windows-ui` 时，非 Windows 环境会报告 **19 条** Windows 窗体用例未执行并返回退出码 2（不计为通过）。MSBuild 单文件打包、**19 条** WinForms 控件用例（共 458 条）、多显示器 DPI/工作区缩放、DPAPI、真实剪贴板、托盘、默认浏览器打开与管理员窗口截图需在推送后的 GitHub Actions Windows CI 与 Windows 实机环境验收。
+截至本次提交前，已在 macOS Mono 环境通过 **443 条纯逻辑与方案 B 集成测试**（覆盖设备草稿、快捷链接、今日巡检计划与隐藏过滤、损坏进度只读保护与备份恢复、导入导出、原子写与锁）。显式加 `--windows-ui` 时，非 Windows 环境会报告 **21 条** Windows 窗体用例未执行并返回退出码 2（不计为通过）。MSBuild 单文件打包、**21 条** WinForms 控件用例（共 464 条）、多显示器 DPI/工作区缩放、DPAPI、真实剪贴板、托盘、默认浏览器打开与管理员窗口截图需在推送后的 GitHub Actions Windows CI 与 Windows 实机环境验收。
 
 ### 目录结构
 
@@ -132,7 +132,8 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
-| v1.1.0 | 2026-11-14 | 方案 B 界面与流程改版正式版：352px 浮动面板新增顶栏日期、2 列快捷链接、今日巡检计划进度卡片（「已点过 X / Y」、开启/关闭切换、查看已点过、单行恢复未点、二次确认重置、全部点完后按可见态触发一次完成提示）、2 列凭据高亮与已复制标记、「打开巡检文件夹 ↗」主按钮与多目录选择；新增 `HideVisitedDevices`（默认开启点完即隐藏）、改名与部分导入保留进度、跨日延迟刷新、独立 `progress.json` 损坏写保护与备份恢复、新生成并验证的取景框应用图标，以及五页设置窗口。macOS Mono 已通过 439 条纯逻辑/集成测试；Windows 19 条 UI 用例与 MSBuild 单文件产物校验由 GitHub Actions Windows CI 与实机验证把关。 |
+| v1.1.1 | 2026-11-14 | 维护与稳健性更新：补齐凭据复制按钮高亮与 30 秒倒计时反馈（含清空/跳过后复位）、后台线程打开巡检目录、失联目录回退至配置目录、顶层 JSON 键精确校验、字体与 GDI 资源安全释放、内置弹窗 100%–200% DPI 缩放对齐、`HookManager` 卸载并发加固，并拆分弹窗与设置辅助模块；测试规模扩展至 443 条纯逻辑/集成 + 21 条 Windows UI（共 464 条），优化 macOS `build.sh` 与 CI 动态测试门禁。 |
+| v1.1.0 | 2026-11-14 | 方案 B 界面与流程改版正式版：352px 浮动面板新增顶栏日期、2 列快捷链接、今日巡检计划进度卡片（「已点过 X / Y」、开启/关闭切换、查看已点过、单行恢复未点、二次确认重置、全部点完后按可见态触发一次完成提示）、2 列凭据高亮与已复制标记、「打开巡检文件夹 ↗」主按钮与多目录选择；新增 `HideVisitedDevices`（默认开启点完即隐藏）、改名与部分导入保留进度、跨日延迟刷新、独立 `progress.json` 损坏写保护与备份恢复、新生成并验证的取景框应用图标，以及五页设置窗口。 |
 | v1.0.4 | 2026-11-12 | 设备管理改为单列可编辑表格，改名直接保存，Esc 放弃当前编辑。应用后即时刷新主面板。新增配置导入导出、设备合并与替换预览、可选本机 DPAPI 完整备份。配置采用原子保存、导入前备份及读取失败保护。整理五页设置、滚动和缩放布局，修复设备表格事件递归与取消编辑问题，增加 Windows 窗体 CI。 |
 | v1.0.3 | 2026-11-03 | 主界面短名改为「巡检助手」（主面板标题、托盘提示、最小化气泡；产品全名与 exe 名不变）；凭据支持 ↑/↓ 上下排序（顺序持久化、即主面板渲染顺序）；主面板「截图」区新增与凭据区一致的折叠（配置新增 `IsDeviceCollapsed` 持久化，两区互不影响；口径更正：本条最初误解为「最小化窗口自动还原截图」，2026-11-03 用户看图澄清为分区折叠）；日期文件夹名默认改为 `巡检-yyyy-MM-dd`（仅默认值与缺字段自愈，已保存配置不迁移）；设置窗口新增「应用」按钮（与保存共用校验＋落盘、成功不关窗）；发版步骤改为幂等（同名 Release 已存在时自动 `--clobber` 补挂 exe）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 322,048 字节，SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
@@ -150,7 +151,7 @@ bash build.sh
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.0` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.1` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 
@@ -166,7 +167,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 
 - Click a device button to enter window-picking mode, then click any program window — only that window itself is captured.
 - Captures with PrintWindow first, so a window comes out complete even when covered by others; if that fails, it falls back to a screen copy automatically (the panel hides itself for the instant of capture, so it never photographs itself).
-- Cancel three ways: Esc, right-click, or clicking the selected device again; picking mode also exits on its own after 30 seconds without a click.
+- Cancel with Esc or right-click (or click the selected device again when "Hide visited devices" is off); picking mode also exits on its own after 30 seconds without a click.
 - Shots are saved as `root folder\date folder\device name.png`; duplicates for the same device on the same day are numbered `-1`, `-2`, … and never overwritten. The date folder name is customizable (default `巡检-yyyy-MM-dd`; change it in Settings, e.g. to `yyyy年MM月dd日`).
 - If the root folder isn't writable, the shot is parked in a fallback folder with a clear notice, so no image is lost; if saving fails, the image is kept and the notice can be clicked to retry.
 
@@ -207,7 +208,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 
 1. Click a device name on the panel (the button turns blue — the app is now waiting for your click);
 2. Click the program window you want to capture;
-3. The shot is saved automatically and the panel footer shows "✓ Saved device name.png". If you clicked the wrong target, press Esc, right-click, or click the same device name again to cancel; clicking a minimized window prompts you to restore it first.
+3. The shot is saved automatically and the panel footer shows "✓ Saved device name.png". If you clicked the wrong target, press Esc or right-click to cancel (or click the same device name again when "Hide visited devices" is off); clicking a minimized window prompts you to restore it first.
 
 **Copying a credential**: click the credential button on the panel, then paste where you need it; the clipboard is cleared automatically after 30 seconds (this can be turned off under "Capture & Storage").
 
@@ -223,7 +224,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 | Credentials | Add, remove, rename, change content, clear a single entry and reorder credentials. Contents are masked and never echoed; leaving an existing field blank means "unchanged"; a clear can be undone within the current draft, and undecryptable entries are marked "Needs re-entry" |
 | Quick Links | Add, edit, toggle enable/disable, and reorder up to 12 `http://` / `https://` links with per-row/field validation |
 | Storage & Display | Screenshot root folder; date folder pattern with live preview; config path; 30-second clipboard auto-clear; capture mode; UI scaling; Today's inspection plan toggle; hide-visited vs. show-all device display policy |
-| Config & Backup | Ordinary export, full local backup, import preview, merge/replace into the draft, plus the About card (`v1.1.0`, repo & active paths) |
+| Config & Backup | Ordinary export, full local backup, import preview, merge/replace into the draft, plus the About card (`v1.1.1`, repo & active paths) |
 
 Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; if a `config.json` already sits next to the exe, that one takes precedence (portable usage).
 
@@ -235,7 +236,7 @@ Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; 
 
 ### Build
 
-**Automatic builds (GitHub Actions)**: pushing source to `main` triggers `.github/workflows/build.yml`, which builds Release with MSBuild on `windows-latest`, runs **439 logic/integration tests + 19 Windows Forms UI tests (458 total)**, verifies the embedded `requireAdministrator` / `PerMonitorV2` manifest and SHA-256, and retains full build/test logs even on failure. Pushing a `v*` tag after checks pass verifies tag/binary version consistency and publishes a GitHub Release with the single-file exe and `.sha256` — see [build.yml](.github/workflows/build.yml).
+**Automatic builds (GitHub Actions)**: pushing source to `main` triggers `.github/workflows/build.yml`, which builds Release with MSBuild on `windows-latest`, runs **443 logic/integration tests + 21 Windows Forms UI tests (464 total)**, verifies the embedded `requireAdministrator` / `PerMonitorV2` manifest and SHA-256, and retains full build/test logs even on failure. Pushing a `v*` tag after checks pass verifies tag/binary version consistency and publishes a GitHub Release with the single-file exe and `.sha256` — see [build.yml](.github/workflows/build.yml).
 
 **Local build (Windows, official)**: Visual Studio 2022 with the ".NET desktop development" workload and the .NET Framework 4.8 targeting pack; open `InspectionWidget.sln` and build the Release configuration. Zero third-party packages, no NuGet restore needed.
 
@@ -249,7 +250,7 @@ The script restores `assets/app.ico` from `assets/app.ico.base64.txt` when neede
 
 ### Verification status
 
-Before release tagging, **439 pure-logic and Scheme B integration tests** pass under macOS Mono (covering settings draft, quick links, today's inspection plan & hide-visited filtering, corrupt `progress.json` write protection & backup recovery, import/export, atomic writes and locking). On non-Windows systems, `--windows-ui` reports the **19** UI cases as unexecuted and exits with code 2 (not counted as passed). The MSBuild single-file build, **19** WinForms UI control tests (458 total), multi-monitor DPI/work-area scaling, cross-user DPAPI, real clipboard/tray behavior, browser launch and elevated-window capture require GitHub Actions `windows-latest` CI and Windows runtime verification.
+Before release tagging, **443 pure-logic and Scheme B integration tests** pass under macOS Mono (covering settings draft, quick links, today's inspection plan & hide-visited filtering, corrupt `progress.json` write protection & backup recovery, import/export, atomic writes and locking). On non-Windows systems, `--windows-ui` reports the **21** UI cases as unexecuted and exits with code 2 (not counted as passed). The MSBuild single-file build, **21** WinForms UI control tests (464 total), multi-monitor DPI/work-area scaling, cross-user DPAPI, real clipboard/tray behavior, browser launch and elevated-window capture require GitHub Actions `windows-latest` CI and Windows runtime verification.
 
 ### Project layout
 
@@ -272,7 +273,8 @@ Before release tagging, **439 pure-logic and Scheme B integration tests** pass u
 
 | Version | Date | Notes |
 | --- | --- | --- |
-| v1.1.0 | 2026-11-14 | Scheme B redesign release: 352px floating panel with Chinese date header, 2-column Quick Links, Today's Inspection Plan progress card (`Visited X / Y`, live toggle, Show Visited, per-row Unmark, confirmation-guarded Reset, visibility-guarded single completion prompt), 2-column Credentials with active copied check highlight, primary "Open inspection folder ↗" action with multi-folder chooser; added `HideVisitedDevices` (default true), rename and partial-import progress preservation, deferred midnight rollover, `progress.json` corruption write protection & backup recovery, redesigned viewfinder icon, and five Settings pages. Verified 439/439 logic/integration tests on macOS Mono; 19 Windows UI tests and MSBuild single-file packaging gated on GitHub Actions Windows CI and Windows runtime QA. |
+| v1.1.1 | 2026-11-14 | Maintenance & reliability release: added active copied credential highlight with 30s countdown and automatic reset on clear/skip, background-thread inspection folder opening, missing-folder fallback to configured root, exact top-level JSON key validation, font/GDI resource cleanup, 100%–200% DPI scaling on built-in modal dialogs, `HookManager` teardown concurrency hardening, and split `MainDialogs.cs` / `SettingsSupport.cs`; expanded automated coverage to 443 logic/integration + 21 Windows UI tests (464 total) with macOS `build.sh` and dynamic CI gate improvements. |
+| v1.1.0 | 2026-11-14 | Scheme B redesign release: 352px floating panel with Chinese date header, 2-column Quick Links, Today's Inspection Plan progress card (`Visited X / Y`, live toggle, Show Visited, per-row Unmark, confirmation-guarded Reset, visibility-guarded single completion prompt), 2-column Credentials with active copied check highlight, primary "Open inspection folder ↗" action with multi-folder chooser; added `HideVisitedDevices` (default true), rename and partial-import progress preservation, deferred midnight rollover, `progress.json` corruption write protection & backup recovery, redesigned viewfinder icon, and five Settings pages. |
 | v1.0.4 | 2026-11-12 | Added an editable device grid with direct save and Esc cancellation, plus immediate refresh after Apply. Added configuration import/export, device merge and replacement previews, optional local DPAPI backups, atomic saves, pre-import recovery backups and read-failure protection. Refined the five Settings pages, scrolling and scaling, fixed recursive grid events and edit cancellation, and added Windows UI CI. |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | New app icon (one source for the exe, window and tray icons); close button (✕) added to the title bar; the exe ships as `InspectionWidget.exe`; the settings button now uses the standard gear glyph from Segoe UI Symbol (with a code-drawn bitmap fallback when the font is unavailable); date folder names are customizable (`FolderNamePattern`, default `yyyy-MM-dd`, invalid patterns rejected at save time); minimize now goes to the system tray (the panel no longer appears in the taskbar; restore/exit from the tray, with a balloon tip the first time it hides — superseding the white paper's original "taskbar, not tray" decision, changed on 2026-11-03 based on hands-on feedback); the Linux/Mono local build `build/InspectionWidget.exe` is 318,464 bytes, SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |

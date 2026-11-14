@@ -159,10 +159,13 @@ namespace InspectionWidget
         private ToolTip _deviceToolTip;
         private Font _fontGear;
         private Bitmap _gearImage;
-        private bool _settingsUsesGearImage;
 
         // 系统托盘（v1.0.2）：常驻 NotifyIcon，最小化 = 隐藏到托盘，托盘恢复/退出。
         private NotifyIcon _trayIcon;
+        private ContextMenuStrip _trayMenu;
+        private ContextMenuStrip _folderMenu;
+        private Icon _ownedAppIcon;
+        private bool _formClosing;
 
         private Panel _scrollHost;
         private Panel _quickLinkHeaderPanel;
@@ -189,7 +192,11 @@ namespace InspectionWidget
         private Label _deviceSubLabel;
         private Panel _credentialHeaderPanel;
         private Label _credentialHeaderLabel;
+        private Label _credentialSubLabel;
         private Label _credentialArrowLabel;
+        private string _copiedCredentialTitle;
+        private int _credentialCountdownSeconds;
+        private Timer _credentialCountdownTimer;
         private Label _deviceArrowLabel;
         private Panel _credentialZonePanel;
         private Panel _deviceZonePanel;
@@ -244,7 +251,7 @@ namespace InspectionWidget
                     if (retired != null) retired.Add(cache);
                     else cache.Dispose();
                 }
-                cache = CreateFont(target, style);
+                cache = UiTheme.CreateFont(target, style);
             }
             return cache;
         }
@@ -270,7 +277,7 @@ namespace InspectionWidget
                 _fontGear = new Font("Segoe UI Symbol", gearTarget, FontStyle.Regular, GraphicsUnit.Pixel);
             }
 
-            if (!HasSymbolFont)
+            if (!UiTheme.HasSymbolFont)
             {
                 int imageSize = M(18);
                 if (_gearImage == null || _gearImage.Width != imageSize)
@@ -327,31 +334,13 @@ namespace InspectionWidget
             }
         }
 
-        private static bool HasSymbolFont
-        {
-            get
-            {
-                foreach (FontFamily family in FontFamily.Families)
-                {
-                    if (family.Name == "Segoe UI Symbol")
-                        return true;
-                }
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// 设置按钮视觉（v1.0.2）：有 Segoe UI Symbol → ⚙ 字形 + 齿轮字体；
-        /// 字体缺失 → GearArt 代码绘制的齿轮位图兜底（文字清空、走 Image）。
-        /// </summary>
         private void ApplySettingsButtonVisual()
         {
-            if (HasSymbolFont)
+            if (UiTheme.HasSymbolFont)
             {
                 _settingsButton.Image = null;
                 _settingsButton.Text = "⚙";
                 _settingsButton.Font = GearFont;
-                _settingsUsesGearImage = false;
             }
             else
             {
@@ -360,10 +349,13 @@ namespace InspectionWidget
                 int imageSize = M(18);
                 if (_gearImage == null || _gearImage.Width != imageSize)
                 {
+                    Bitmap old = _gearImage;
                     _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
+                    _settingsButton.Image = _gearImage;
+                    if (old != null) old.Dispose();
+                    return;
                 }
                 _settingsButton.Image = _gearImage;
-                _settingsUsesGearImage = true;
             }
         }
 
@@ -371,7 +363,12 @@ namespace InspectionWidget
         {
             if (disposing)
             {
-                if (_clipboardGuard != null) _clipboardGuard.Dispose();
+                if (_clipboardGuard != null)
+                {
+                    _clipboardGuard.Cleared -= OnClipboardCleared;
+                    _clipboardGuard.ClearSkipped -= OnClipboardClearSkipped;
+                    _clipboardGuard.Dispose();
+                }
                 if (_hooks != null && !_hooksDisposed)
                 {
                     _hooksDisposed = true;
@@ -385,7 +382,33 @@ namespace InspectionWidget
                 if (_rootToolTip != null) _rootToolTip.Dispose();
                 if (_titleToolTip != null) _titleToolTip.Dispose();
                 if (_deviceToolTip != null) _deviceToolTip.Dispose();
-                if (_trayIcon != null) _trayIcon.Dispose();
+                if (_folderMenu != null)
+                {
+                    _folderMenu.Dispose();
+                    _folderMenu = null;
+                }
+                if (_trayIcon != null)
+                {
+                    _trayIcon.Visible = false;
+                    _trayIcon.Dispose();
+                    _trayIcon = null;
+                }
+                if (_trayMenu != null)
+                {
+                    _trayMenu.Dispose();
+                    _trayMenu = null;
+                }
+                if (_ownedAppIcon != null)
+                {
+                    Icon = null;
+                    _ownedAppIcon.Dispose();
+                    _ownedAppIcon = null;
+                }
+                if (_credentialCountdownTimer != null)
+                {
+                    _credentialCountdownTimer.Stop();
+                    _credentialCountdownTimer.Dispose();
+                }
                 if (_feedbackTimer != null) _feedbackTimer.Dispose();
                 if (_dayRolloverTimer != null) _dayRolloverTimer.Dispose();
                 if (_font15Bold != null) _font15Bold.Dispose();
@@ -449,9 +472,9 @@ namespace InspectionWidget
             AutoScaleMode = AutoScaleMode.None;
 
             // 应用图标（v1.0.2）：与 exe 图标同源（嵌入资源），任务栏/Alt-Tab 不再是默认图标
-            Icon appIcon = AppIcon.Load();
-            if (appIcon != null)
-                Icon = appIcon;
+            _ownedAppIcon = AppIcon.Load();
+            if (_ownedAppIcon != null)
+                Icon = _ownedAppIcon;
 
             LoadResult load = _store.Load();
             _config = load.Config != null ? load.Config : AppConfig.CreateDefault();
@@ -804,6 +827,13 @@ namespace InspectionWidget
                 AutoSize = true,
                 Location = new Point(SideMargin, 2)
             };
+            _credentialSubLabel = new Label
+            {
+                Text = "点按复制，30 秒后清空",
+                Font = font11,
+                ForeColor = WeakTextColor,
+                AutoSize = true
+            };
             _credentialArrowLabel = new Label
             {
                 Text = "˅",
@@ -812,9 +842,11 @@ namespace InspectionWidget
                 AutoSize = true
             };
             _credentialHeaderPanel.Controls.Add(credentialHeaderLabel);
+            _credentialHeaderPanel.Controls.Add(_credentialSubLabel);
             _credentialHeaderPanel.Controls.Add(_credentialArrowLabel);
             _credentialHeaderPanel.Click += OnCredentialHeaderClicked;
             credentialHeaderLabel.Click += OnCredentialHeaderClicked;
+            _credentialSubLabel.Click += OnCredentialHeaderClicked;
             _credentialArrowLabel.Click += OnCredentialHeaderClicked;
             _scrollHost.Controls.Add(_credentialHeaderPanel);
 
@@ -922,20 +954,8 @@ namespace InspectionWidget
                 if (!RestorePersistentFeedbackIfNeeded())
                     _feedbackLabel.Text = string.Empty;
             };
-        }
-
-        private static Font CreateFont(float sizePx, FontStyle style)
-        {
-            string family = "Microsoft YaHei UI";
-            foreach (FontFamily installed in FontFamily.Families)
-            {
-                if (installed.Name == "Segoe UI")
-                {
-                    family = "Segoe UI";
-                    break;
-                }
-            }
-            return new Font(family, sizePx, style, GraphicsUnit.Pixel);
+            _credentialCountdownTimer = new Timer { Interval = 1000 };
+            _credentialCountdownTimer.Tick += OnCredentialCountdownTick;
         }
 
         // ---------- 布局 ----------
@@ -976,6 +996,7 @@ namespace InspectionWidget
             _planDisabledHintLabel.Font = Font11;
 
             _credentialHeaderLabel.Font = Font12Bold;
+            _credentialSubLabel.Font = Font11;
             _credentialArrowLabel.Font = Font13;
             _deviceHeaderLabel.Font = Font12Bold;
             _deviceSubLabel.Font = Font11;
@@ -1102,6 +1123,7 @@ namespace InspectionWidget
             _credentialHeaderPanel.Size = new Size(hostWidth, headerH);
             _credentialHeaderLabel.Location = new Point(margin, M(3));
             _credentialArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
+            PositionCredentialSubLabel();
             y += headerH;
 
             int credH = ComputeCredentialsZoneHeight();
@@ -1440,9 +1462,24 @@ namespace InspectionWidget
         private void RebuildClipboardGuard()
         {
             if (_clipboardGuard != null)
+            {
+                _clipboardGuard.Cleared -= OnClipboardCleared;
+                _clipboardGuard.ClearSkipped -= OnClipboardClearSkipped;
                 _clipboardGuard.Dispose();
+            }
+            _copiedCredentialTitle = null;
+            _credentialCountdownSeconds = 0;
+            if (_credentialCountdownTimer != null)
+                _credentialCountdownTimer.Stop();
             _clipboardGuard = new ClipboardGuard(_clipboardGateway, _config.AutoClearClipboard);
+            _clipboardGuard.Cleared += OnClipboardCleared;
+            _clipboardGuard.ClearSkipped += OnClipboardClearSkipped;
             _credentialService = new CredentialService(_protector, _clipboardGuard);
+            if (_credentialHeaderPanel != null)
+            {
+                RefreshCredentialButtonVisuals();
+                UpdateCredentialHeader();
+            }
         }
 
         /// <summary>
@@ -1909,7 +1946,57 @@ namespace InspectionWidget
                 button.Click += OnCredentialButtonClicked;
                 _credentialControls.Add(button);
                 _credentialZonePanel.Controls.Add(button);
-                _deviceToolTip.SetToolTip(button, "复制凭据：" + entry.Title);
+            }
+            RefreshCredentialButtonVisuals();
+        }
+
+        private bool IsActiveCopiedCredential(CredentialEntry entry)
+        {
+            return entry != null
+                && !entry.NeedsReset
+                && !string.IsNullOrEmpty(_copiedCredentialTitle)
+                && string.Equals(entry.Title, _copiedCredentialTitle, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void RefreshCredentialButtonVisuals()
+        {
+            for (int i = 0; i < _credentialControls.Count; i++)
+            {
+                var btn = _credentialControls[i] as Button;
+                if (btn == null) continue;
+                var entry = btn.Tag as CredentialEntry;
+                if (entry == null) continue;
+
+                bool active = IsActiveCopiedCredential(entry);
+                if (entry.NeedsReset)
+                {
+                    btn.BackColor = ButtonBackColor;
+                    btn.ForeColor = ErrorColor;
+                    btn.Font = Font12;
+                    btn.FlatAppearance.BorderColor = BorderColor;
+                }
+                else if (active)
+                {
+                    btn.BackColor = AccentSoftColor;
+                    btn.ForeColor = AccentColor;
+                    btn.Font = Font12Bold;
+                    btn.FlatAppearance.BorderColor = AccentColor;
+                }
+                else
+                {
+                    btn.BackColor = ButtonBackColor;
+                    btn.ForeColor = PrimaryTextColor;
+                    btn.Font = Font12;
+                    btn.FlatAppearance.BorderColor = BorderColor;
+                }
+                if (_deviceToolTip != null)
+                {
+                    string tip = active && _config.AutoClearClipboard && _credentialCountdownSeconds > 0
+                        ? "已复制「" + entry.Title + "」，" + _credentialCountdownSeconds + " 秒后自动清空"
+                        : (active ? "已复制「" + entry.Title + "」" : "复制凭据：" + entry.Title);
+                    _deviceToolTip.SetToolTip(btn, tip);
+                }
+                btn.Invalidate();
             }
         }
 
@@ -1917,7 +2004,9 @@ namespace InspectionWidget
         {
             var btn = (Button)sender;
             var entry = btn.Tag as CredentialEntry;
-            Color ink = entry != null && entry.NeedsReset ? ErrorColor : WeakTextColor;
+            Color ink = entry != null && entry.NeedsReset
+                ? ErrorColor
+                : (IsActiveCopiedCredential(entry) ? AccentColor : WeakTextColor);
             int iconX = M(8);
             int iconY = (btn.Height - M(12)) / 2;
             int backW = M(7);
@@ -1959,6 +2048,39 @@ namespace InspectionWidget
         private void UpdateCredentialHeader()
         {
             _credentialArrowLabel.Text = _config.IsCredentialCollapsed ? "›" : "˅";
+            if (_credentialSubLabel == null)
+                return;
+            if (!string.IsNullOrEmpty(_copiedCredentialTitle))
+            {
+                if (_config.AutoClearClipboard)
+                {
+                    _credentialSubLabel.Text = _credentialCountdownSeconds > 0
+                        ? "已复制 · " + _credentialCountdownSeconds + " 秒后清空"
+                        : "正在清空剪贴板…";
+                }
+                else
+                {
+                    _credentialSubLabel.Text = "已复制（自动清空已关闭）";
+                }
+                _credentialSubLabel.ForeColor = AccentColor;
+            }
+            else
+            {
+                _credentialSubLabel.Text = _config.AutoClearClipboard
+                    ? "点按复制，30 秒后清空"
+                    : "点按复制";
+                _credentialSubLabel.ForeColor = WeakTextColor;
+            }
+            PositionCredentialSubLabel();
+        }
+
+        private void PositionCredentialSubLabel()
+        {
+            if (_credentialSubLabel == null || _credentialHeaderLabel == null || _credentialArrowLabel == null)
+                return;
+            _credentialSubLabel.Location = new Point(
+                Math.Max(_credentialHeaderLabel.Right + M(8), _credentialArrowLabel.Left - _credentialSubLabel.Width - M(6)),
+                M(4));
         }
 
         private void UpdateDeviceHeader()
@@ -1986,6 +2108,8 @@ namespace InspectionWidget
                 _rootLabel.Text = "配置读取失败，点击此处重试（保存已暂停）";
                 _rootLabel.ForeColor = ErrorColor;
                 _openFolderButton.Text = "重试读取配置";
+                if (_rootToolTip != null)
+                    _rootToolTip.SetToolTip(_rootLabel, _configLoadError ?? string.Empty);
                 return;
             }
             _openFolderButton.Text = "打开巡检文件夹 ↗";
@@ -1993,8 +2117,8 @@ namespace InspectionWidget
                 ? "尚未设置保存目录"
                 : _config.RootPath;
             _rootLabel.ForeColor = WeakTextColor;
-            if (!string.IsNullOrEmpty(_config.RootPath))
-                _rootToolTip.SetToolTip(_rootLabel, _config.RootPath);
+            if (_rootToolTip != null)
+                _rootToolTip.SetToolTip(_rootLabel, string.IsNullOrEmpty(_config.RootPath) ? string.Empty : _config.RootPath);
         }
 
         // ---------- 交互 ----------
@@ -2035,12 +2159,8 @@ namespace InspectionWidget
         private void OnResetRoundClicked(object sender, EventArgs e)
         {
             if (_session == null) return;
-            using (var confirm = new ResetRoundConfirmDialog())
-            {
-                UiTheme.ScaleLayout(confirm, ScaleFactor);
-                if (confirm.ShowDialog(this) != DialogResult.Yes)
-                    return;
-            }
+            if (ShowScaledDialog(delegate { return new ResetRoundConfirmDialog(); }) != DialogResult.Yes)
+                return;
             string progressErr;
             _session.ResetRound(out progressErr);
             RebuildPlanCard();
@@ -2085,44 +2205,42 @@ namespace InspectionWidget
             _settingsDialogOpen = true;
             try
             {
-                using (var dialog = new ProgressRecoveryDialog(_progressStore != null ? _progressStore.Path : null, _session.ProgressError))
+                string path = _progressStore != null ? _progressStore.Path : null;
+                string progressErr = _session.ProgressError;
+                DialogResult choice = ShowScaledDialog(delegate { return new ProgressRecoveryDialog(path, progressErr); });
+                if (choice == DialogResult.Retry)
                 {
-                    UiTheme.ScaleLayout(dialog, ScaleFactor);
-                    DialogResult choice = dialog.ShowDialog(this);
-                    if (choice == DialogResult.Retry)
+                    if (_session.RetryLoadProgress(out err))
                     {
-                        if (_session.RetryLoadProgress(out err))
-                        {
-                            RefreshConfigState();
-                            ApplyHeightAnchored();
-                            ShowSuccessFeedback("已恢复读取巡检进度");
-                        }
-                        else
-                        {
-                            RebuildPlanCard();
-                            ApplyHeightAnchored();
-                            ShowProgressErrorFeedback();
-                        }
+                        RefreshConfigState();
+                        ApplyHeightAnchored();
+                        ShowSuccessFeedback("已恢复读取巡检进度");
                     }
-                    else if (choice == DialogResult.Yes)
+                    else
                     {
-                        string backupPath;
-                        if (_session.BackupAndResetProgress(out backupPath, out err))
-                        {
-                            RefreshConfigState();
-                            ApplyHeightAnchored();
-                            ShowPersistentFeedback(
-                                string.IsNullOrEmpty(backupPath)
-                                    ? "已重置本轮巡检进度"
-                                    : "坏进度已备份至：" + backupPath + "（已重置新轮）",
-                                WarningColor);
-                        }
-                        else
-                        {
-                            RebuildPlanCard();
-                            ApplyHeightAnchored();
-                            ShowProgressErrorFeedback();
-                        }
+                        RebuildPlanCard();
+                        ApplyHeightAnchored();
+                        ShowProgressErrorFeedback();
+                    }
+                }
+                else if (choice == DialogResult.Yes)
+                {
+                    string backupPath;
+                    if (_session.BackupAndResetProgress(out backupPath, out err))
+                    {
+                        RefreshConfigState();
+                        ApplyHeightAnchored();
+                        ShowPersistentFeedback(
+                            string.IsNullOrEmpty(backupPath)
+                                ? "已重置本轮巡检进度"
+                                : "坏进度已备份至：" + backupPath + "（已重置新轮）",
+                            WarningColor);
+                    }
+                    else
+                    {
+                        RebuildPlanCard();
+                        ApplyHeightAnchored();
+                        ShowProgressErrorFeedback();
                     }
                 }
             }
@@ -2193,8 +2311,13 @@ namespace InspectionWidget
                 }
                 else
                 {
+                    bool rowStillVisible = _session == null
+                        || !_session.PlanModeEnabled
+                        || !_session.HideVisitedDevices
+                        || _session.ShowVisitedOverride;
+                    string cancelHint = rowStillVisible ? "（Esc、右键或再点取消）" : "（Esc 或右键取消）";
                     ShowFeedback(
-                        "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」（Esc 或右键取消）",
+                        "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」" + cancelHint,
                         false);
                 }
                 return;
@@ -2230,12 +2353,39 @@ namespace InspectionWidget
             switch (result)
             {
                 case CopyResult.Copied:
-                    ShowSuccessFeedback("已复制「" + entry.Title + "」");
+                    _copiedCredentialTitle = entry.Title;
+                    if (_config.AutoClearClipboard)
+                    {
+                        _credentialCountdownSeconds = _clipboardGuard != null ? _clipboardGuard.ClearAfterSeconds : 30;
+                        if (_credentialCountdownTimer != null)
+                        {
+                            _credentialCountdownTimer.Stop();
+                            _credentialCountdownTimer.Start();
+                        }
+                        ShowSuccessFeedback("已复制「" + entry.Title + "」（" + _credentialCountdownSeconds + " 秒后清空）");
+                    }
+                    else
+                    {
+                        _credentialCountdownSeconds = 0;
+                        if (_credentialCountdownTimer != null)
+                            _credentialCountdownTimer.Stop();
+                        ShowSuccessFeedback("已复制「" + entry.Title + "」");
+                    }
+                    RefreshCredentialButtonVisuals();
+                    UpdateCredentialHeader();
                     break;
                 case CopyResult.NeedsReset:
                     // 运行时标记并刷新按钮显示（内存标记，不落盘）
+                    if (string.Equals(_copiedCredentialTitle, entry.Title, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _copiedCredentialTitle = null;
+                        _credentialCountdownSeconds = 0;
+                        if (_credentialCountdownTimer != null)
+                            _credentialCountdownTimer.Stop();
+                    }
                     entry.NeedsReset = true;
                     RebuildCredentialControls();
+                    UpdateCredentialHeader();
                     ApplyHeightAnchored();
                     ShowFeedback("该凭据需重新设置，请到设置中重新填写", true);
                     break;
@@ -2243,6 +2393,74 @@ namespace InspectionWidget
                     ShowFeedback("复制失败，请重试", true);
                     break;
             }
+        }
+
+        private void OnCredentialCountdownTick(object sender, EventArgs e)
+        {
+            if (_formClosing || IsDisposed || string.IsNullOrEmpty(_copiedCredentialTitle) || !_config.AutoClearClipboard)
+            {
+                if (_credentialCountdownTimer != null)
+                    _credentialCountdownTimer.Stop();
+                return;
+            }
+            if (_credentialCountdownSeconds > 1)
+            {
+                _credentialCountdownSeconds--;
+            }
+            else
+            {
+                _credentialCountdownSeconds = 0;
+                if (_credentialCountdownTimer != null)
+                    _credentialCountdownTimer.Stop();
+            }
+            UpdateCredentialHeader();
+            RefreshCredentialButtonVisuals();
+        }
+
+        private void OnClipboardCleared()
+        {
+            if (_formClosing || IsDisposed)
+                return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(OnClipboardCleared)); }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
+                return;
+            }
+            if (_formClosing || IsDisposed)
+                return;
+            _copiedCredentialTitle = null;
+            _credentialCountdownSeconds = 0;
+            if (_credentialCountdownTimer != null)
+                _credentialCountdownTimer.Stop();
+            RefreshCredentialButtonVisuals();
+            UpdateCredentialHeader();
+            if (_stateMachine.State == PanelState.Idle && !_feedbackPersistent)
+                ShowFeedback("剪贴板凭据已自动清空", false);
+        }
+
+        private void OnClipboardClearSkipped()
+        {
+            if (_formClosing || IsDisposed)
+                return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(OnClipboardClearSkipped)); }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
+                return;
+            }
+            if (_formClosing || IsDisposed)
+                return;
+            _copiedCredentialTitle = null;
+            _credentialCountdownSeconds = 0;
+            if (_credentialCountdownTimer != null)
+                _credentialCountdownTimer.Stop();
+            RefreshCredentialButtonVisuals();
+            UpdateCredentialHeader();
+            if (_stateMachine.State == PanelState.Idle && !_feedbackPersistent)
+                ShowFeedback("剪贴板内容已变更，已跳过自动清空", false);
         }
 
         private void OnSettingsClicked(object sender, EventArgs e)
@@ -2336,7 +2554,12 @@ namespace InspectionWidget
             }
 
             // 本轮有主目录和暂存目录等多处文件：让用户清晰选择打开哪一处，避免漏看暂存图
-            var menu = new ContextMenuStrip();
+            if (_folderMenu != null)
+            {
+                _folderMenu.Dispose();
+                _folderMenu = null;
+            }
+            var menu = _folderMenu = new ContextMenuStrip();
             for (int i = 0; i < folders.Count; i++)
             {
                 string folder = folders[i];
@@ -2357,6 +2580,34 @@ namespace InspectionWidget
 
         private void OpenSingleInspectionFolder(string dir)
         {
+            var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
+            {
+                string latest = FindLatestPngInDirectory(dir);
+                try
+                {
+                    if (latest != null)
+                    {
+                        Process.Start("explorer.exe", "/select,\"" + latest + "\"");
+                    }
+                    else
+                    {
+                        string err;
+                        if (!_folderNavigator.TryOpenFolder(dir, out err))
+                            ReportFolderOpenError("打开文件夹失败：" + err);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ReportFolderOpenError("打开文件夹失败：" + ex.Message);
+                }
+            }));
+            worker.IsBackground = true;
+            worker.Name = "InspectionWidget.OpenFolderWorker";
+            worker.Start();
+        }
+
+        private static string FindLatestPngInDirectory(string dir)
+        {
             string latest = null;
             DateTime latestTime = DateTime.MinValue;
             try
@@ -2373,23 +2624,25 @@ namespace InspectionWidget
             }
             catch
             {
-                latest = null;
+                return null;
             }
+            return latest;
+        }
+
+        private void ReportFolderOpenError(string message)
+        {
+            if (_formClosing || IsDisposed)
+                return;
             try
             {
-                if (latest != null)
-                    Process.Start("explorer.exe", "/select,\"" + latest + "\"");
-                else
+                BeginInvoke(new Action(delegate
                 {
-                    string err;
-                    if (!_folderNavigator.TryOpenFolder(dir, out err))
-                        ShowFeedback("打开文件夹失败：" + err, true);
-                }
+                    if (!_formClosing && !IsDisposed)
+                        ShowFeedback(message, true);
+                }));
             }
-            catch (Exception ex)
-            {
-                ShowFeedback("打开文件夹失败：" + ex.Message, true);
-            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         }
 
         /// <summary>等待态视觉：设备标题行文案/颜色、按钮高亮与可用性、窗体边框。</summary>
@@ -3169,7 +3422,7 @@ namespace InspectionWidget
 
         private void BuildTrayIcon()
         {
-            var menu = new ContextMenuStrip();
+            var menu = _trayMenu = new ContextMenuStrip();
             var showItem = new ToolStripMenuItem("显示面板");
             showItem.Click += delegate { ShowPanelFromTray(); };
             var exitItem = new ToolStripMenuItem("退出");
@@ -3225,6 +3478,9 @@ namespace InspectionWidget
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            _formClosing = true;
+            if (_credentialCountdownTimer != null)
+                _credentialCountdownTimer.Stop();
             // 托盘图标先隐藏并释放，避免进程退出后托盘区残影。
             if (_trayIcon != null)
             {
@@ -3232,11 +3488,18 @@ namespace InspectionWidget
                 _trayIcon.Dispose();
                 _trayIcon = null;
             }
+            if (_trayMenu != null)
+            {
+                _trayMenu.Dispose();
+                _trayMenu = null;
+            }
             // 退出兜底（Task 6）：先按回执核对清剪贴板（有回执且序列号+令牌
             // 匹配才清，Guard 内部处理），再 Dispose Guard，最后走原有逻辑。
             if (_clipboardGuard != null)
             {
                 _clipboardGuard.TryClearNow();
+                _clipboardGuard.Cleared -= OnClipboardCleared;
+                _clipboardGuard.ClearSkipped -= OnClipboardClearSkipped;
                 _clipboardGuard.Dispose();
             }
             _hooks.Stop();
@@ -3372,176 +3635,20 @@ namespace InspectionWidget
 
             bool hasPendingFailure = _pendingImage != null && _pendingRequest != null;
             bool hasSavedFiles = HasSavedPaths();
-            using (var dialog = new CompletionPromptDialog(hasPendingFailure, hasSavedFiles, progressErr))
-            {
-                UiTheme.ScaleLayout(dialog, ScaleFactor);
-                DialogResult answer = dialog.ShowDialog(this);
-                if (answer == DialogResult.Yes)
-                    OpenInspectionFolders();
-            }
+            DialogResult answer = ShowScaledDialog(
+                delegate { return new CompletionPromptDialog(hasPendingFailure, hasSavedFiles, progressErr); });
+            if (answer == DialogResult.Yes)
+                OpenInspectionFolders();
         }
 
-        private sealed class ProgressRecoveryDialog : Form
+        private DialogResult ShowScaledDialog(Func<Form> factory)
         {
-            public ProgressRecoveryDialog(string path, string error)
+            double scale = ScaleFactor;
+            UiTheme.UseFontScale(scale);
+            using (Form dialog = factory())
             {
-                Text = "巡检进度恢复";
-                StartPosition = FormStartPosition.CenterParent;
-                FormBorderStyle = FormBorderStyle.FixedDialog;
-                MinimizeBox = false;
-                MaximizeBox = false;
-                TopMost = true;
-                AutoScaleMode = AutoScaleMode.None;
-                ClientSize = new Size(460, 200);
-                BackColor = UiTheme.PageBackColor;
-                Font = UiTheme.BodyFont;
-
-                string body = "进度文件读取或校验失败，已暂停覆盖原文件：\n"
-                    + (error ?? "未知错误")
-                    + (string.IsNullOrEmpty(path) ? string.Empty : "\n\n文件位置：" + path)
-                    + "\n\n你可以先检查或替换文件后「重试读取」，或将坏原件备份后再「备份并重置」开启今日新轮。";
-                var message = new Label
-                {
-                    Text = body,
-                    AutoSize = false,
-                    Dock = DockStyle.Fill,
-                    Padding = new Padding(18),
-                    ForeColor = UiTheme.PrimaryTextColor
-                };
-                var buttons = new FlowLayoutPanel
-                {
-                    Dock = DockStyle.Bottom,
-                    Height = 52,
-                    FlowDirection = FlowDirection.RightToLeft,
-                    Padding = new Padding(12)
-                };
-                var keep = UiTheme.SecondaryButton("保留原件");
-                keep.Width = 92;
-                keep.DialogResult = DialogResult.Cancel;
-                var backupReset = UiTheme.SecondaryButton("备份并重置");
-                backupReset.ForeColor = UiTheme.ErrorColor;
-                backupReset.Width = 108;
-                backupReset.DialogResult = DialogResult.Yes;
-                var retry = UiTheme.PrimaryButton("重试读取");
-                retry.Width = 96;
-                retry.DialogResult = DialogResult.Retry;
-                buttons.Controls.Add(keep);
-                buttons.Controls.Add(backupReset);
-                buttons.Controls.Add(retry);
-                Controls.Add(message);
-                Controls.Add(buttons);
-                AcceptButton = retry;
-                CancelButton = keep;
-            }
-        }
-
-        private sealed class ResetRoundConfirmDialog : Form
-        {
-            public ResetRoundConfirmDialog()
-            {
-                Text = "重置本轮进度";
-                StartPosition = FormStartPosition.CenterParent;
-                FormBorderStyle = FormBorderStyle.FixedDialog;
-                MinimizeBox = false;
-                MaximizeBox = false;
-                TopMost = true;
-                AutoScaleMode = AutoScaleMode.None;
-                ClientSize = new Size(420, 148);
-                BackColor = UiTheme.PageBackColor;
-                Font = UiTheme.BodyFont;
-
-                var message = new Label
-                {
-                    Text = "确定清空今日所有设备的“已点过”记录并重新开始本轮吗？\n\n已保存的截图文件不会被删除。",
-                    AutoSize = false,
-                    Dock = DockStyle.Fill,
-                    Padding = new Padding(18),
-                    ForeColor = UiTheme.PrimaryTextColor
-                };
-                var buttons = new FlowLayoutPanel
-                {
-                    Dock = DockStyle.Bottom,
-                    Height = 52,
-                    FlowDirection = FlowDirection.RightToLeft,
-                    Padding = new Padding(12)
-                };
-                var confirm = UiTheme.PrimaryButton("确定重置");
-                confirm.BackColor = UiTheme.ErrorColor;
-                confirm.Width = 104;
-                confirm.DialogResult = DialogResult.Yes;
-                var cancel = UiTheme.SecondaryButton("取消");
-                cancel.Width = 84;
-                cancel.DialogResult = DialogResult.No;
-                buttons.Controls.Add(confirm);
-                buttons.Controls.Add(cancel);
-                Controls.Add(message);
-                Controls.Add(buttons);
-                AcceptButton = cancel;
-                CancelButton = cancel;
-            }
-        }
-
-        private sealed class CompletionPromptDialog : Form
-        {
-            public CompletionPromptDialog(bool hasPendingFailure, bool hasSavedFiles, string progressSaveError)
-            {
-                Text = "今日巡检进度";
-                StartPosition = FormStartPosition.CenterParent;
-                FormBorderStyle = FormBorderStyle.FixedDialog;
-                MinimizeBox = false;
-                MaximizeBox = false;
-                TopMost = true;
-                AutoScaleMode = AutoScaleMode.None;
-                ClientSize = new Size(440, string.IsNullOrEmpty(progressSaveError) ? 160 : 210);
-                BackColor = UiTheme.PageBackColor;
-                Font = UiTheme.BodyFont;
-
-                string body;
-                if (hasPendingFailure)
-                {
-                    body = "今日所有设备均已点过，但当前仍有截图尚未保存成功，请先点击底部反馈区重试。\n\n是否仍要打开巡检文件夹？";
-                }
-                else if (!hasSavedFiles)
-                {
-                    body = "今日所有设备均已点过，但本轮尚未记录到已保存的截图文件。\n\n是否检查并打开巡检文件夹？";
-                }
-                else
-                {
-                    body = "今日所有设备均已点过。\n\n是否立即打开巡检文件夹？";
-                }
-                if (!string.IsNullOrEmpty(progressSaveError))
-                {
-                    body += "\n\n注意：本次“不再重复提醒”标记未能写入进度文件（"
-                        + progressSaveError + "），下次重启后可能再次提示。";
-                }
-
-                var message = new Label
-                {
-                    Text = body,
-                    AutoSize = false,
-                    Dock = DockStyle.Fill,
-                    Padding = new Padding(18),
-                    ForeColor = UiTheme.PrimaryTextColor
-                };
-                var buttons = new FlowLayoutPanel
-                {
-                    Dock = DockStyle.Bottom,
-                    Height = 52,
-                    FlowDirection = FlowDirection.RightToLeft,
-                    Padding = new Padding(12)
-                };
-                var open = UiTheme.PrimaryButton("打开文件夹");
-                open.Width = 116;
-                open.DialogResult = DialogResult.Yes;
-                var later = UiTheme.SecondaryButton("稍后");
-                later.Width = 84;
-                later.DialogResult = DialogResult.No;
-                buttons.Controls.Add(open);
-                buttons.Controls.Add(later);
-                Controls.Add(message);
-                Controls.Add(buttons);
-                AcceptButton = open;
-                CancelButton = later;
+                UiTheme.ScaleLayout(dialog, scale);
+                return dialog.ShowDialog(this);
             }
         }
     }

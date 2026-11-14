@@ -79,6 +79,9 @@ namespace InspectionWidget.Capture
             public Timer TimeoutTimer;
             public Timer DeferredTeardownTimer;
             public readonly ManualResetEvent Ready = new ManualResetEvent(false);
+            public readonly object ReadyLock = new object();
+            public readonly object HookLock = new object();
+            public bool ReadyDisposed;
             public Exception StartError;
             public volatile bool SwallowNextUp;
             public Point PendingPoint;
@@ -238,10 +241,10 @@ namespace InspectionWidget.Capture
                 // 异常路径成对释放：已挂上的先卸掉再回报失败。
                 Unhook(session);
                 session.StartError = ex;
-                session.Ready.Set();
+                SignalReady(session);
                 return;
             }
-            session.Ready.Set();
+            SignalReady(session);
 
             NativeMethods.MSG msg;
             while (true)
@@ -257,15 +260,39 @@ namespace InspectionWidget.Capture
 
         private static void Unhook(HookSession session)
         {
-            if (session.MouseHook != IntPtr.Zero)
+            lock (session.HookLock)
             {
-                NativeMethods.UnhookWindowsHookEx(session.MouseHook);
-                session.MouseHook = IntPtr.Zero;
+                if (session.MouseHook != IntPtr.Zero)
+                {
+                    NativeMethods.UnhookWindowsHookEx(session.MouseHook);
+                    session.MouseHook = IntPtr.Zero;
+                }
+                if (session.KeyboardHook != IntPtr.Zero)
+                {
+                    NativeMethods.UnhookWindowsHookEx(session.KeyboardHook);
+                    session.KeyboardHook = IntPtr.Zero;
+                }
             }
-            if (session.KeyboardHook != IntPtr.Zero)
+        }
+
+        private static void SignalReady(HookSession session)
+        {
+            lock (session.ReadyLock)
             {
-                NativeMethods.UnhookWindowsHookEx(session.KeyboardHook);
-                session.KeyboardHook = IntPtr.Zero;
+                if (!session.ReadyDisposed)
+                    session.Ready.Set();
+            }
+        }
+
+        private static void DisposeReady(HookSession session)
+        {
+            lock (session.ReadyLock)
+            {
+                if (!session.ReadyDisposed)
+                {
+                    session.ReadyDisposed = true;
+                    session.Ready.Dispose();
+                }
             }
         }
 
@@ -302,6 +329,7 @@ namespace InspectionWidget.Capture
                     thread.Join(500);
                 }
             }
+            DisposeReady(session);
         }
 
         // ---------- 回调（钩子线程上执行，只做坐标判定与投递） ----------
@@ -315,7 +343,12 @@ namespace InspectionWidget.Capture
                 {
                     var data = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
                     Point pt = data.pt.ToPoint();
-                    if (session.SelfBounds.Contains(pt))
+                    Rectangle bounds;
+                    lock (_lock)
+                    {
+                        bounds = session.SelfBounds;
+                    }
+                    if (bounds.Contains(pt))
                         return NativeMethods.CallNextHookEx(session.MouseHook, nCode, wParam, lParam);
                     session.PendingPoint = pt;
                     session.SwallowNextUp = true;

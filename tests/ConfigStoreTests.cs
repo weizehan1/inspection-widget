@@ -461,6 +461,29 @@ namespace InspectionWidget.Tests
                 finally { Cleanup(dir); }
             });
 
+            TestRunner.Run("存储：Devices 含 QuickLinks 字样但顶层缺 QuickLinks 键时仍走默认补齐", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    File.WriteAllText(ConfigFile(dir),
+                        "{\"RootPath\":\"D:\\\\Shots\",\"Devices\":[\"QuickLinks\"],\"Credentials\":[],"
+                        + "\"IsCredentialCollapsed\":false,\"IsDeviceCollapsed\":false,"
+                        + "\"AutoClearClipboard\":true,\"CaptureMode\":0,"
+                        + "\"WindowLeft\":null,\"WindowTop\":null,\"LastDevice\":null,"
+                        + "\"UiScalePercent\":100,\"FolderNamePattern\":\"yyyy-MM-dd\","
+                        + "\"TrayHintShown\":false,\"PlanModeEnabled\":false,\"HideVisitedDevices\":true}");
+                    ConfigStore store = MakeStore(dir);
+                    LoadResult result = store.Load();
+                    Assert.Equal(ConfigLoadKind.Defaulted, result.Kind);
+                    Assert.Equal(1, result.Config.Devices.Count);
+                    Assert.Equal("QuickLinks", result.Config.Devices[0]);
+                    Assert.NotNull(result.Config.QuickLinks);
+                    Assert.Equal(0, result.Config.QuickLinks.Count);
+                }
+                finally { Cleanup(dir); }
+            });
+
         }
 
         internal static string MakeTempDir()

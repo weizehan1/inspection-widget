@@ -22,6 +22,19 @@ namespace InspectionWidget.Credentials
         /// <summary>核对不匹配/网关未能清空而跳过清空时触发（供 UI 提示，可空挂）。</summary>
         public event Action ClearSkipped;
 
+        /// <summary>自动或退出前核对并成功清空剪贴板时触发（供 UI 更新高亮/倒计时，可空挂）。</summary>
+        public event Action Cleared;
+
+        public bool AutoClearEnabled
+        {
+            get { return _autoClearEnabled; }
+        }
+
+        public int ClearAfterSeconds
+        {
+            get { return _clearAfterSeconds; }
+        }
+
         public ClipboardGuard(IClipboardGateway gateway, bool autoClearEnabled, int clearAfterSeconds = 30)
         {
             if (gateway == null) throw new ArgumentNullException("gateway");
@@ -102,6 +115,9 @@ namespace InspectionWidget.Credentials
                     if (object.ReferenceEquals(_receipt, receipt))
                         _receipt = null;
                 }
+                Action clearedHandler = Cleared;
+                if (clearedHandler != null)
+                    clearedHandler();
             }
             else
             {

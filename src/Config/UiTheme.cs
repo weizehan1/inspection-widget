@@ -12,6 +12,8 @@ namespace InspectionWidget
         private static double _fontScale = 1.0;
         private static readonly Dictionary<double, FontSet> FontCache =
             new Dictionary<double, FontSet>();
+        private static string _preferredFontFamily;
+        private static bool? _hasSymbolFont;
 
         public static readonly Color AccentColor = Color.FromArgb(0x24, 0x63, 0xA0);
         public static readonly Color AccentHoverColor = Color.FromArgb(0x19, 0x4D, 0x80);
@@ -240,18 +242,55 @@ namespace InspectionWidget
             };
         }
 
-        private static Font CreateFont(float sizePx, FontStyle style)
+        internal static bool HasSymbolFont
         {
-            string family = "Microsoft YaHei UI";
-            foreach (FontFamily installed in FontFamily.Families)
+            get
             {
-                if (installed.Name == "Segoe UI")
-                {
-                    family = "Segoe UI";
-                    break;
-                }
+                EnsureFontCapabilities();
+                return _hasSymbolFont.Value;
             }
-            return new Font(family, sizePx, style, GraphicsUnit.Pixel);
+        }
+
+        internal static Font CreateFont(float sizePx, FontStyle style)
+        {
+            EnsureFontCapabilities();
+            return new Font(_preferredFontFamily, sizePx, style, GraphicsUnit.Pixel);
+        }
+
+        private static void EnsureFontCapabilities()
+        {
+            lock (FontGate)
+            {
+                if (_preferredFontFamily != null && _hasSymbolFont.HasValue)
+                    return;
+
+                string preferred = "Microsoft YaHei UI";
+                bool hasSymbol = false;
+                FontFamily[] families = FontFamily.Families;
+                try
+                {
+                    for (int i = 0; i < families.Length; i++)
+                    {
+                        FontFamily family = families[i];
+                        if (family == null)
+                            continue;
+                        if (family.Name == "Segoe UI")
+                            preferred = "Segoe UI";
+                        else if (family.Name == "Segoe UI Symbol")
+                            hasSymbol = true;
+                    }
+                }
+                finally
+                {
+                    for (int i = 0; i < families.Length; i++)
+                    {
+                        if (families[i] != null)
+                            families[i].Dispose();
+                    }
+                }
+                _preferredFontFamily = preferred;
+                _hasSymbolFont = hasSymbol;
+            }
         }
 
         private static int Scale(float value, double factor)

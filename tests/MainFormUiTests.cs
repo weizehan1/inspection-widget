@@ -15,7 +15,7 @@ namespace InspectionWidget.Tests
 {
     public static class MainFormUiTests
     {
-        public const int CaseCount = 6;
+        public const int CaseCount = 8;
 
         private sealed class StepClock : IClock
         {
@@ -439,6 +439,94 @@ namespace InspectionWidget.Tests
                     Assert.Equal(new DateTime(2026, 11, 15), (DateTime)Field(env.Form, "_uiRenderedPlanDate"));
                     Assert.Equal("已点过 0 / 3", countLabel.Text);
                     Assert.Equal(0, session.Plan.VisitedCount);
+                }
+            });
+
+            TestRunner.Run("UI：复制凭据高亮按钮、副标题倒计时递减，清空或跳过后复位样式", () =>
+            {
+                Console.WriteLine("[START] 复制凭据高亮与倒计时复位");
+                AppConfig cfg = MainEnv.BuildDefaultConfig();
+                var protector = new FakeProtector();
+                cfg.Credentials[0].EncryptedSecret = protector.Protect("s3cr3t-pass");
+                cfg.AutoClearClipboard = true;
+
+                using (var env = new MainEnv(cfg))
+                {
+                    env.Form.Show();
+                    Application.DoEvents();
+
+                    var gateway = new FakeClipboardGateway();
+                    SetField(env.Form, "_protector", protector);
+                    SetField(env.Form, "_clipboardGateway", gateway);
+                    Invoke(env.Form, "RebuildClipboardGuard");
+
+                    var credControls = (IList)Field(env.Form, "_credentialControls");
+                    Button credBtn = null;
+                    foreach (Control c in credControls)
+                    {
+                        var b = c as Button;
+                        if (b != null)
+                        {
+                            credBtn = b;
+                            break;
+                        }
+                    }
+                    Assert.NotNull(credBtn);
+
+                    var subLabel = (Label)Field(env.Form, "_credentialSubLabel");
+                    Assert.Equal("点按复制，30 秒后清空", subLabel.Text);
+
+                    Invoke(env.Form, "OnCredentialButtonClicked", credBtn, EventArgs.Empty);
+                    Assert.Equal("s3cr3t-pass", gateway.LastWrittenText);
+                    Assert.Equal("运维账号", (string)Field(env.Form, "_copiedCredentialTitle"));
+                    Assert.Equal(30, (int)Field(env.Form, "_credentialCountdownSeconds"));
+                    Assert.Equal(UiTheme.AccentSoftColor, credBtn.BackColor);
+                    Assert.Equal(UiTheme.AccentColor, credBtn.ForeColor);
+                    Assert.Equal("已复制 · 30 秒后清空", subLabel.Text);
+
+                    Invoke(env.Form, "OnCredentialCountdownTick", null, EventArgs.Empty);
+                    Assert.Equal(29, (int)Field(env.Form, "_credentialCountdownSeconds"));
+                    Assert.Equal("已复制 · 29 秒后清空", subLabel.Text);
+
+                    Invoke(env.Form, "OnClipboardCleared");
+                    Assert.Null((string)Field(env.Form, "_copiedCredentialTitle"));
+                    Assert.Equal(0, (int)Field(env.Form, "_credentialCountdownSeconds"));
+                    Assert.Equal(Color.White, credBtn.BackColor);
+                    Assert.Equal("点按复制，30 秒后清空", subLabel.Text);
+
+                    Invoke(env.Form, "OnCredentialButtonClicked", credBtn, EventArgs.Empty);
+                    Assert.Equal("运维账号", (string)Field(env.Form, "_copiedCredentialTitle"));
+                    Invoke(env.Form, "OnClipboardClearSkipped");
+                    Assert.Null((string)Field(env.Form, "_copiedCredentialTitle"));
+                    Assert.Equal(0, (int)Field(env.Form, "_credentialCountdownSeconds"));
+                    Assert.Equal(Color.White, credBtn.BackColor);
+                }
+            });
+
+            TestRunner.Run("UI：内置弹窗（进度恢复、重置确认、完成提示）在 200% 缩放下字体与尺寸放大", () =>
+            {
+                Console.WriteLine("[START] 内置弹窗缩放");
+                try
+                {
+                    UiTheme.UseFontScale(2.0);
+                    using (var recovery = new ProgressRecoveryDialog("D:\\progress.json", "坏文件"))
+                    using (var reset = new ResetRoundConfirmDialog())
+                    using (var complete = new CompletionPromptDialog(false, true, null))
+                    {
+                        Form[] dialogs = { recovery, reset, complete };
+                        for (int i = 0; i < dialogs.Length; i++)
+                        {
+                            Form dlg = dialogs[i];
+                            int baseWidth = dlg.ClientSize.Width;
+                            UiTheme.ScaleLayout(dlg, 2.0);
+                            Assert.True(dlg.Font.Size >= 20f);
+                            Assert.Equal(baseWidth * 2, dlg.ClientSize.Width);
+                        }
+                    }
+                }
+                finally
+                {
+                    UiTheme.UseFontScale(1.0);
                 }
             });
         }

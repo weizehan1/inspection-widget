@@ -60,7 +60,7 @@ namespace InspectionWidget.Storage
                 }
             }
 
-            if (!hasSavedPaths && configured != null)
+            if (result.Count == 0 && configured != null)
             {
                 bool exists;
                 try

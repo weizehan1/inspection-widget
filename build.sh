@@ -9,6 +9,18 @@ cd "$(dirname "$0")"
 PROJECT="src/InspectionWidget.csproj"
 OUT_DIR="build"
 
+# macOS Homebrew / Intel Mac Mono 运行 System.Drawing 时自动补充 libgdiplus 搜索路径
+if [ "$(uname -s)" = "Darwin" ]; then
+    for gdi_dir in /opt/homebrew/lib /usr/local/lib; do
+        if [ -f "$gdi_dir/libgdiplus.dylib" ]; then
+            case ":${DYLD_FALLBACK_LIBRARY_PATH:-}:" in
+                *":$gdi_dir:"*) ;;
+                *) export DYLD_FALLBACK_LIBRARY_PATH="${gdi_dir}${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}" ;;
+            esac
+        fi
+    done
+fi
+
 # 应用图标源文件以 base64 文本入库；构建前按需还原。
 # 已有合法 .ico（文件头 00 00 01 00）时保留，不覆盖；解码失败即退出。
 restore_app_icon() {

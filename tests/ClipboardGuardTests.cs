@@ -155,6 +155,35 @@ namespace InspectionWidget.Tests
                     Assert.Equal(0, gateway.ClearAttempts);
                 }
             });
+
+            TestRunner.Run("编排：AutoClearEnabled 与 ClearAfterSeconds 属性可读，Cleared 在清空时触发", () =>
+            {
+                var gateway = new FakeClipboardGateway();
+                int clearedCount = 0;
+                int skippedCount = 0;
+                using (var guard = new ClipboardGuard(gateway, false, 45))
+                {
+                    Assert.False(guard.AutoClearEnabled);
+                    Assert.Equal(45, guard.ClearAfterSeconds);
+                }
+                using (var guard = new ClipboardGuard(gateway, true, 3600))
+                {
+                    guard.Cleared += () => clearedCount++;
+                    guard.ClearSkipped += () => skippedCount++;
+                    Assert.True(guard.AutoClearEnabled);
+                    Assert.Equal(3600, guard.ClearAfterSeconds);
+                    guard.Copy("secret-1");
+                    Assert.True(guard.TryClearNow());
+                    Assert.Equal(1, clearedCount);
+                    Assert.Equal(0, skippedCount);
+
+                    guard.Copy("secret-2");
+                    gateway.SimulateExternalCopy("other");
+                    Assert.False(guard.TryClearNow());
+                    Assert.Equal(1, clearedCount);
+                    Assert.Equal(1, skippedCount);
+                }
+            });
         }
     }
 }

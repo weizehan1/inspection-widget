@@ -185,6 +185,25 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("导航：生产构造可用（构造不打开目录）", () =>
                 Assert.NotNull(new InspectionFolderNavigator()));
+
+            TestRunner.Run("导航：已保存路径全部失联时仍回退到存在的配置根目录", () =>
+            {
+                string root = Path.Combine(Path.GetTempPath(), "iw-nav-fallback-" + Guid.NewGuid().ToString("N"));
+                string missingShot = Path.Combine(Path.Combine(root, "20261113"), "core.png");
+                string configured = Path.Combine(root, "20261114");
+                Directory.CreateDirectory(configured);
+                try
+                {
+                    var nav = new InspectionFolderNavigator(Directory.Exists, delegate { });
+                    var list = nav.ResolveFolders(root, "yyyyMMdd", new DateTime(2026, 11, 14), new[] { missingShot });
+                    Assert.Equal(1, list.Count);
+                    Assert.Equal(configured, list[0]);
+                }
+                finally
+                {
+                    try { Directory.Delete(root, true); } catch { }
+                }
+            });
         }
     }
 }

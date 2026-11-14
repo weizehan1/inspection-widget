@@ -30,9 +30,13 @@ Desktop.ini
 .vs/
 .idea/
 .vscode/
+.DS_Store
 
 # 构建产物目录（Task 0 审查 Minor）
 build/
+
+# 应用图标由 base64 文本按需还原，不入库二进制 .ico
+assets/app.ico
 
 # 图标预览图是源码资产，不受上面的截图 *.png 规则影响
 !assets/app-icon.png

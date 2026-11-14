@@ -23,6 +23,7 @@ namespace InspectionWidget
         private readonly TextBox _deviceChangeBox;
         private readonly Label _errorLabel;
         private readonly double _uiScaleFactor;
+        private Icon _ownedAppIcon;
 
         public ConfigImportPlan Plan { get; private set; }
 
@@ -52,8 +53,8 @@ namespace InspectionWidget
             AutoScaleMode = AutoScaleMode.None;
             ClientSize = new Size(760, 620);
             MinimumSize = new Size(680, 540);
-            Icon appIcon = AppIcon.Load();
-            if (appIcon != null) Icon = appIcon;
+            _ownedAppIcon = AppIcon.Load();
+            if (_ownedAppIcon != null) Icon = _ownedAppIcon;
 
             var root = new TableLayoutPanel
             {
@@ -359,6 +360,17 @@ namespace InspectionWidget
             Result = new ConfigImportFormResult { Options = options };
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _ownedAppIcon != null)
+            {
+                Icon = null;
+                _ownedAppIcon.Dispose();
+                _ownedAppIcon = null;
+            }
+            base.Dispose(disposing);
         }
 
         private static string CredentialSummary(ConfigImportDocument document)

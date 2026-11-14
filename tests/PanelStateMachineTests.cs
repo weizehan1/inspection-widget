@@ -193,6 +193,15 @@ namespace InspectionWidget.Tests
                 Assert.True(sm.CompleteCapture());
                 Assert.Equal(PanelState.Idle, sm.State);
             });
+
+            TestRunner.Run("钩子：未启动与重复 Dispose 安全无异常", () =>
+            {
+                var hooks = new HookManager();
+                Assert.False(hooks.UpdateSelfBounds(new System.Drawing.Rectangle(10, 20, 100, 200)));
+                hooks.Stop();
+                hooks.Dispose();
+                hooks.Dispose();
+            });
         }
     }
 }

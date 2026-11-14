@@ -278,9 +278,13 @@ namespace InspectionWidget.Config
 
                 bool defaulted = Normalize(config);
                 string text = Encoding.UTF8.GetString(RemoveUtf8Bom(bytes));
+                HashSet<string> topLevelKeys = ConfigJsonReader.TryReadTopLevelKeys(text);
                 for (int i = 0; i < OptionalFieldNames.Length; i++)
                 {
-                    if (text.IndexOf("\"" + OptionalFieldNames[i] + "\"", StringComparison.Ordinal) < 0)
+                    bool present = topLevelKeys != null
+                        ? topLevelKeys.Contains(OptionalFieldNames[i])
+                        : text.IndexOf("\"" + OptionalFieldNames[i] + "\"", StringComparison.Ordinal) >= 0;
+                    if (!present)
                     {
                         defaulted = true;
                         break;

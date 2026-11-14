@@ -109,6 +109,22 @@ namespace InspectionWidget.Config
             }
         }
 
+        internal static HashSet<string> TryReadTopLevelKeys(string text)
+        {
+            try
+            {
+                object rootObject = new Parser(text).Parse();
+                var root = rootObject as Dictionary<string, object>;
+                if (root == null)
+                    return null;
+                return new HashSet<string>(root.Keys, StringComparer.Ordinal);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         public static bool TryParse(string text, out ConfigImportDocument document, out string error)
         {
             document = null;

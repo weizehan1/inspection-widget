@@ -1,8 +1,5 @@
 using System;
 using System.IO;
-using System.Runtime.CompilerServices;
-
-[assembly: InternalsVisibleTo("InspectionWidget.Tests")]
 
 namespace InspectionWidget.Config
 {
