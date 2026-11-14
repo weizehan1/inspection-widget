@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.0-rc` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.0` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -83,7 +83,7 @@
 | 凭据 | 凭据增删、改名、改内容、清除单条、上下排序；内容掩码不回显，留空保存表示不改，清除可在当前草稿撤销，解不开的条目标「需重新设置」 |
 | 快捷链接 | 增删改、排序、启用/停用最多 12 条 `http://` / `https://` 网址，校验不合法时定位到具体行与字段 |
 | 存储与显示 | 截图根目录、日期文件夹名与实时预览、配置路径、剪贴板自动清空开关、截图模式、界面缩放、今日巡检计划开关与「隐藏已点过设备 / 全部显示」策略 |
-| 配置备份 | 普通导出、本机完整备份、导入预览与草稿合并/替换；以及产品版本（v1.1.0-rc）、路径信息等关于卡片 |
+| 配置备份 | 普通导出、本机完整备份、导入预览与草稿合并/替换；以及产品版本（v1.1.0）、路径信息等关于卡片 |
 
 配置文件位置：默认存 `%LocalAppData%\InspectionWidget\config.json`；若 exe 同目录已有 `config.json`，优先用 exe 旁边的这一份（便携用法）。
 
@@ -95,7 +95,7 @@
 
 ### 构建
 
-**自动构建（GitHub Actions）**：推送源码后由 `.github/workflows/build.yml` 在 Windows 环境用 MSBuild 构建 Release 并跑测试；产物为内嵌应用清单的 `InspectionWidget.exe`，从 Actions 产物或 Release 中下载。打 `v*` 版本标签时自动生成 GitHub Release 并附 exe——见 [build.yml](.github/workflows/build.yml)。本轮改造未推送、未打标签、未创建 Release。
+**自动构建（GitHub Actions）**：推送源码到 `main` 后由 `.github/workflows/build.yml` 在 `windows-latest` 上用 MSBuild 构建 Release、运行 **439 条纯逻辑与集成测试 + 19 条 Windows 窗体用例（共 458 条）**，校验 `requireAdministrator` / `PerMonitorV2` 清单内嵌与 SHA-256，并留存全部构建与测试日志；推送 `v*` 标签且上述门禁通过后，校验标签版本一致性并幂等发布 GitHub Release（附单文件 exe 与 `.sha256`）——见 [build.yml](.github/workflows/build.yml)。
 
 **本地构建（Windows，正式版）**：Visual Studio 2022 勾选「.NET 桌面开发」工作负载与 .NET Framework 4.8 目标包，打开 `InspectionWidget.sln`，Release 配置生成。零第三方包，无需还原 NuGet。
 
@@ -109,7 +109,7 @@ bash build.sh
 
 ### 验证状态
 
-Windows 发布工作流执行 MSBuild Release 构建与测试后上传单文件 exe。当前分支（`v1.1.0-rc`）已在 macOS Mono 环境通过 **433 条纯逻辑与方案 B 集成测试**（覆盖设备草稿、快捷链接、今日巡检计划与隐藏过滤、导入导出、原子写、锁、恢复备份与写保护）。显式加 `--windows-ui` 时，非 Windows 环境会报告窗体用例未执行并返回退出码 2。Windows 实机下的 WinForms 控件用例（11 条）、多显示器 DPI/工作区缩放、DPAPI、真实剪贴板、托盘、默认浏览器打开与管理员窗口截图尚待 Windows 环境验收。
+截至本次发版准备提交前，已在 macOS Mono 环境通过 **439 条纯逻辑与方案 B 集成测试**（覆盖设备草稿、快捷链接、今日巡检计划与隐藏过滤、损坏进度只读保护与备份恢复、导入导出、原子写与锁）。显式加 `--windows-ui` 时，非 Windows 环境会报告 **19 条** Windows 窗体用例未执行并返回退出码 2（不计为通过）。MSBuild 单文件打包、**19 条** WinForms 控件用例（共 458 条）、多显示器 DPI/工作区缩放、DPAPI、真实剪贴板、托盘、默认浏览器打开与管理员窗口截图需在推送后的 GitHub Actions Windows CI 与 Windows 实机环境验收。
 
 ### 目录结构
 
@@ -132,7 +132,7 @@ Windows 发布工作流执行 MSBuild Release 构建与测试后上传单文件 
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
-| v1.1.0-rc | 2026-11-14 | 方案 B 界面与流程改版候选版：352px 浮动面板新增顶栏日期、2 列快捷链接、今日巡检计划进度卡片（「已点过 X / Y」、开启/关闭切换、查看已点过、单行恢复未点、二次确认重置、全部点完后回空闲提示一次）、2 列凭据高亮与已复制标记、「打开巡检文件夹 ↗」主按钮与多目录选择；新增 `HideVisitedDevices`（默认开启点完即隐藏）及设置改名保留/跨日自动重置/独立 `progress.json` 持久化；设置窗重组为五页（设备 / 凭据 / 快捷链接 / 存储与显示 / 配置备份含关于）。当前仅完成 macOS Mono 构建与 433 条纯逻辑/集成回归，尚未完成 Windows 实机验收与发版。 |
+| v1.1.0 | 2026-11-14 | 方案 B 界面与流程改版正式版：352px 浮动面板新增顶栏日期、2 列快捷链接、今日巡检计划进度卡片（「已点过 X / Y」、开启/关闭切换、查看已点过、单行恢复未点、二次确认重置、全部点完后按可见态触发一次完成提示）、2 列凭据高亮与已复制标记、「打开巡检文件夹 ↗」主按钮与多目录选择；新增 `HideVisitedDevices`（默认开启点完即隐藏）、改名与部分导入保留进度、跨日延迟刷新、独立 `progress.json` 损坏写保护与备份恢复、新生成并验证的取景框应用图标，以及五页设置窗口。macOS Mono 已通过 439 条纯逻辑/集成测试；Windows 19 条 UI 用例与 MSBuild 单文件产物校验由 GitHub Actions Windows CI 与实机验证把关。 |
 | v1.0.4 | 2026-11-12 | 设备管理改为单列可编辑表格，改名直接保存，Esc 放弃当前编辑。应用后即时刷新主面板。新增配置导入导出、设备合并与替换预览、可选本机 DPAPI 完整备份。配置采用原子保存、导入前备份及读取失败保护。整理五页设置、滚动和缩放布局，修复设备表格事件递归与取消编辑问题，增加 Windows 窗体 CI。 |
 | v1.0.3 | 2026-11-03 | 主界面短名改为「巡检助手」（主面板标题、托盘提示、最小化气泡；产品全名与 exe 名不变）；凭据支持 ↑/↓ 上下排序（顺序持久化、即主面板渲染顺序）；主面板「截图」区新增与凭据区一致的折叠（配置新增 `IsDeviceCollapsed` 持久化，两区互不影响；口径更正：本条最初误解为「最小化窗口自动还原截图」，2026-11-03 用户看图澄清为分区折叠）；日期文件夹名默认改为 `巡检-yyyy-MM-dd`（仅默认值与缺字段自愈，已保存配置不迁移）；设置窗口新增「应用」按钮（与保存共用校验＋落盘、成功不关窗）；发版步骤改为幂等（同名 Release 已存在时自动 `--clobber` 补挂 exe）；Linux/Mono 本机构建产物 `build/InspectionWidget.exe` 为 322,048 字节，SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
@@ -150,7 +150,7 @@ Windows 发布工作流执行 MSBuild Release 构建与测试后上传单文件 
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.0-rc` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.0` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 
@@ -223,7 +223,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 | Credentials | Add, remove, rename, change content, clear a single entry and reorder credentials. Contents are masked and never echoed; leaving an existing field blank means "unchanged"; a clear can be undone within the current draft, and undecryptable entries are marked "Needs re-entry" |
 | Quick Links | Add, edit, toggle enable/disable, and reorder up to 12 `http://` / `https://` links with per-row/field validation |
 | Storage & Display | Screenshot root folder; date folder pattern with live preview; config path; 30-second clipboard auto-clear; capture mode; UI scaling; Today's inspection plan toggle; hide-visited vs. show-all device display policy |
-| Config & Backup | Ordinary export, full local backup, import preview, merge/replace into the draft, plus the About card (`v1.1.0-rc`, repo & active paths) |
+| Config & Backup | Ordinary export, full local backup, import preview, merge/replace into the draft, plus the About card (`v1.1.0`, repo & active paths) |
 
 Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; if a `config.json` already sits next to the exe, that one takes precedence (portable usage).
 
@@ -235,7 +235,7 @@ Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; 
 
 ### Build
 
-**Automatic builds (GitHub Actions)**: pushing source triggers `.github/workflows/build.yml`, which builds the Release configuration with MSBuild on a Windows runner and runs the test suite. The result is an `InspectionWidget.exe` with the application manifest embedded, downloadable from the Actions artifacts or from Releases. Pushing a `v*` tag automatically creates a GitHub Release with the exe attached — see [build.yml](.github/workflows/build.yml). This round was not pushed, tagged or released.
+**Automatic builds (GitHub Actions)**: pushing source to `main` triggers `.github/workflows/build.yml`, which builds Release with MSBuild on `windows-latest`, runs **439 logic/integration tests + 19 Windows Forms UI tests (458 total)**, verifies the embedded `requireAdministrator` / `PerMonitorV2` manifest and SHA-256, and retains full build/test logs even on failure. Pushing a `v*` tag after checks pass verifies tag/binary version consistency and publishes a GitHub Release with the single-file exe and `.sha256` — see [build.yml](.github/workflows/build.yml).
 
 **Local build (Windows, official)**: Visual Studio 2022 with the ".NET desktop development" workload and the .NET Framework 4.8 targeting pack; open `InspectionWidget.sln` and build the Release configuration. Zero third-party packages, no NuGet restore needed.
 
@@ -249,7 +249,7 @@ The script restores `assets/app.ico` from `assets/app.ico.base64.txt` when neede
 
 ### Verification status
 
-The Windows release workflow builds Release with MSBuild and uploads the single-file executable after tests pass. For `v1.1.0-rc`, **433 pure-logic and Scheme B integration tests** pass under macOS Mono (covering settings draft, quick links, today's inspection plan & hide-visited filtering, import/export, atomic writes, locking, recovery backups and write protection). On non-Windows systems, `--windows-ui` reports the UI cases as unexecuted and exits with code 2. The 11 WinForms UI control tests, multi-monitor DPI/work-area scaling, cross-user DPAPI, real clipboard/tray behavior, browser launch and elevated-window capture still require Windows verification.
+Before release tagging, **439 pure-logic and Scheme B integration tests** pass under macOS Mono (covering settings draft, quick links, today's inspection plan & hide-visited filtering, corrupt `progress.json` write protection & backup recovery, import/export, atomic writes and locking). On non-Windows systems, `--windows-ui` reports the **19** UI cases as unexecuted and exits with code 2 (not counted as passed). The MSBuild single-file build, **19** WinForms UI control tests (458 total), multi-monitor DPI/work-area scaling, cross-user DPAPI, real clipboard/tray behavior, browser launch and elevated-window capture require GitHub Actions `windows-latest` CI and Windows runtime verification.
 
 ### Project layout
 
@@ -272,7 +272,7 @@ The Windows release workflow builds Release with MSBuild and uploads the single-
 
 | Version | Date | Notes |
 | --- | --- | --- |
-| v1.1.0-rc | 2026-11-14 | Scheme B redesign release candidate: 352px floating panel with Chinese date header, 2-column Quick Links, Today's Inspection Plan progress card (`Visited X / Y`, live toggle, Show Visited, per-row Unmark, confirmation-guarded Reset, single completion prompt upon return to idle), 2-column Credentials with active copied check highlight, primary "Open inspection folder ↗" action with multi-folder chooser; added `HideVisitedDevices` (default true), rename progress preservation, day rollover and `progress.json` persistence; reorganized Settings into five pages (Devices / Credentials / Quick Links / Storage & Display / Config & Backup incl. About). Verified on macOS Mono (433/433 logic/integration tests); Windows runtime QA and release not yet performed. |
+| v1.1.0 | 2026-11-14 | Scheme B redesign release: 352px floating panel with Chinese date header, 2-column Quick Links, Today's Inspection Plan progress card (`Visited X / Y`, live toggle, Show Visited, per-row Unmark, confirmation-guarded Reset, visibility-guarded single completion prompt), 2-column Credentials with active copied check highlight, primary "Open inspection folder ↗" action with multi-folder chooser; added `HideVisitedDevices` (default true), rename and partial-import progress preservation, deferred midnight rollover, `progress.json` corruption write protection & backup recovery, redesigned viewfinder icon, and five Settings pages. Verified 439/439 logic/integration tests on macOS Mono; 19 Windows UI tests and MSBuild single-file packaging gated on GitHub Actions Windows CI and Windows runtime QA. |
 | v1.0.4 | 2026-11-12 | Added an editable device grid with direct save and Esc cancellation, plus immediate refresh after Apply. Added configuration import/export, device merge and replacement previews, optional local DPAPI backups, atomic saves, pre-import recovery backups and read-failure protection. Refined the five Settings pages, scrolling and scaling, fixed recursive grid events and edit cancellation, and added Windows UI CI. |
 | v1.0.3 | 2026-11-03 | The UI short name is now "Inspection Assistant" (panel title, tray tooltip and minimize balloon; the full product name and the exe name are unchanged); credentials can be reordered with ↑/↓ buttons (the order persists and is the order the panel renders); the panel's screenshot (devices) section can now be collapsed just like the credentials section (new persisted `IsDeviceCollapsed` config field; the two sections fold independently — clarified by the user on 2026-11-03 after an initial misunderstanding as "auto-restore minimized windows"); the default date folder pattern is now `巡检-yyyy-MM-dd` (default and missing-field healing only; existing saved values are not migrated); Settings gains an Apply button (same validation and save path as Save, but the window stays open on success); the release step is now idempotent (an existing same-tag release gets the exe uploaded with `--clobber` instead of failing); the Linux/Mono local build `build/InspectionWidget.exe` is 322,048 bytes, SHA256 `f3ee66680e43011f1213d4a71d6c81fc5cb7c8d90dc397dd2cd1d22d2533f77a` |
 | v1.0.2 | 2026-11-03 | New app icon (one source for the exe, window and tray icons); close button (✕) added to the title bar; the exe ships as `InspectionWidget.exe`; the settings button now uses the standard gear glyph from Segoe UI Symbol (with a code-drawn bitmap fallback when the font is unavailable); date folder names are customizable (`FolderNamePattern`, default `yyyy-MM-dd`, invalid patterns rejected at save time); minimize now goes to the system tray (the panel no longer appears in the taskbar; restore/exit from the tray, with a balloon tip the first time it hides — superseding the white paper's original "taskbar, not tray" decision, changed on 2026-11-03 based on hands-on feedback); the Linux/Mono local build `build/InspectionWidget.exe` is 318,464 bytes, SHA256 `6fda0c8da3469ed0bc6d65b858cd2dd5064df702b33044b233addaad72af09db` |

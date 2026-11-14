@@ -90,3 +90,10 @@ Codex额外发现新增Windows日期断言与中文界面不符，已要求原�
 原审计会话复审已完成：10/10 ADDRESSED，修复diff新发现[]；以实际落盘报告的9616598..8fe14ea为准，通知摘要另出现的其他哈希未作为验收依据。
 Codex核对当前产品树与8fe14ea一致、10项逐项裁定与空发现清单、439项本地通过日志及实际产物哈希；代码层面验收通过，Windows19条与实机操作仍未完成。
 Windows验证ZIP已打包并验证CRC、逐文件SHA256，无用户配置/凭据/截图；交付见 `work/v110/final-acceptance.md`。保留开发分支和worktree，不自动合并/推送/发布。
+
+
+## v1.1.0 发版准备
+
+- 正式版本标识收口：将 [src/Properties/AssemblyInfo.cs](src/Properties/AssemblyInfo.cs) 中 `AssemblyInformationalVersion` 由 `1.1.0-rc` 更新为 `1.1.0`（保留 `AssemblyVersion` 与 `AssemblyFileVersion` 为 `1.1.0.0`），将 [src/SettingsForm.cs](src/SettingsForm.cs) 关于卡片文案更新为 `巡检助手 v1.1.0 · Windows 10/11 · .NET Framework 4.8`，同步更新 [README.md](README.md) 中英文当前版本、验证状态（`439` 条纯逻辑/集成用例与 `19` 条 Windows UI 用例）与发布记录，保留 `work/v110/` 下历史 `rc` 审计/修复/复审/交付文档不动。
+- 新增发版前核查缺陷修复（[tests/MainFormUiTests.cs](tests/MainFormUiTests.cs)）：修正 `TestMainForm.GetSystemDpiScale()` 在基类 `MainForm` 构造调用 `BuildStaticLayout()` 时因派生字段 `_dpiProvider` 尚未赋值导致 `NullReferenceException` 的测试夹具缺陷——未初始化时安全返回 `1.0`，构造完成后仍调用 `_dpiProvider()` 并完整保留全部 DPI 缩放断言。
+- 加固 [.github/workflows/build.yml](.github/workflows/build.yml)：顶层与 `build` job 收敛为最小 `contents: read` 权限，独立 `release` job（`needs: build` 且仅 `push` `refs/tags/v*` 时触发）赋予 `contents: write`；两 job 均配置 `timeout-minutes`（15 / 5）；MSBuild `/flp` 参数加引号并严格校验退出码；分别运行 439 纯逻辑与 458 全量（`--windows-ui`）并校验无 `[SKIP]`/`[FAIL]`；构建及测试日志通过 `if: always()` 上传（失败亦留存）；校验 `InspectionWidget.exe` 版本元数据、内嵌 `requireAdministrator` + `PerMonitorV2` 清单及 Tag 版本一致性并产出 `.sha256`；通过 `gh release view` 显式区分不存在（404）与其他错误，实现不吞错的可靠幂等 Release 发布。

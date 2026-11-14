@@ -1,11 +1,12 @@
-# 巡检截图小组件 —— GitHub Actions 自动构建与发版
+# 巡检截图小组件 —— GitHub Actions 自动构建、全量测试与发版
 #
-# 在 windows-latest 上用 MSBuild（VS2022 工具链）构建：
-# - src/InspectionWidget.csproj 已设置 <ApplicationManifest>..\app.manifest</ApplicationManifest>，
-#   MSBuild 构建时把 app.manifest 内嵌进 exe，产物为单文件，不再外置 .manifest
-#   （本地 Mono xbuild 无法内嵌，才在 build/ 里外置一份，那是本地构建的差异）。
-# - 每次 push 到 main 与手动 workflow_dispatch 都构建并上传 artifact。
-# - 推送 v* 标签时，额外把 exe 附到同名 GitHub Release。
+# 在 windows-latest 上用 MSBuild（VS2022 工具链）构建 Release：
+# - src/InspectionWidget.csproj 已配置 <ApplicationManifest>..\app.manifest</ApplicationManifest>，
+#   MSBuild 将 requireAdministrator 与 DPI 声明内嵌进 exe，产名单文件交付。
+# - 所有分支/PR/手动触发仅使用最小只读权限完成构建、439 逻辑用例 + 19 Windows UI 用例（共 458 条）、
+#   产物版本与清单自检，以及全量构建/测试日志留存（失败亦上传）。
+# - 仅当推送 v* 标签时触发 release 任务（独立赋予 contents: write），先校验 tag 版本一致性，
+#   再以显式 view 判存的幂等流程创建或更新 GitHub Release 并附带 exe 与 .sha256。
 
 name: 构建巡检截图小组件
 
@@ -21,77 +22,230 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
+    name: Windows 构建与全量测试
     runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
 
     steps:
       - name: 检出源码
         uses: actions/checkout@v5
 
-      # 应用图标 assets/app.ico 是二进制文件，在仓库中以 base64 文本（assets/app.ico.base64.txt）存放，构建前还原。
-      - name: 还原应用图标
+      - name: 准备目录并还原应用图标
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path "ci-logs", "dist" | Out-Null
           $b64 = Get-Content "assets/app.ico.base64.txt" -Raw
-          [IO.File]::WriteAllBytes("assets/app.ico", [Convert]::FromBase64String($b64))
+          $bytes = [Convert]::FromBase64String($b64)
+          if ($bytes.Length -lt 4 -or $bytes[0] -ne 0 -or $bytes[1] -ne 0 -or $bytes[2] -ne 1 -or $bytes[3] -ne 0) {
+            throw "还原出的 assets/app.ico 不是合法 ICO 文件头。"
+          }
+          [IO.File]::WriteAllBytes((Join-Path (Get-Location) "assets\app.ico"), $bytes)
 
-      # 不用 microsoft/setup-msbuild（仍基于已弃用的 Node 20，会报警告）：
-      # runner 自带 vswhere，直接定位 VS2022 的 MSBuild.exe。
+      # 不用第三方 setup-msbuild，直接用 runner 自带 vswhere 定位 VS2022 MSBuild.exe
       - name: 定位 MSBuild
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
           if (-not $msbuild) { throw "未找到 MSBuild.exe" }
+          Write-Host "MSBuild: $msbuild"
           "MSBUILD_PATH=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: 构建主程序（Release）
         shell: pwsh
-        run: '& $env:MSBUILD_PATH InspectionWidget.sln /p:Configuration=Release /m'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:MSBUILD_PATH InspectionWidget.sln /p:Configuration=Release /p:Platform="Any CPU" /m "/flp:LogFile=ci-logs\msbuild-app.log;Verbosity=normal;Encoding=UTF-8"
+          $msbuildExit = $LASTEXITCODE
+          if ($msbuildExit -ne 0) { throw "主程序 MSBuild 构建失败，退出码 $msbuildExit" }
 
-      # tests 工程未包含在 .sln 中，需单独构建；
-      # 它是控制台 exe、自带极简测试框架，Main 以失败数决定退出码（0=全过，1=有失败），
-      # 默认入口只跑纯逻辑；Windows 窗体用例由下一步 --windows-ui 在 STA 线程执行。
       - name: 构建测试工程（Release）
         shell: pwsh
-        run: '& $env:MSBUILD_PATH tests\InspectionWidget.Tests.csproj /p:Configuration=Release /p:Platform=AnyCPU'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:MSBUILD_PATH tests\InspectionWidget.Tests.csproj /p:Configuration=Release /p:Platform=AnyCPU "/flp:LogFile=ci-logs\msbuild-tests.log;Verbosity=normal;Encoding=UTF-8"
+          $msbuildExit = $LASTEXITCODE
+          if ($msbuildExit -ne 0) { throw "测试工程 MSBuild 构建失败，退出码 $msbuildExit" }
 
-      - name: 运行测试
+      - name: 运行纯逻辑与集成测试（439 条）
         shell: pwsh
         run: |
-          & tests\bin\Release\InspectionWidget.Tests.exe
-          if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码 $LASTEXITCODE" }
+          try { chcp 65001 2>$null | Out-Null } catch {}
+          $global:LASTEXITCODE = 0
+          & tests\bin\Release\InspectionWidget.Tests.exe *> ci-logs\tests-logic.log
+          $exitCode = $LASTEXITCODE
+          $raw = Get-Content -Path ci-logs\tests-logic.log -Raw
+          Write-Host $raw
+          if ($exitCode -ne 0) { throw "纯逻辑测试失败，退出码 $exitCode" }
+          if ($raw -match '\[SKIP\]') { throw "纯逻辑测试日志出现 [SKIP]，禁止静默跳过。" }
+          if ($raw -match '(?m)^\[FAIL\]') { throw "纯逻辑测试日志出现 [FAIL]。" }
+          $passCount = ([regex]::Matches($raw, '(?m)^\[PASS\]')).Count
+          Write-Host "逻辑测试通过数：$passCount"
+          if ($passCount -ne 439) { throw "预期 439 条纯逻辑通过，实际为 $passCount 条。" }
 
-      - name: 运行 Windows 窗体测试
+      - name: 运行含 Windows 窗体全量测试（439 逻辑 + 19 UI = 458 条）
         shell: pwsh
         run: |
-          & tests\bin\Release\InspectionWidget.Tests.exe --windows-ui
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows UI tests failed, exit code $LASTEXITCODE"
+          try { chcp 65001 2>$null | Out-Null } catch {}
+          $global:LASTEXITCODE = 0
+          & tests\bin\Release\InspectionWidget.Tests.exe --windows-ui *> ci-logs\tests-winui.log
+          $exitCode = $LASTEXITCODE
+          $raw = Get-Content -Path ci-logs\tests-winui.log -Raw
+          Write-Host $raw
+          if ($exitCode -ne 0) { throw "Windows UI 测试失败，退出码 $exitCode" }
+          if ($raw -match '\[SKIP\]') { throw "Windows 环境不得跳过窗体测试，命中 [SKIP]。" }
+          if ($raw -match '(?m)^\[FAIL\]') { throw "Windows UI 测试日志出现 [FAIL]。" }
+          $passCount = ([regex]::Matches($raw, '(?m)^\[PASS\]')).Count
+          Write-Host "全量测试通过数（逻辑+UI）：$passCount"
+          if ($passCount -ne 458) { throw "预期 458 条全部通过（439 逻辑 + 19 UI），实际为 $passCount 条。" }
+
+      - name: 校验 exe 版本、清单权限、Tag 一致性与 SHA256
+        shell: pwsh
+        env:
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          $exePath = Resolve-Path "src\bin\Release\InspectionWidget.exe"
+          $item = Get-Item $exePath
+          if ($item.Length -le 0) { throw "构建产物 InspectionWidget.exe 大小为 0。" }
+
+          $ver = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
+          Write-Host "FileVersion=$($ver.FileVersion) ProductVersion=$($ver.ProductVersion) FileSize=$($item.Length)"
+          if ([string]::IsNullOrWhiteSpace($ver.FileVersion) -or [string]::IsNullOrWhiteSpace($ver.ProductVersion)) {
+            throw "exe 缺少 FileVersion 或 ProductVersion 元数据。"
           }
 
-      - name: 上传产物（单个 exe）
+          $exeText = [System.Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($exePath))
+          if (-not ($exeText.Contains('level="requireAdministrator"') -and $exeText.Contains('PerMonitorV2'))) {
+            throw "InspectionWidget.exe 未正确内嵌 requireAdministrator 与 PerMonitorV2 DPI 清单。"
+          }
+
+          if ($env:GIT_REF.StartsWith("refs/tags/v")) {
+            $tagVer = $env:GIT_REF_NAME.Substring(1)
+            $numericVer = ($tagVer -split '-')[0]
+            if ($ver.ProductVersion -ne $tagVer) {
+              throw "Tag 版本($tagVer) 与 exe ProductVersion($($ver.ProductVersion)) 不一致。"
+            }
+            if (-not $ver.FileVersion.StartsWith("$numericVer.")) {
+              throw "Tag 主版本($numericVer) 与 exe FileVersion($($ver.FileVersion)) 不一致。"
+            }
+            $settingsSrc = Get-Content "src\SettingsForm.cs" -Raw -Encoding utf8
+            if (-not $settingsSrc.Contains("巡检助手 v$tagVer ")) {
+              throw "SettingsForm 关于卡片版本字符串与 Tag v$tagVer 不一致。"
+            }
+          }
+
+          $hash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -Path $exePath -Destination "dist\InspectionWidget.exe" -Force
+          $shaPath = Join-Path (Get-Location) "dist\InspectionWidget.exe.sha256"
+          [IO.File]::WriteAllText($shaPath, "$hash  InspectionWidget.exe`n", [System.Text.Encoding]::ASCII)
+
+          @(
+            "FileVersion=$($ver.FileVersion)"
+            "ProductVersion=$($ver.ProductVersion)"
+            "Size=$($item.Length)"
+            "SHA256=$hash"
+            "Manifest=embedded(requireAdministrator,PerMonitorV2)"
+          ) | Out-File -FilePath "ci-logs\artifact-manifest.txt" -Encoding utf8
+
+          @(
+            "### Windows Release 产物校验"
+            "- **FileVersion**: ``$($ver.FileVersion)``"
+            "- **ProductVersion**: ``$($ver.ProductVersion)``"
+            "- **Bytes**: ``$($item.Length)``"
+            "- **SHA256**: ``$hash``"
+            "- **Manifest**: 内嵌 ``requireAdministrator`` + ``PerMonitorV2``"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: 上传构建与测试日志（含失败场景）
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-and-test-logs
+          path: ci-logs/
+          if-no-files-found: warn
+
+      - name: 上传单文件产物与校验和
         uses: actions/upload-artifact@v5
         with:
           name: InspectionWidget
-          path: src/bin/Release/InspectionWidget.exe
+          path: |
+            dist/InspectionWidget.exe
+            dist/InspectionWidget.exe.sha256
           if-no-files-found: error
 
-      # 用 runner 自带的 gh 命令行发版，不再引第三方 action（避免其运行时版本弃用警告）。
-      # 幂等（v1.0.3 加固）：同名 Release 已存在时 gh release create 会失败，此时改走 upload --clobber
-      # 把 exe 挂到已有 Release 上，整步以最终命令的退出码定成败。
-      - name: 发布 Release（仅 v* 标签）
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+  release:
+    name: 发布 GitHub Release（仅 v* 标签）
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出发布说明
+        uses: actions/checkout@v5
+
+      - name: 下载已验证构建产物
+        uses: actions/download-artifact@v5
+        with:
+          name: InspectionWidget
+          path: dist
+
+      - name: 校验下载产物 SHA256
+        shell: bash
+        run: |
+          (cd dist && sha256sum -c InspectionWidget.exe.sha256)
+
+      - name: 创建或幂等更新 GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release create ${{ github.ref_name }} "src/bin/Release/InspectionWidget.exe" --title ${{ github.ref_name }} --notes "自动构建：MSBuild 于 windows-latest，manifest 已内嵌，单文件运行；配置默认存 %LocalAppData%\InspectionWidget"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "同名 Release 已存在，改走 upload 把 exe 挂到已有 Release"
-            gh release upload ${{ github.ref_name }} "src/bin/Release/InspectionWidget.exe" --clobber
-            if ($LASTEXITCODE -ne 0) { throw "上传 exe 到已有 Release 失败，退出码 $LASTEXITCODE" }
-          }
+          set -euo pipefail
+          SHA256="$(cut -d' ' -f1 dist/InspectionWidget.exe.sha256)"
+          NOTES_FILE="/tmp/release-notes-${TAG}.md"
+
+          if [ -f "work/v110/release-notes-${TAG}.md" ]; then
+            cp "work/v110/release-notes-${TAG}.md" "$NOTES_FILE"
+          else
+            cat > "$NOTES_FILE" <<EOF
+          巡检助手 ${TAG} 自动构建发布（Windows 10/11 · .NET Framework 4.8）。
+
+          - 构建方式：GitHub Actions (\`windows-latest\`) MSBuild Release
+          - 内嵌清单：\`requireAdministrator\` + \`PerMonitorV2\` 单文件交付
+          - 配置默认保存路径：\`%LocalAppData%\InspectionWidget\`；今日进度保存在 \`%LocalAppData%\InspectionWidget\progress.json\`
+          EOF
+          fi
+
+          printf '\n### 产物校验（SHA-256）\n\n- `InspectionWidget.exe`: `%s`\n' "$SHA256" >> "$NOTES_FILE"
+
+          set +e
+          view_err="$(gh release view "$TAG" --json url 2>&1)"
+          view_rc=$?
+          set -e
+
+          if [ "$view_rc" -eq 0 ]; then
+            echo "Release $TAG 已存在，幂等覆盖附件并更新说明..."
+            gh release upload "$TAG" dist/InspectionWidget.exe dist/InspectionWidget.exe.sha256 --clobber
+            gh release edit "$TAG" --notes-file "$NOTES_FILE"
+          elif printf '%s' "$view_err" | grep -qiE 'release not found|not found'; then
+            echo "Release $TAG 尚不存在，新建 Release..."
+            gh release create "$TAG" dist/InspectionWidget.exe dist/InspectionWidget.exe.sha256 \
+              --title "$TAG" \
+              --verify-tag \
+              --notes-file "$NOTES_FILE"
+          else
+            echo "查询 Release $TAG 失败：$view_err" >&2
+            exit 1
+          fi

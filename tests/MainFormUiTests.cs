@@ -92,7 +92,7 @@ namespace InspectionWidget.Tests
 
             protected override double GetSystemDpiScale()
             {
-                return _dpiProvider();
+                return _dpiProvider != null ? _dpiProvider() : 1.0;
             }
         }
 

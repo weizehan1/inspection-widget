@@ -1217,7 +1217,7 @@ namespace InspectionWidget
             };
             var product = new Label
             {
-                Text = "巡检助手 v1.1.0-rc · Windows 10/11 · .NET Framework 4.8",
+                Text = "巡检助手 v1.1.0 · Windows 10/11 · .NET Framework 4.8",
                 Font = UiTheme.BodyBoldFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 AutoSize = true,
