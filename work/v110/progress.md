@@ -84,3 +84,9 @@ Codex 结构化验证报告 `/tmp/opencode/inspection-v110/codex-candidate-tests
 Hydrogen完成10项返修与6组新增headless回归，新增Windows用例共19条。Codex重跑完整构建439/439通过；重跑原AuditRepro确认损坏进度原件保留、普通模式目录记录、部分导入保留勾选。日志 `/tmp/opencode/inspection-v110/codex-fixed-final-build.log`、`codex-fixed-repro.log`，结构化结果 `codex-fixed-final-tests.json`。
 Codex额外发现新增Windows日期断言与中文界面不符，已要求原实现者只修该断言和报告失败提示措辞，并回读最终状态重编译通过。没有宣称19条Windows用例已运行。
 返修提交 `8fe14eae6bb0f58e9ca2d83e9a6c667bc7ff105f`。已送原独立审计会话 `6350a12e-db4f-4ff1-9e95-692e8d5c4199` 逐项复审，任务 `work/v110/hydrogen-re-review-brief.md`；原审计JSON仍保留open，待独立裁定。新图标资产未被返修覆盖。
+
+## 代码验收交付
+
+原审计会话复审已完成：10/10 ADDRESSED，修复diff新发现[]；以实际落盘报告的9616598..8fe14ea为准，通知摘要另出现的其他哈希未作为验收依据。
+Codex核对当前产品树与8fe14ea一致、10项逐项裁定与空发现清单、439项本地通过日志及实际产物哈希；代码层面验收通过，Windows19条与实机操作仍未完成。
+Windows验证ZIP已打包并验证CRC、逐文件SHA256，无用户配置/凭据/截图；交付见 `work/v110/final-acceptance.md`。保留开发分支和worktree，不自动合并/推送/发布。

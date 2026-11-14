@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "title": "InspectionSessionController 静默吞掉 progress.json 读取/恢复错误并在后续操作中直接覆盖损坏文件",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：InspectionPlan.RestoreWithStatus 先校验版本/字段/设备与路径结构，再按日期区分 PreviousDayValid(< today) 与 CorruptOrInvalid(> today)；InspectionProgressStore.TryBackupCorruptCopy 备份原坏字节；InspectionSessionController 增加 IsProgressProtected/RetryLoadProgress/BackupAndResetProgress 并在受保护或备份失败时阻止 SaveProgress 覆写；MainForm 接入 _planRecoveryButton 与 ProgressRecoveryDialog。独立复现：codex-fixed-repro.log (REPRO-1 progress_overwritten=False)；/tmp/opencode/inspection-v110/review2/rereview.log (CHECK-1 protected=True preservedBytes=True resetOk=True backupMatch=True yestProtected=False yestClickErr=<null>)；主仓 headless 回归 审计1/审计1b 通过（439/439）。Windows 恢复弹窗交互与 MainFormUiTests Case 5 未在 Windows 运行。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 2,
+    "title": "PlanModeEnabled=false 时 RecordSaveSucceeded 丢弃真实保存路径与兜底暂存目录，导致打开目录失效",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：InspectionSessionController.RecordSaveSucceeded 移除 !PlanModeEnabled 门禁，普通模式下同样记录 SavedPaths 并持久化到 progress.json。独立复现：codex-fixed-repro.log (REPRO-2 recorded=True savedPaths=1 openFolders=1)；rereview.log (CHECK-2 recorded=True savedCount=1 openCount=1 restartOpenCount=1 sameDir=True)；主仓回归 审计2（含仅暂存与主+暂存混合重启）通过。Windows 实机 explorer.exe 拉起目录未实测。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 3,
+    "title": "多处 progressErr 进度落盘错误被静默吞掉，并被「设置已应用」「配置已重新读取」或保存成功提示覆盖",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：InspectionSessionController 暴露 ProgressError/HasProgressError/RetrySaveProgress 并在 5 参 TryClaimCompletionPrompt 透出 error；MainForm 的 RetryConfigLoad、OnSettingsClicked、OnDeviceRowActivated、OnSaveCompleted、OnResetRoundClicked、OnUnmarkDeviceClicked 与 TryMaybeShowCompletionPrompt 均接入持续错误提示与 RestorePersistentFeedbackIfNeeded，不以成功文案覆盖进度失败，CompletionPromptDialog 在持久化失败时附加重启可能重复提示说明，且提供「重试保存」恢复入口。独立验证：rereview.log (CHECK-3 loadProtected=False errOnSelect=True retryStillFails=True)；主仓 审计4与3 通过。Windows 面板视觉展示与点击重试交互未实跑。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 4,
+    "title": "最小化到托盘期间完成最后一个设备仍会直接弹出无宿主 CompletionPromptDialog",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：5 参 TryClaimCompletionPrompt 增加 panelVisible 门控；MainForm.TryMaybeShowCompletionPrompt 在 !Visible || WindowState == FormWindowState.Minimized || _hiddenForCapture || Opacity < 0.5 时不认领且始终以 dialog.ShowDialog(this) 传主窗为 owner；ShowPanelFromTray 恢复可见后补调 SyncRolloverUiIfIdle 与 TryMaybeShowCompletionPrompt；OnSaveCompleted 先完成失败图 _pendingImage 登记再切换 Idle 并允许按原规格弹带失败说明的一次完成询问。独立验证：rereview.log (CHECK-4 claimedHidden=False promptedHidden=False claimedVisible=True promptedVisible=True claimedTwice=False)；主仓 审计4与3 通过。Windows 实机托盘最小化/恢复及 MainFormUiTests Case 5 未实跑。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 5,
+    "title": "非合并导入未包含 Devices 字段的配置文件时仍将 PendingImportDeviceReplace 置为 true，错误清空当日进度",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：ConfigImportPlan 增加 DevicesReplaced（仅 !MergeDevicesOnly && document.Has(\"Devices\") 时为 true）；SettingsDraft.ApplyPlan 仅在 plan.DevicesReplaced 为 true 时设 PendingImportDeviceReplace=true 并清 PendingDeviceRenames。独立复现：codex-fixed-repro.log (REPRO-3 pendingImportDeviceReplace=False visitedBefore=1 visitedAfter=1)；rereview.log (CHECK-5 devicesReplaced=False pendingReplace=False renameCount=1 visitedAfter=1 renamedVisited=True)；主仓 审计5 通过（同步修正既有测试用例明确补充 PresentFields.Add(\"Devices\")）。无 Windows 专属代码路径。",
+    "windowsStatus": "not-applicable"
+  },
+  {
+    "id": 6,
+    "title": "跨日定时器在忙碌期间触发后跳过界面重建，次日首个周期 rolled 已为 false 导致隐藏设备列表停留在前一日状态",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：InspectionSessionController 维护 _pendingRolloverUiRefresh 与 ConsumePendingRolloverRefresh()；MainForm 新增 SyncRolloverUiIfIdle()（跟踪 _uiRenderedPlanDate 与 _pendingDayRolloverRefresh）并在 OnDayRolloverTick、OnDeviceRowActivated 取消、Esc/右键/超时、OnCaptureCompleted、OnSaveCompleted、ShowPanelFromTray、OnSettingsClicked 等收敛路径刷新。独立验证：rereview.log (CHECK-6 recordedDay1=False rolledSecond=False pendingBefore=True consumed=True pendingAfter=False)；主仓 审计6 通过。Windows MainFormUiTests Case 6（含正确日期字面值 2026年11月15日 星期日）未在 Windows 实跑。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 7,
+    "title": "Waiting 态下再次点击同一设备切换回 Idle 时未清理提示语且漏掉 TryMaybeShowCompletionPrompt 检查",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：MainForm.OnDeviceRowActivated 在重复点击当前设备回到 Idle 时清空 _waitingPlanToken，调用 OnStateChanged()、SyncRolloverUiIfIdle()、ShowFeedback(\"已取消选窗\", false) 与 TryMaybeShowCompletionPrompt()，与 Esc/右键取消路径一致且不主动抢焦点。已新增 Windows 用例 MainFormUiTests Case 4 覆盖真实按钮激活与提示文案切换，因无 Windows 环境未实跑。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 8,
+    "title": "Waiting 态下折叠面板、切换计划/显示开关或重置进度后未更新 HookManager.UpdateSelfBounds",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：HookManager 抽出 internal interface IWindowPickHooks 并暴露 CurrentSelfBounds；MainForm 新增 UpdateWaitingHookSelfBounds()（带 !_hooksDisposed && !IsDisposed 守卫）并在 ApplyHeightAnchored、OnSizeChanged、OnLocationChanged、ClampToWorkingArea 统一同步钩子自身矩形。已新增 Windows 用例 MainFormUiTests Case 3 注入 FakeWindowPickHooks 验证折叠凭据/切换计划更新 SelfBounds，未在 Windows 实跑，真实 Win32 低级钩子亦未实机测试。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 9,
+    "title": "高 DPI 启动时 MainForm.OnHandleCreated 释放缓存 Font 后未刷新动态子控件的字体与布局",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：MainForm 新增 SwapScaledFont/EnsureScaledFonts/ApplyScaleAndRebuild，在静态与动态控件全部重绑新 Font 后才在 finally 中统一 Dispose 旧字体与 _gearImage；RebuildQuickLinks 移除每行绘制临时 Font；OnHandleCreated 检测到 ScaleFactor != _appliedScaleFactor 时重算尺寸、动态区与位置；ApplyScaleToStaticLayout 确认覆盖全部静态控件。已新增 Windows 用例 MainFormUiTests Case 1 验证 DPI 1.0->2.0 下 TextRenderer 测量零字体异常，未在 Windows 实跑。",
+    "windowsStatus": "untested"
+  },
+  {
+    "id": 10,
+    "title": "MainForm.LayoutSections 与 SettingsForm 行布局在 AutoScroll 滚动后直接赋值子控件 Location 会叠加偏移",
+    "verdict": "ADDRESSED",
+    "evidence": "源码核查：MainForm.LayoutSections 先计算逻辑总高、设 AutoScrollMinSize 并钳制滚动位置，再仅对 _scrollHost 直接子控件叠加 _scrollHost.AutoScrollPosition 偏移；SettingsForm 新增 PrepareAutoScrollPanel，仅对 _credentialRowsPanel 与 _linkRowsPanel 直接子行叠加滚动偏移，并在新增行时 ScrollControlIntoView。已新增 SettingsUiTests（Case 12-13）与 MainFormUiTests Case 2 覆盖真实 WinForms 滚动后移动/删除/折叠对齐，未在 Windows 实跑。",
+    "windowsStatus": "untested"
+  }
+]
