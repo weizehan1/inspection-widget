@@ -78,3 +78,9 @@ Codex 结构化验证报告 `/tmp/opencode/inspection-v110/codex-candidate-tests
 用户追加要求用 ImageGen 重做图标，已生成并接入统一嵌入资源；原图/提示词/ICO编码在assets，验证见 `work/v110/icon-generation.md`。ICO兼容性缺口已精确复现并修正，真实 AppIcon.Load 加载成功，整仓433/433通过。
 独立审计针对源码9616598发现5High/5Medium，暂不通过；Codex 已独立运行审计复现程序，确认损坏进度被覆盖、计划关闭丢暂存目录、缺Devices的部分导入清进度等行为。审计资料保留在work/v110/hydrogen-audit*，将退回原Hydrogen实现者修复，代码与图标分开归因。
 已将10项返修交回原实现会话 `acc0783b-7da0-46fb-8153-63da84b19d83`，任务 `work/v110/hydrogen-audit-fix-brief.md`；新图标已提交 `1cb70d8`，执行者不改assets，Codex暂不并行改源码。修复完成后由原独立审计会话复审。
+
+## 审计返修后独立核验与复审
+
+Hydrogen完成10项返修与6组新增headless回归，新增Windows用例共19条。Codex重跑完整构建439/439通过；重跑原AuditRepro确认损坏进度原件保留、普通模式目录记录、部分导入保留勾选。日志 `/tmp/opencode/inspection-v110/codex-fixed-final-build.log`、`codex-fixed-repro.log`，结构化结果 `codex-fixed-final-tests.json`。
+Codex额外发现新增Windows日期断言与中文界面不符，已要求原实现者只修该断言和报告失败提示措辞，并回读最终状态重编译通过。没有宣称19条Windows用例已运行。
+返修提交 `8fe14eae6bb0f58e9ca2d83e9a6c667bc7ff105f`。已送原独立审计会话 `6350a12e-db4f-4ff1-9e95-692e8d5c4199` 逐项复审，任务 `work/v110/hydrogen-re-review-brief.md`；原审计JSON仍保留open，待独立裁定。新图标资产未被返修覆盖。
