@@ -94,6 +94,11 @@ namespace InspectionWidget.Tests
             {
                 return _dpiProvider != null ? _dpiProvider() : 1.0;
             }
+
+            public void TriggerRecreateHandle()
+            {
+                RecreateHandle();
+            }
         }
 
         private sealed class MainEnv : IDisposable
@@ -246,8 +251,12 @@ namespace InspectionWidget.Tests
                     Assert.Equal(1.0, appliedBefore);
                     Assert.Equal(PanelLayout.ScaledSchemeBPanelWidth(1.0), widthAt100);
 
-                    env.SystemDpi = 2.0;
                     env.Form.Show();
+                    Application.DoEvents();
+                    Assert.True(env.Form.IsHandleCreated);
+
+                    env.SystemDpi = 2.0;
+                    env.Form.TriggerRecreateHandle();
                     Application.DoEvents();
 
                     double appliedAfter = (double)Field(env.Form, "_appliedScaleFactor");
@@ -415,20 +424,20 @@ namespace InspectionWidget.Tests
                     var countLabel = (Label)Field(env.Form, "_planCountLabel");
 
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
-                    Assert.Equal("1 / 3", countLabel.Text);
+                    Assert.Equal("已点过 1 / 3", countLabel.Text);
 
                     // 午夜跨日时仍在 Waiting：更新时间显示，保留待刷新标志而不粗暴破坏当前等待上下文
                     env.Clock.Now = new DateTime(2026, 11, 15, 0, 5, 0);
                     Invoke(env.Form, "OnDayRolloverTick", null, EventArgs.Empty);
                     Assert.Equal("2026年11月15日 星期日", dateLabel.Text);
                     Assert.True((bool)Field(env.Form, "_pendingDayRolloverRefresh"));
-                    Assert.Equal("1 / 3", countLabel.Text);
+                    Assert.Equal("已点过 1 / 3", countLabel.Text);
 
                     // 再次点击当前设备取消回 Idle，自动同步重绘新日 0 / 3 列表
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
                     Assert.False((bool)Field(env.Form, "_pendingDayRolloverRefresh"));
                     Assert.Equal(new DateTime(2026, 11, 15), (DateTime)Field(env.Form, "_uiRenderedPlanDate"));
-                    Assert.Equal("0 / 3", countLabel.Text);
+                    Assert.Equal("已点过 0 / 3", countLabel.Text);
                     Assert.Equal(0, session.Plan.VisitedCount);
                 }
             });
