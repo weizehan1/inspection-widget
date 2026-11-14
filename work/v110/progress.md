@@ -8,7 +8,7 @@ User authorization: 2026-11-14 “开始按照你的编排开始执行吧”。
 
 - P0: worktree 已建立，已刷新配置并保留用户指定模型；已批准草案中的建议默认值。
 - Baseline: `bash build.sh` 退出 1，缺少 msbuild/xbuild；不是测试失败，目前无法执行基线，待补齐构建环境。
-- PD: Kimi `574f80be-a9e6-4955-a01d-c3edaafa2c40` 已运行；只写设计目录和自己的报告，交两份可预览结构供用户确认。
+- PD: Kimi `574f80be-a9e6-4955-a01d-c3edaafa2c40` 已交付并修复 A/B 预览。Codex 重新打开、截图和交互检查通过，现在展示两方案供用户选定，P3 尚未实施。
 - P1: 混元4 `47eecb71-ae23-4ec9-ae88-e6c68948410f` 已运行，配置/链接/目录纯业务服务。
 - P2: DeepSeek `8a6a165f-5f4b-4043-be34-30a1a5efbad9` 交付首版及返修。Codex 回读四处修正后，正式入口整仓 Release 构建退出 0、375/375 纯逻辑测试通过；模块可供 P3 集成，Windows/UI 行为与最终 Hydrogen 审计仍待后续。
 - P3: 等用户选定具体前端预览后执行。
@@ -45,3 +45,14 @@ Mono 6.14.1 与 mono-libgdiplus 6.2 已安装。安装日志 `/tmp/opencode/insp
 
 四项问题均已按真实源码与行为测试核实修复；正式仓库构建退出 0，375/375 通过（新增 P2 共33条）。日志 `/tmp/opencode/inspection-v110/p2-revised.log`，结果 `p2-revised-tests.json`。
 集成约束：启动 Restore 成功后立刻用当前配置 ReconcileDevices；所有点击/保存回调/定时刷新前 EnsureCurrentDay；获取 token 后供对应请求持有，旧轮不能复用新 token。通知资格消费后要持久化，失败明确提示。P2 模块通过不代表 UI 与最终产品验收通过。
+
+## PD review round 1
+
+Codex 使用独立 agent-browser 会话 `v110-preview-b66b41a8b0e7` 在 1440x980 打开预览并拍摄 `/tmp/opencode/inspection-v110/preview-main.png`。B 的 `.folder-button span{flex:0}` 导致文字单字竖排；A 默认内容凭据被挤入滚动；设置 input handler 全量重建表单导致字段/焦点丢失。已退回 Kimi 修正这些具体缺口，不凭执行者报告直接认定设计可交付。
+
+## PD review round 2
+
+已回读 preview SHA256 `6378f16b071cf90973104442b383660f2a9574dda317aad51ff83b5f556df67f`；重新打开后 A/B 文件夹按钮高38px、label高17px，三设备两凭据均完整可见。A滚动容器仍有少量底部padding溢出，但内容未遮挡，不以“完全无滚动条”作为结论。
+通过真实 fill+逐字 type 修改“主复核入口一期”及 `https://review.example.invalid/ops`，切设备页返回后值一致、应用按钮启用。
+证据 `/tmp/opencode/inspection-v110/preview-main-reviewed.png`、`scheme-a.png`、`scheme-b.png`、`settings-reviewed.png`、`preview-main-check.json`、`preview-input-reviewed.json`。
+推荐 A：320px 按巡检顺序组织；B：352px 入口更集中。正式 DESIGN.md 与 UI 实现等用户选择。当前后台模块 P1 继续独立推进。
