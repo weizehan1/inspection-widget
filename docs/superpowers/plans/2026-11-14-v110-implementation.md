@@ -2,6 +2,8 @@
 
 > For agentic workers: user selected Kimi 3.1 Pro for frontend, PI Hunyuan4/DeepSeek for implementation, Hydrogen for audit and Codex for final verification. Follow the task briefs and file ownership; do not substitute models or add more agents.
 
+> 2026-11-14 execution amendment: 用户已取消卡滞的混元4，剩余 P1/P3/P4 实现统一交 Hydrogen；已选 B 设计，P2 已通过 Codex 模块复核。按 `work/v110/hydrogen-handoff.md` 接手当前未提交产物，并加入已点过设备隐藏/保留设置；本修订优先于下文旧分工和“待选”措辞。
+
 **Goal:** 重做巡检组件界面，并加入可配置链接、每日点击进度和完成后的目录入口。
 **Architecture:** 保留 WinForms 和原截图状态机，新增纯业务服务与独立进度存储，UI 消费接口。PD 设计预览先行；P1/P2 不依赖视觉选择，可先并行；P3 等用户选定具体预览。
 **Tech Stack:** C# 7.3（Mono 构建兼容 7.2）、.NET Framework 4.8、WinForms、自定义 TestRunner。
@@ -10,6 +12,7 @@
 ## Global Constraints
 - 单文件 exe，无新增第三方运行依赖，不改变截图/凭据/托盘/写保护的业务契约。
 - 对勾表示设备点击已被接受，取消/失败不撤销；保存状态单独反馈。
+- 新增 HideVisitedDevices（默认 true），计划模式下点击后隐藏或按设置保留；临时查看已点过不改进度、清单和统计，全部隐藏空态与未配置设备区分。
 - 同日恢复、次日新轮、非空清单全勾只询问一次；弹窗不抢选窗和保存焦点。
 - 每个执行者只修改自己任务的文件；不提交、推送、发布、安装依赖或另派 agent。Codex 负责登记测试入口和提交。
 - 无 Windows 证据的 UI/默认浏览器/资源管理器/混合 DPI 不算验收通过。

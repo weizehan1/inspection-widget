@@ -22,6 +22,8 @@
 
 ## 未验证 / 遗留
 
+2026-11-14 用户选定方案 B「入口与清单」。已新增 `docs/design/v110/DESIGN.md`，并将 `design-contract.md` 与 `recommendation.md` 标为已选定；HTML 保留 A/B 供对照，不代表仍需再次选择。
+
 没有 Windows 实机，未验证真实 WinForms 字体、DPI、混合多屏、键盘焦点、选窗、截图时隐藏、托盘、剪贴板或文件落盘。HTML 仅验证设计原型交互，不能替代产品测试。
 
 “恢复未点”“重置本轮”等控件在 HTML 中只演示反馈，不实现持久化业务。等待用户选择 A 或 B 后再固化正式 `DESIGN.md` 并实施。

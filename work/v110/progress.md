@@ -6,13 +6,13 @@ Branch: feat/v1.1.0-inspection-redesign
 Base: b9044e1
 User authorization: 2026-11-14 “开始按照你的编排开始执行吧”。
 
-- P0: worktree 已建立，已刷新配置并保留用户指定模型；已批准草案中的建议默认值。
-- Baseline: `bash build.sh` 退出 1，缺少 msbuild/xbuild；不是测试失败，目前无法执行基线，待补齐构建环境。
-- PD: Kimi `574f80be-a9e6-4955-a01d-c3edaafa2c40` 已交付并修复 A/B 预览。Codex 重新打开、截图和交互检查通过，现在展示两方案供用户选定，P3 尚未实施。
-- P1: 混元4 `47eecb71-ae23-4ec9-ae88-e6c68948410f` 已运行，配置/链接/目录纯业务服务。
+- P0: worktree 已建立，已刷新配置；用户最新要求将剩余实现全部交 Hydrogen，不再恢复混元4。
+- Baseline: 工具链已补齐，原 main 342/342 通过；见下方记录。
+- PD: Kimi `574f80be-a9e6-4955-a01d-c3edaafa2c40` 完成预览与返修，转交用户选定 B 的结果并写入 DESIGN.md；P3 可实施。
+- P1: 混元4 `47eecb71-ae23-4ec9-ae88-e6c68948410f` 已被用户取消，残留代码已保留与备份，尚未通过完整构建，将由 Hydrogen 接手。
 - P2: DeepSeek `8a6a165f-5f4b-4043-be34-30a1a5efbad9` 交付首版及返修。Codex 回读四处修正后，正式入口整仓 Release 构建退出 0、375/375 纯逻辑测试通过；模块可供 P3 集成，Windows/UI 行为与最终 Hydrogen 审计仍待后续。
-- P3: 等用户选定具体前端预览后执行。
-- P4/P5/P6: 待实现完成后回归、Hydrogen 审计、Codex 验收。
+- P3/P4: 用户选 B 且授权 Hydrogen 接手剩余界面实现和回归，含新增隐藏已点过设置。
+- P5/P6: 实现完成后由新的 Hydrogen 审计上下文复核，Codex 最终验收。
 
 Ruling: 用户授权按计划开始，采用点击即标已点过、同日恢复/跨日清空等原稿默认规则；不再次询问已经写明且获准的运行语义。
 Ruling: “预览并确认设计”保留为具体可审查的视觉选择；后台业务模块可提前实施，避免视觉选择阻塞独立工作。
@@ -56,3 +56,11 @@ Codex 使用独立 agent-browser 会话 `v110-preview-b66b41a8b0e7` 在 1440x980
 通过真实 fill+逐字 type 修改“主复核入口一期”及 `https://review.example.invalid/ops`，切设备页返回后值一致、应用按钮启用。
 证据 `/tmp/opencode/inspection-v110/preview-main-reviewed.png`、`scheme-a.png`、`scheme-b.png`、`settings-reviewed.png`、`preview-main-check.json`、`preview-input-reviewed.json`。
 推荐 A：320px 按巡检顺序组织；B：352px 入口更集中。正式 DESIGN.md 与 UI 实现等用户选择。当前后台模块 P1 继续独立推进。
+
+## 用户最新调整与 Hydrogen 接手
+
+用户取消混元4并要求剩余工作交反重力 Hydrogen。Kimi 转交“用户已明确选用方案B”，正式依据 `docs/design/v110/DESIGN.md` 已核对存在；后续不再询问A/B。
+追加需求：设置已点过设备隐藏或保留对勾，默认隐藏（仅计划模式），可临时查看已点过补截；不改变完整清单/进度/完成通知口径。
+接手前 Codex 登记 P1 三类测试，整仓构建退出1，`QuickLinkTests.cs(150,35)` CS0012，测试工程缺 System.Xml 引用；日志 `/tmp/opencode/inspection-v110/pre-hydrogen-build.log`。此为待接手修复缺口，不把旧375/375当新代码通过。
+完整接手前源码/未提交diff/哈希备份 `/tmp/opencode/inspection-v110/pre-hydrogen-20261114-164501/`；不清除未提交工作。执行说明 `work/v110/hydrogen-handoff.md`。
+Hydrogen 执行实例已启动：`acc0783b-7da0-46fb-8153-63da84b19d83`，provider/model=`antigravity/gemini-4-hydrogen-high`，workspace=`wks_fa6054276984b28d`。独占源码实现与共享构建，后续由完成通知驱动复核，不轮询。
