@@ -10,7 +10,7 @@ User authorization: 2026-11-14 “开始按照你的编排开始执行吧”。
 - Baseline: `bash build.sh` 退出 1，缺少 msbuild/xbuild；不是测试失败，目前无法执行基线，待补齐构建环境。
 - PD: Kimi `574f80be-a9e6-4955-a01d-c3edaafa2c40` 已运行；只写设计目录和自己的报告，交两份可预览结构供用户确认。
 - P1: 混元4 `47eecb71-ae23-4ec9-ae88-e6c68948410f` 已运行，配置/链接/目录纯业务服务。
-- P2: DeepSeek `8a6a165f-5f4b-4043-be34-30a1a5efbad9` 已运行，独立 Planning 模块和测试。
+- P2: DeepSeek `8a6a165f-5f4b-4043-be34-30a1a5efbad9` 交付首版及返修。Codex 回读四处修正后，正式入口整仓 Release 构建退出 0、375/375 纯逻辑测试通过；模块可供 P3 集成，Windows/UI 行为与最终 Hydrogen 审计仍待后续。
 - P3: 等用户选定具体前端预览后执行。
 - P4/P5/P6: 待实现完成后回归、Hydrogen 审计、Codex 验收。
 
@@ -32,4 +32,16 @@ Ruling: “预览并确认设计”保留为具体可审查的视觉选择；后
 
 ## Toolchain
 
-正在通过 Homebrew 安装 Mono。安装日志 `/tmp/opencode/inspection-v110/toolchain.log`；基线日志 `/tmp/opencode/inspection-v110/baseline.log`。安装完成后在未改动源码的基线目录单独验证，避免把新代码失败算到历史基线。
+Mono 6.14.1 与 mono-libgdiplus 6.2 已安装。安装日志 `/tmp/opencode/inspection-v110/toolchain.log`、`gdiplus-install.log`。
+未改动源码的原 main 工作区基线命令 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib bash build.sh` 退出 0，342/342 纯逻辑测试通过；日志 `/tmp/opencode/inspection-v110/baseline.log`，结构化结果 `baseline-tests.json`。Windows UI 未执行。
+首次缺 Mono、随后缺 libgdiplus 的运行都属于工具链准备问题；补齐后同源码基线已通过，无需修改产品代码。
+
+## P2 review round 1
+
+正式集成命令 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib bash build.sh` 退出 0，372/372；日志 `/tmp/opencode/inspection-v110/p2-integration.log`，结果 `p2-integration-tests.json`。
+发现与返修：pending 经新增/删除清单可误弹、快照空白设备名未拒绝、保存失败测试验证了不同目标、保存大小超过读取上限。详见 `/tmp/opencode/inspection-v110/p2-review-findings.json`。不因测试全过就认定需求已满足。
+
+## P2 review round 2
+
+四项问题均已按真实源码与行为测试核实修复；正式仓库构建退出 0，375/375 通过（新增 P2 共33条）。日志 `/tmp/opencode/inspection-v110/p2-revised.log`，结果 `p2-revised-tests.json`。
+集成约束：启动 Restore 成功后立刻用当前配置 ReconcileDevices；所有点击/保存回调/定时刷新前 EnsureCurrentDay；获取 token 后供对应请求持有，旧轮不能复用新 token。通知资格消费后要持久化，失败明确提示。P2 模块通过不代表 UI 与最终产品验收通过。

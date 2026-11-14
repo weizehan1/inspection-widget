@@ -33,6 +33,8 @@ namespace InspectionWidget.Tests
             ConfigWriteProtectionTests.RunAll();
             AtomicConfigWriterTests.RunAll();
             SettingsApplyCoordinatorTests.RunAll();
+            InspectionPlanTests.RunAll();
+            InspectionProgressStoreTests.RunAll();
 
             bool windowsUiSkipped = false;
             if (windowsUiRequested)
