@@ -6,6 +6,13 @@ using InspectionWidget.Storage;
 
 namespace InspectionWidget.Planning
 {
+    internal enum ProgressRestoreStatus
+    {
+        Restored,
+        PreviousDayValid,
+        CorruptOrInvalid
+    }
+
     /// <summary>
     /// 每日巡检进度：以纯状态为核心，不依赖 UI、真实截图或外部程序。
     /// <para>语义：对勾表示“这次点击已被截图状态机接受”。UI 只有在点击被接受后
@@ -266,6 +273,20 @@ namespace InspectionWidget.Planning
         /// </summary>
         public bool Restore(InspectionProgressSnapshot snapshot, out string error)
         {
+            ProgressRestoreStatus status;
+            return RestoreWithStatus(snapshot, out status, out error);
+        }
+
+        /// <summary>
+        /// 带结构/过期区分的恢复：结构本身损坏返回 CorruptOrInvalid；
+        /// 结构合法但属于更早日期的快照返回 PreviousDayValid（不是损坏，可正常开今日新轮）。
+        /// </summary>
+        internal bool RestoreWithStatus(
+            InspectionProgressSnapshot snapshot,
+            out ProgressRestoreStatus status,
+            out string error)
+        {
+            status = ProgressRestoreStatus.CorruptOrInvalid;
             error = null;
             if (snapshot == null)
             {
@@ -277,9 +298,9 @@ namespace InspectionWidget.Planning
                 error = "进度快照版本不受支持（" + snapshot.SchemaVersion + "），未恢复。";
                 return false;
             }
-            if (snapshot.Date == default(DateTime) || snapshot.Date.Date != _clock.Now.Date)
+            if (snapshot.Date == default(DateTime))
             {
-                error = "进度快照不是今天的记录，未恢复为当日进度。";
+                error = "进度快照缺少有效日期，未恢复。";
                 return false;
             }
             if (string.IsNullOrWhiteSpace(snapshot.RoundId))
@@ -351,6 +372,20 @@ namespace InspectionWidget.Planning
                 }
             }
 
+            DateTime today = _clock.Now.Date;
+            if (snapshot.Date.Date < today)
+            {
+                status = ProgressRestoreStatus.PreviousDayValid;
+                error = "进度快照不是今天的记录，未恢复为当日进度。";
+                return false;
+            }
+            if (snapshot.Date.Date > today)
+            {
+                status = ProgressRestoreStatus.CorruptOrInvalid;
+                error = "进度快照日期（" + snapshot.Date.ToString("yyyy-MM-dd") + "）晚于当前系统日期，未恢复。";
+                return false;
+            }
+
             // 校验全部通过后才提交，避免半途失败留下混合状态。
             _date = snapshot.Date.Date;
             _roundId = snapshot.RoundId;
@@ -362,6 +397,7 @@ namespace InspectionWidget.Planning
             _savedPaths.AddRange(savedPaths);
             _completionPrompted = snapshot.CompletionPrompted;
             _completionPending = snapshot.CompletionPending;
+            status = ProgressRestoreStatus.Restored;
             return true;
         }
 

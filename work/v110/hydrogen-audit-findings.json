@@ -1,0 +1,92 @@
+[
+  {
+    "severity": "high",
+    "title": "InspectionSessionController 静默吞掉 progress.json 读取/恢复错误并在后续操作中直接覆盖损坏文件",
+    "file": "src/Planning/InspectionSessionController.cs",
+    "line": 48,
+    "detail": "构造函数调用 _progressStore.TryLoad(out snapshot, out error) 和 _plan.Restore(snapshot, out restoreError) 时丢弃了 error 与 restoreError，未记录只读错误状态或写入保护标志；一旦进度文件损坏、截断、超限（>1 MiB）或字段非同日非法导致加载失败，计划被静默清空为 0/N，随后 TrySelectDevice、ApplySavedConfig、ReloadConfig 或 RecordSaveSucceeded 都会通过 AtomicConfigWriter 直接覆盖原 progress.json。",
+    "fix": "在 InspectionSessionController 中暴露 ProgressLoadError（或写保护状态）：当 TryLoad 或同日 Restore 失败时保留只读错误状态，禁止在未显式重置/备份恢复前覆写原损坏文件，并在主面板给出持续错误提示及重试/备份恢复入口。",
+    "status": "open"
+  },
+  {
+    "severity": "high",
+    "title": "PlanModeEnabled=false 时 RecordSaveSucceeded 丢弃真实保存路径与兜底暂存目录，导致打开目录失效",
+    "file": "src/Planning/InspectionSessionController.cs",
+    "line": 146,
+    "detail": "RecordSaveSucceeded 在 !PlanModeEnabled 时直接返回 false，既不记录 _plan.RecordSavedPath(fullPath, token)，也不落盘到 progress.json。若截图因主目录无权限/不可用而写入 FallbackScreenshots 兜底目录（UsedFallback=true），OpenInspectionFolders() 仅能解析当前配置主目录：主目录不存在时报错「今天尚无截图」，主目录存在时则只打开主目录、遗漏真正保存截图的兜底目录。",
+    "fix": "无论 PlanModeEnabled 是否启用，只要保存成功都应记录当日实际保存路径（或独立的当日保存目录列表），并在 ResolveOpenFolders() 中按真实保存目录去重汇总，与计划计数开关解耦。",
+    "status": "open"
+  },
+  {
+    "severity": "high",
+    "title": "多处 progressErr 进度落盘错误被静默吞掉，并被「设置已应用」「配置已重新读取」或保存成功提示覆盖",
+    "file": "src/MainForm.cs",
+    "line": 2026,
+    "detail": "MainForm 中四处进度写入忽略或覆盖了 progressErr：(1) OnSettingsClicked（2026-2039 行）调用 _session.ApplySavedConfig 后未检查 progressErr 即调用 ShowSuccessFeedback(\"设置已应用\")；(2) RetryConfigLoad（1261-1277 行）调用 ReloadConfig 后直接显示「配置已重新读取」；(3) OnSaveCompleted（2576-2590 行）调用 RecordSaveSucceeded 后未检查 progressErr 即显示截图保存成功；(4) TryMaybeShowCompletionPrompt（3014 行）忽略 TryClaimCompletionPrompt 返回的 progressErr，导致 CompletionPrompted 落盘失败后重启会重复弹窗；(5) OnDeviceRowActivated（1950-1954 行）虽展示了 progressErr，但仅使用会过期/被覆盖的临时反馈条。",
+    "fix": "在 ApplySavedConfig、ReloadConfig、RecordSaveSucceeded、TryClaimCompletionPrompt 返回非空 progressErr 时显式使用错误提示并避免被常规成功文案覆盖；在 OnSaveCompleted 截图已保存但 progress.json 失败时给出并列警告提示；落盘失败时保留待重试状态。",
+    "status": "open"
+  },
+  {
+    "severity": "high",
+    "title": "最小化到托盘期间完成最后一个设备仍会直接弹出无宿主 CompletionPromptDialog",
+    "file": "src/MainForm.cs",
+    "line": 3014,
+    "detail": "TryMaybeShowCompletionPrompt 仅向 TryClaimCompletionPrompt 传入 _hiddenForCapture || Opacity < 0.5，未把 !Visible（例如最小化隐藏到系统托盘）作为抑制条件，且未拦截 _pendingImage != null 尚未处理的失败重试态；一旦在隐藏状态下触发完成提示，不仅提前消耗 CompletionPrompted=true，还会调用无 owner 的 dialog.ShowDialog() 弹窗，若用户选「打开文件夹」且有多个目录，还会针对隐藏按钮弹出菜单。ShowPanelFromTray 恢复显示时也未补检 TryMaybeShowCompletionPrompt。",
+    "fix": "将 !Visible 纳入 TryClaimCompletionPrompt 抑制门控（或仅在主面板 Visible && !_hiddenForCapture && Opacity >= 0.5 时认领并弹窗），并在 ShowPanelFromTray 恢复主面板可见后触发一次 TryMaybeShowCompletionPrompt()。",
+    "status": "open"
+  },
+  {
+    "severity": "high",
+    "title": "非合并导入未包含 Devices 字段的配置文件时仍将 PendingImportDeviceReplace 置为 true，错误清空当日进度",
+    "file": "src/Config/SettingsDraft.cs",
+    "line": 239,
+    "detail": "ConfigTransfer.TryBuildPlan（ConfigTransfer.cs:162-171）在 MergeDevicesOnly=false 且导入文件不包含 Devices（例如仅改 HideVisitedDevices 或部分设置的新版 Exchange 文件）时保留 current.Devices；但 ConfigImportPlan 未区分「来源实际替换了 Devices」，SettingsDraft.ApplyPlan(plan, false)（239-258 行）无条件将 PendingImportDeviceReplace 设为 true 并清空 PendingDeviceRenames，导致设置保存后 ApplySavedConfig 调用 _plan.ReplaceDevices(...) 清空当日已完成进度与历史改名迁移。",
+    "fix": "在 ConfigImportPlan 中显式记录 DevicesReplaced（仅当 !mergeOnly && document.Has(\"Devices\") 时为 true），让 SettingsDraft.ApplyPlan 仅在 plan.DevicesReplaced 为 true 时设置 PendingImportDeviceReplace 并清空 PendingDeviceRenames。",
+    "status": "open"
+  },
+  {
+    "severity": "medium",
+    "title": "跨日定时器在忙碌期间触发后跳过界面重建，次日首个周期 rolled 已为 false 导致隐藏设备列表停留在前一日状态",
+    "file": "src/MainForm.cs",
+    "line": 2995,
+    "detail": "OnDayRolloverTick 每次都会调用 _session.EnsureCurrentDayResetIfRolled(out rolled)，该方法在首次跨午夜时立刻把 _plan 重置为新的一天并返回 rolled=true；但 MainForm 随后用 if (rolled && _stateMachine.State == PanelState.Idle && !_saveInFlight) 才重建设备列表。若跨午夜恰好发生在 Waiting 或保存进行中，首次被跳过，下一分钟 rolled 已变成 false，且保存/取消/超时回调也未统一 RebuildDeviceButtons()，于是计划卡显示 0/N 而昨天被 HideVisitedDevices 隐藏的设备继续消失。",
+    "fix": "在 MainForm 记录待处理的跨日界面刷新标志（如 _pendingDayRolloverRefresh |= rolled），或在任何状态切回 Idle 且 !_saveInFlight 时若日期视图尚未同步则统一 RebuildPlanCard() 与 RebuildDeviceButtons()。",
+    "status": "open"
+  },
+  {
+    "severity": "medium",
+    "title": "Waiting 态下再次点击同一设备切换回 Idle 时未清理提示语且漏掉 TryMaybeShowCompletionPrompt 检查",
+    "file": "src/MainForm.cs",
+    "line": 1939,
+    "detail": "在关闭隐藏或开启「查看已点过」时，Waiting 态下再次点击当前设备会使 PanelStateMachine.SelectDevice 返回 true 并切回 Idle；但 OnDeviceRowActivated 仅在 State == Waiting 时更新反馈条，切回 Idle 后既不恢复/清理等待截图提示文本，也未调用 TryMaybeShowCompletionPrompt()（当其余设备均已完成、仅剩取消切换后的检查时机时会导致通知遗漏）。",
+    "fix": "当 OnDeviceRowActivated 使状态从 Waiting 切换回 Idle 时，在 OnStateChanged() 后同步刷新闲置/失败提示状态并调用 TryMaybeShowCompletionPrompt()。",
+    "status": "open"
+  },
+  {
+    "severity": "medium",
+    "title": "Waiting 态下折叠面板、切换计划/显示开关或重置进度后未更新 HookManager.UpdateSelfBounds",
+    "file": "src/MainForm.cs",
+    "line": 1825,
+    "detail": "在 Waiting 态点击分组折叠、切换 PlanModeEnabled、切换 ShowVisitedOverride、取消标记或重置本轮时，代码调用 ApplyHeightAnchored() 改变了 MainForm 的尺寸与屏幕 Bounds，但未同步调用 _hooks.UpdateSelfBounds(Bounds)，会导致鼠标钩子仍沿用旧尺寸判定「是否点击在面板自身上」。",
+    "fix": "在 ApplyHeightAnchored() 更新窗体 Bounds 后统一检查：若 _hooks != null 且当前处于 Waiting，立即调用 _hooks.UpdateSelfBounds(Bounds)。",
+    "status": "open"
+  },
+  {
+    "severity": "medium",
+    "title": "高 DPI 启动时 MainForm.OnHandleCreated 释放缓存 Font 后未刷新动态子控件的字体与布局",
+    "file": "src/MainForm.cs",
+    "line": 425,
+    "detail": "构造函数先按初始 DPI 生成 _quickLinkControls、_deviceRows、_credentialControls 等动态控件及缓存字体；OnHandleCreated（425-433 行）随后按实际 DeviceDpi 调用 ApplyScaleToStaticLayout()，GetScaledFont（226-235 行）会在目标字号变化时 Dispose 旧 Font 实例，却未重建或重绑动态子控件，可能使动态行继续引用已 Dispose 的 Font（WinForms GDI+ 参数无效风险）且行高未按新 DPI 缩放。",
+    "fix": "在 OnHandleCreated 中若 ScaleFactor 较构造时发生变化，除更新静态布局外应重新构建动态区域（快捷链接、计划卡、设备行、凭据行）并重新计算 PanelLayout 高度。",
+    "status": "open"
+  },
+  {
+    "severity": "medium",
+    "title": "MainForm.LayoutSections 与 SettingsForm 行布局在 AutoScroll 滚动后直接赋值子控件 Location 会叠加偏移",
+    "file": "src/MainForm.cs",
+    "line": 984,
+    "detail": "WinForms 中 AutoScroll=true 容器在滚动后设置子控件 Location 时，坐标系以当前视口原点为准（需加 AutoScrollPosition.Y）。MainForm.LayoutSections 对 _scrollHost 子面板（984-1040 行）、SettingsForm.LayoutCredentialRows（1544 行）与 LayoutLinkRows（1672 行）均在未计入 AutoScrollPosition.Y（也未先归零）的情况下直接按逻辑 y 赋值 Location，用户在滚动后折叠/增删行或打开/收起设备列表时会出现空白或行重叠错位。",
+    "fix": "所有位于 AutoScroll 容器内的动态重排函数在计算子控件 Location.Y 时加上 container.AutoScrollPosition.Y（或先挂起布局并计入滚动偏移）。",
+    "status": "open"
+  }
+]

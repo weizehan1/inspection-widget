@@ -20,6 +20,9 @@ namespace InspectionWidget.Planning
         private readonly InspectionPlan _plan;
         private AppConfig _config;
         private bool _showVisitedOverride;
+        private string _progressProtectError;
+        private string _progressSaveError;
+        private bool _pendingRolloverUiRefresh;
 
         public InspectionSessionController(
             IClock clock,
@@ -45,18 +48,74 @@ namespace InspectionWidget.Planning
             _config = config ?? AppConfig.CreateDefault();
             _plan = new InspectionPlan(clock, _config.Devices);
 
+            string initialError;
+            LoadProgressFromStore(false, out initialError);
+        }
+
+        public bool IsProgressProtected
+        {
+            get { return !string.IsNullOrEmpty(_progressProtectError); }
+        }
+
+        public string ProgressError
+        {
+            get { return _progressProtectError ?? _progressSaveError; }
+        }
+
+        public bool HasProgressError
+        {
+            get { return !string.IsNullOrEmpty(ProgressError); }
+        }
+
+        public bool HasPendingRolloverRefresh
+        {
+            get { return _pendingRolloverUiRefresh; }
+        }
+
+        public bool ConsumePendingRolloverRefresh()
+        {
+            bool was = _pendingRolloverUiRefresh;
+            _pendingRolloverUiRefresh = false;
+            return was;
+        }
+
+        public bool RetryLoadProgress(out string error)
+        {
+            bool ok = LoadProgressFromStore(true, out error);
+            if (ok)
+                _pendingRolloverUiRefresh = true;
+            return ok;
+        }
+
+        public bool RetrySaveProgress(out string error)
+        {
+            SaveProgress(out error);
+            return string.IsNullOrEmpty(error);
+        }
+
+        public bool BackupAndResetProgress(out string backupPath, out string error)
+        {
+            backupPath = null;
+            error = null;
             if (_progressStore != null)
             {
-                InspectionProgressSnapshot snapshot;
-                string error;
-                if (_progressStore.TryLoad(out snapshot, out error) && snapshot != null)
+                if (!_progressStore.TryBackupCorruptCopy(out backupPath, out error))
                 {
-                    string restoreError;
-                    if (_plan.Restore(snapshot, out restoreError))
-                        _plan.ReconcileDevices(_config.Devices);
+                    // 备份失败时绝不解除保护或覆写原损坏文件。
+                    _progressProtectError = "进度损坏且备份失败（未覆盖原文件）：" + (error ?? "未知错误");
+                    error = _progressProtectError;
+                    return false;
                 }
             }
-            _plan.EnsureCurrentDay();
+
+            _progressProtectError = null;
+            _progressSaveError = null;
+            _showVisitedOverride = false;
+            _plan.ResetRound();
+            _plan.ReconcileDevices(_config != null ? _config.Devices : null);
+            _pendingRolloverUiRefresh = true;
+            SaveProgress(out error);
+            return string.IsNullOrEmpty(error);
         }
 
         public InspectionPlan Plan
@@ -131,6 +190,8 @@ namespace InspectionWidget.Planning
                 capturedToken = token;
                 if (PlanModeEnabled && _plan.MarkVisited(device, token))
                     SaveProgress(out progressSaveError);
+                else if (HasProgressError)
+                    progressSaveError = ProgressError;
             }
             return true;
         }
@@ -143,10 +204,14 @@ namespace InspectionWidget.Planning
             progressSaveError = null;
             bool rolled;
             EnsureCurrentDayResetIfRolled(out rolled);
-            if (!PlanModeEnabled || string.IsNullOrWhiteSpace(fullPath))
+            if (string.IsNullOrWhiteSpace(fullPath))
                 return false;
             if (!_plan.RecordSavedPath(fullPath, token))
+            {
+                if (HasProgressError)
+                    progressSaveError = ProgressError;
                 return false;
+            }
             SaveProgress(out progressSaveError);
             return true;
         }
@@ -227,18 +292,36 @@ namespace InspectionWidget.Planning
             _plan.EnsureCurrentDay();
             dayRolled = _plan.Date != prevDate;
             if (dayRolled)
+            {
                 _showVisitedOverride = false;
+                _pendingRolloverUiRefresh = true;
+            }
             return dayRolled;
         }
 
         public bool TryClaimCompletionPrompt(
             bool saveInFlight,
             bool settingsDialogOpen,
+            bool panelHidden,
+            out string progressSaveError)
+        {
+            return TryClaimCompletionPrompt(
+                saveInFlight,
+                settingsDialogOpen,
+                panelHidden,
+                true,
+                out progressSaveError);
+        }
+
+        public bool TryClaimCompletionPrompt(
+            bool saveInFlight,
+            bool settingsDialogOpen,
             bool hiddenForCapture,
+            bool panelVisible,
             out string progressSaveError)
         {
             progressSaveError = null;
-            if (!PlanModeEnabled || saveInFlight || settingsDialogOpen || hiddenForCapture)
+            if (!PlanModeEnabled || saveInFlight || settingsDialogOpen || hiddenForCapture || !panelVisible)
                 return false;
             if (_stateMachine.State != PanelState.Idle)
                 return false;
@@ -261,13 +344,89 @@ namespace InspectionWidget.Planning
                 _plan.SavedPaths);
         }
 
-        private void SaveProgress(out string error)
+        private bool LoadProgressFromStore(bool isRetry, out string error)
         {
             error = null;
             if (_progressStore == null)
+            {
+                _progressProtectError = null;
+                _progressSaveError = null;
+                _plan.EnsureCurrentDay();
+                return true;
+            }
+
+            InspectionProgressSnapshot snapshot;
+            string loadError;
+            if (!_progressStore.TryLoad(out snapshot, out loadError))
+            {
+                _progressProtectError = loadError ?? "巡检进度读取失败，已保护原文件。";
+                error = _progressProtectError;
+                return false;
+            }
+
+            if (snapshot == null)
+            {
+                _progressProtectError = null;
+                _progressSaveError = null;
+                if (isRetry)
+                {
+                    _plan.ResetRound();
+                    _plan.ReconcileDevices(_config != null ? _config.Devices : null);
+                }
+                _plan.EnsureCurrentDay();
+                return true;
+            }
+
+            ProgressRestoreStatus status;
+            string restoreError;
+            if (_plan.RestoreWithStatus(snapshot, out status, out restoreError))
+            {
+                _progressProtectError = null;
+                _progressSaveError = null;
+                _plan.ReconcileDevices(_config != null ? _config.Devices : null);
+                _plan.EnsureCurrentDay();
+                return true;
+            }
+
+            if (status == ProgressRestoreStatus.PreviousDayValid)
+            {
+                // 有效的昨日进度不属于损坏：正常进入今日新轮，不开启写保护。
+                _progressProtectError = null;
+                _progressSaveError = null;
+                if (isRetry)
+                {
+                    _plan.ResetRound();
+                    _plan.ReconcileDevices(_config != null ? _config.Devices : null);
+                }
+                _plan.EnsureCurrentDay();
+                return true;
+            }
+
+            _progressProtectError = restoreError ?? "巡检进度校验失败，已保护原文件。";
+            error = _progressProtectError;
+            return false;
+        }
+
+        private void SaveProgress(out string error)
+        {
+            error = null;
+            if (IsProgressProtected)
+            {
+                error = _progressProtectError;
+                return;
+            }
+            if (_progressStore == null)
                 return;
             InspectionProgressSnapshot snapshot = _plan.CreateSnapshot();
-            _progressStore.TrySave(snapshot, out error);
+            if (_progressStore.TrySave(snapshot, out error))
+            {
+                _progressSaveError = null;
+            }
+            else
+            {
+                _progressSaveError = error ?? "写入巡检进度失败。";
+                error = _progressSaveError;
+            }
         }
     }
 }

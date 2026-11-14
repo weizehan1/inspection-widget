@@ -16,7 +16,7 @@ namespace InspectionWidget.Tests
     /// </summary>
     public static class SettingsUiTests
     {
-        public const int CaseCount = 11;
+        public const int CaseCount = 13;
 
         public static void RunAll()
         {
@@ -279,6 +279,88 @@ namespace InspectionWidget.Tests
                         Assert.True(changes.Multiline);
                         Assert.Equal(ScrollBars.Vertical, changes.ScrollBars);
                     }
+                }
+            });
+
+            TestRunner.Run("UI：凭据列表滚动后上移与删除行位置与滚动偏移对齐且不漂移", () =>
+            {
+                Console.WriteLine("[START] 凭据列表 AutoScroll 位置对齐");
+                using (var env = new UiEnv())
+                {
+                    env.Invoke(env.Form, "OnNavClicked", 1);
+                    for (int i = 0; i < 8; i++)
+                        env.Invoke(env.Form, "AddCredential");
+
+                    var panel = (Panel)env.Field(env.Form, "_credentialRowsPanel");
+                    var rows = (IList)env.Field(env.Form, "_credentialRows");
+                    Assert.True(rows.Count >= 8);
+                    panel.PerformLayout();
+                    panel.AutoScrollPosition = new Point(0, 140);
+                    Application.DoEvents();
+                    int scrollYBefore = panel.AutoScrollPosition.Y;
+                    Assert.True(scrollYBefore < 0, "应出现垂直滚动偏移");
+
+                    env.Invoke(env.Form, "MoveCredential", rows[4], -1);
+                    Application.DoEvents();
+                    int scrollYAfterMove = panel.AutoScrollPosition.Y;
+                    Assert.True(scrollYAfterMove < 0);
+                    Control firstAfterMove = (Control)env.Field(rows[0], "Panel");
+                    Control secondAfterMove = (Control)env.Field(rows[1], "Panel");
+                    Assert.Equal(scrollYAfterMove, firstAfterMove.Top);
+                    int step = secondAfterMove.Top - firstAfterMove.Top;
+                    Assert.True(step > firstAfterMove.Height);
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        Control p = (Control)env.Field(rows[i], "Panel");
+                        Assert.Equal(scrollYAfterMove + i * step, p.Top);
+                    }
+
+                    while (rows.Count > 1)
+                        env.Invoke(env.Form, "DeleteCredential", rows[rows.Count - 1]);
+                    Application.DoEvents();
+                    Assert.Equal(0, panel.AutoScrollPosition.Y);
+                    Assert.Equal(0, ((Control)env.Field(rows[0], "Panel")).Top);
+                }
+            });
+
+            TestRunner.Run("UI：快捷链接滚动后上移与删除行位置对齐且缩减时钳制滚动", () =>
+            {
+                Console.WriteLine("[START] 快捷链接 AutoScroll 位置对齐");
+                using (var env = new UiEnv())
+                {
+                    env.Invoke(env.Form, "OnNavClicked", 2);
+                    for (int i = 0; i < 10; i++)
+                        env.Invoke(env.Form, "AddLink");
+
+                    var panel = (Panel)env.Field(env.Form, "_linkRowsPanel");
+                    var rows = (IList)env.Field(env.Form, "_linkRows");
+                    Assert.True(rows.Count >= 10);
+                    panel.PerformLayout();
+                    panel.AutoScrollPosition = new Point(0, 120);
+                    Application.DoEvents();
+                    int scrollYBefore = panel.AutoScrollPosition.Y;
+                    Assert.True(scrollYBefore < 0, "快捷链接应出现垂直滚动偏移");
+
+                    env.Invoke(env.Form, "MoveLink", rows[5], -1);
+                    Application.DoEvents();
+                    int scrollYAfterMove = panel.AutoScrollPosition.Y;
+                    Assert.True(scrollYAfterMove < 0);
+                    Control firstAfterMove = (Control)env.Field(rows[0], "Panel");
+                    Control secondAfterMove = (Control)env.Field(rows[1], "Panel");
+                    Assert.Equal(scrollYAfterMove, firstAfterMove.Top);
+                    int step = secondAfterMove.Top - firstAfterMove.Top;
+                    Assert.True(step > firstAfterMove.Height);
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        Control p = (Control)env.Field(rows[i], "Panel");
+                        Assert.Equal(scrollYAfterMove + i * step, p.Top);
+                    }
+
+                    while (rows.Count > 1)
+                        env.Invoke(env.Form, "DeleteLink", rows[rows.Count - 1]);
+                    Application.DoEvents();
+                    Assert.Equal(0, panel.AutoScrollPosition.Y);
+                    Assert.Equal(0, ((Control)env.Field(rows[0], "Panel")).Top);
                 }
             });
         }

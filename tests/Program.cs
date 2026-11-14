@@ -49,8 +49,9 @@ namespace InspectionWidget.Tests
                 else
                 {
                     windowsUiSkipped = true;
+                    int totalWindowsUiCases = SettingsUiTests.CaseCount + MainFormUiTests.CaseCount;
                     Console.WriteLine("[SKIP] Windows UI：当前不是 Windows，未执行 "
-                        + SettingsUiTests.CaseCount + " 条；这些用例不计为通过。");
+                        + totalWindowsUiCases + " 条；这些用例不计为通过。");
                 }
             }
 
@@ -71,6 +72,7 @@ namespace InspectionWidget.Tests
                 try
                 {
                     SettingsUiTests.RunAll();
+                    MainFormUiTests.RunAll();
                 }
                 catch (Exception ex)
                 {

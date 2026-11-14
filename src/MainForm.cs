@@ -52,16 +52,19 @@ namespace InspectionWidget
             get
             {
                 if (_config == null) return 1.0;
-                double system;
-                try
-                {
-                    system = Math.Max(1.0, DeviceDpi / 96.0);
-                }
-                catch
-                {
-                    system = 1.0;
-                }
-                return UiScale.Factor(_config.UiScalePercent) * system;
+                return UiScale.Factor(_config.UiScalePercent) * GetSystemDpiScale();
+            }
+        }
+
+        protected virtual double GetSystemDpiScale()
+        {
+            try
+            {
+                return Math.Max(1.0, DeviceDpi / 96.0);
+            }
+            catch
+            {
+                return 1.0;
             }
         }
 
@@ -80,12 +83,16 @@ namespace InspectionWidget
 
         private readonly ConfigStore _store;
         private readonly PanelStateMachine _stateMachine;
-        private readonly HookManager _hooks;
+        private readonly IWindowPickHooks _hooks;
+        private bool _hooksDisposed;
         private readonly QuickLinkLauncher _linkLauncher = new QuickLinkLauncher();
-        private readonly InspectionFolderNavigator _folderNavigator = new InspectionFolderNavigator();
+        private readonly InspectionFolderNavigator _folderNavigator;
         private InspectionProgressStore _progressStore;
         private InspectionSessionController _session;
         private InspectionPlanToken _waitingPlanToken;
+        private double _appliedScaleFactor = double.NaN;
+        private DateTime _uiRenderedPlanDate;
+        private bool _pendingDayRolloverRefresh;
         private AppConfig _config;
         private string _configRevision = string.Empty;
         private bool _configWriteProtected;
@@ -115,7 +122,7 @@ namespace InspectionWidget
             public InspectionPlanToken PlanToken;
         }
 
-        private readonly IClock _clock = new SystemClock();
+        private readonly IClock _clock;
         private readonly ScreenshotSaver _saver = new ScreenshotSaver();
         private CaptureRequest _currentRequest;
         // 保存失败待重试的图与其请求：Saver 不释放传入 Bitmap，所有权在本方；
@@ -174,6 +181,7 @@ namespace InspectionWidget
         private Panel _planActionPanel;
         private Button _showVisitedButton;
         private Button _resetRoundButton;
+        private Button _planRecoveryButton;
         private Label _planDisabledHintLabel;
 
         private Panel _deviceHeaderPanel;
@@ -222,46 +230,89 @@ namespace InspectionWidget
         private Font _font12Bold;
         private Font _font11;
 
-        /// <summary>因子感知字体缓存：目标字号随当前缩放档位变，变了才重建（旧字体先释放）。</summary>
-        private Font GetScaledFont(ref Font cache, float basePx, FontStyle style)
+        /// <summary>
+        /// 延迟收集旧 Font：切换缩放时先把新字体分配给所有控件再统一释放旧字体，
+        /// 避免任何控件在过渡期间仍持有已释放的 Font。
+        /// </summary>
+        private static Font SwapScaledFont(ref Font cache, float basePx, FontStyle style, double scale, List<IDisposable> retired)
         {
-            float target = basePx * (float)ScaleFactor;
-            if (cache == null || cache.Size != target)
+            float target = basePx * (float)scale;
+            if (cache == null || Math.Abs(cache.Size - target) > 0.01f)
             {
-                if (cache != null) cache.Dispose();
+                if (cache != null)
+                {
+                    if (retired != null) retired.Add(cache);
+                    else cache.Dispose();
+                }
                 cache = CreateFont(target, style);
             }
             return cache;
         }
 
+        private void EnsureScaledFonts(List<IDisposable> retired)
+        {
+            double scale = ScaleFactor;
+            SwapScaledFont(ref _font15Bold, 15f, FontStyle.Bold, scale, retired);
+            SwapScaledFont(ref _font13, 13f, FontStyle.Regular, scale, retired);
+            SwapScaledFont(ref _font13Bold, 13f, FontStyle.Bold, scale, retired);
+            SwapScaledFont(ref _font12, 12f, FontStyle.Regular, scale, retired);
+            SwapScaledFont(ref _font12Bold, 12f, FontStyle.Bold, scale, retired);
+            SwapScaledFont(ref _font11, 11f, FontStyle.Regular, scale, retired);
+
+            float gearTarget = 16f * (float)scale;
+            if (_fontGear == null || Math.Abs(_fontGear.Size - gearTarget) > 0.01f)
+            {
+                if (_fontGear != null)
+                {
+                    if (retired != null) retired.Add(_fontGear);
+                    else _fontGear.Dispose();
+                }
+                _fontGear = new Font("Segoe UI Symbol", gearTarget, FontStyle.Regular, GraphicsUnit.Pixel);
+            }
+
+            if (!HasSymbolFont)
+            {
+                int imageSize = M(18);
+                if (_gearImage == null || _gearImage.Width != imageSize)
+                {
+                    if (_gearImage != null)
+                    {
+                        if (retired != null) retired.Add(_gearImage);
+                        else _gearImage.Dispose();
+                    }
+                    _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
+                }
+            }
+        }
+
         private Font Font15Bold
         {
-            get { return GetScaledFont(ref _font15Bold, 15f, FontStyle.Bold); }
+            get { return _font15Bold ?? SwapScaledFont(ref _font15Bold, 15f, FontStyle.Bold, ScaleFactor, null); }
         }
 
         private Font Font13
         {
-            get { return GetScaledFont(ref _font13, 13f, FontStyle.Regular); }
+            get { return _font13 ?? SwapScaledFont(ref _font13, 13f, FontStyle.Regular, ScaleFactor, null); }
         }
 
         private Font Font13Bold
         {
-            get { return GetScaledFont(ref _font13Bold, 13f, FontStyle.Bold); }
+            get { return _font13Bold ?? SwapScaledFont(ref _font13Bold, 13f, FontStyle.Bold, ScaleFactor, null); }
         }
 
         private Font Font12
         {
-            get { return GetScaledFont(ref _font12, 12f, FontStyle.Regular); }
+            get { return _font12 ?? SwapScaledFont(ref _font12, 12f, FontStyle.Regular, ScaleFactor, null); }
         }
 
         private Font Font12Bold
         {
-            get { return GetScaledFont(ref _font12Bold, 12f, FontStyle.Bold); }
+            get { return _font12Bold ?? SwapScaledFont(ref _font12Bold, 12f, FontStyle.Bold, ScaleFactor, null); }
         }
 
         private Font Font11
         {
-            get { return GetScaledFont(ref _font11, 11f, FontStyle.Regular); }
+            get { return _font11 ?? SwapScaledFont(ref _font11, 11f, FontStyle.Regular, ScaleFactor, null); }
         }
 
         // 设置按钮齿轮（v1.0.2）：Segoe UI Symbol 的 ⚙ 才是标准齿轮字形，
@@ -270,12 +321,8 @@ namespace InspectionWidget
         {
             get
             {
-                float target = 16f * (float)ScaleFactor;
-                if (_fontGear == null || _fontGear.Size != target)
-                {
-                    if (_fontGear != null) _fontGear.Dispose();
-                    _fontGear = new Font("Segoe UI Symbol", target, FontStyle.Regular, GraphicsUnit.Pixel);
-                }
+                if (_fontGear == null)
+                    _fontGear = new Font("Segoe UI Symbol", 16f * (float)ScaleFactor, FontStyle.Regular, GraphicsUnit.Pixel);
                 return _fontGear;
             }
         }
@@ -313,7 +360,6 @@ namespace InspectionWidget
                 int imageSize = M(18);
                 if (_gearImage == null || _gearImage.Width != imageSize)
                 {
-                    if (_gearImage != null) _gearImage.Dispose();
                     _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
                 }
                 _settingsButton.Image = _gearImage;
@@ -326,7 +372,11 @@ namespace InspectionWidget
             if (disposing)
             {
                 if (_clipboardGuard != null) _clipboardGuard.Dispose();
-                if (_hooks != null) _hooks.Dispose();
+                if (_hooks != null && !_hooksDisposed)
+                {
+                    _hooksDisposed = true;
+                    _hooks.Dispose();
+                }
                 if (_pendingImage != null)
                 {
                     _pendingImage.Dispose();
@@ -368,10 +418,22 @@ namespace InspectionWidget
         }
 
         public MainForm()
+            : this(null, null, null, null, null)
         {
-            _store = new ConfigStore();
+        }
+
+        internal MainForm(
+            ConfigStore store,
+            InspectionProgressStore progressStore,
+            IClock clock,
+            IWindowPickHooks hooks,
+            InspectionFolderNavigator folderNavigator)
+        {
+            _store = store ?? new ConfigStore();
+            _clock = clock ?? new SystemClock();
+            _folderNavigator = folderNavigator ?? new InspectionFolderNavigator();
             _stateMachine = new PanelStateMachine();
-            _hooks = new HookManager();
+            _hooks = hooks ?? new HookManager();
             _hooks.ExternalClick += OnHookExternalClick;
             _hooks.CancelRequested += OnHookCancelRequested;
             _hooks.TimeoutElapsed += OnHookTimeoutElapsed;
@@ -397,7 +459,7 @@ namespace InspectionWidget
             _configWriteProtected = load.Kind == ConfigLoadKind.IoErrorKept;
             _configLoadError = load.Error;
             EnsureConfigLists();
-            _progressStore = new InspectionProgressStore(ResolveProgressPath(_store));
+            _progressStore = progressStore ?? new InspectionProgressStore(ResolveProgressPath(_store));
             _session = new InspectionSessionController(
                 _clock, _stateMachine, _progressStore, _config, _folderNavigator);
 
@@ -405,14 +467,14 @@ namespace InspectionWidget
             BuildTrayIcon();
             RebuildClipboardGuard();
 
-            ApplyScaleToStaticLayout();
-            RefreshConfigState();
-            ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
+            ApplyScaleAndRebuild(true, false);
             RestorePosition();
             LayoutSections();
 
             if (_configWriteProtected)
                 ShowConfigLoadErrorFeedback();
+            else if (_deviceListError == null && _session.HasProgressError)
+                ShowProgressErrorFeedback();
 
             _dayRolloverTimer = new Timer { Interval = 30000 };
             _dayRolloverTimer.Tick += OnDayRolloverTick;
@@ -427,9 +489,10 @@ namespace InspectionWidget
             base.OnHandleCreated(e);
             if (_config == null)
                 return;
-            ApplyScaleToStaticLayout();
-            ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
-            LayoutSections();
+            if (double.IsNaN(_appliedScaleFactor) || Math.Abs(ScaleFactor - _appliedScaleFactor) > 0.001)
+                ApplyScaleAndRebuild(true, true);
+            else
+                LayoutSections();
         }
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -437,23 +500,48 @@ namespace InspectionWidget
             base.OnDpiChanged(e);
             if (_config == null)
                 return;
-            int scrollPosition = _scrollHost != null ? _scrollHost.VerticalScroll.Value : 0;
-            ApplyScaleToStaticLayout();
-            RebuildQuickLinks();
-            RebuildPlanCard();
-            RebuildDeviceButtons();
-            RebuildCredentialControls();
-            RefreshStateVisuals();
-            ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
-            LayoutSections();
-            if (_scrollHost != null)
+            ApplyScaleAndRebuild(true, true);
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            UpdateWaitingHookSelfBounds();
+        }
+
+        protected override void OnLocationChanged(EventArgs e)
+        {
+            base.OnLocationChanged(e);
+            UpdateWaitingHookSelfBounds();
+        }
+
+        private void ApplyScaleAndRebuild(bool rebuildDynamic, bool adjustPosition)
+        {
+            var retired = new List<IDisposable>();
+            try
             {
-                int max = Math.Max(0,
-                    _scrollHost.VerticalScroll.Maximum - _scrollHost.ClientSize.Height);
-                _scrollHost.VerticalScroll.Value = Math.Min(scrollPosition, max);
-                _scrollHost.PerformLayout();
+                EnsureScaledFonts(retired);
+                ApplyScaleToStaticLayout();
+                if (rebuildDynamic)
+                    RefreshConfigState();
+                ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
+                if (adjustPosition)
+                {
+                    if (_config != null && (!_config.WindowLeft.HasValue || !_config.WindowTop.HasValue))
+                        RestorePosition();
+                    ClampToWorkingArea();
+                }
+                else
+                {
+                    LayoutSections();
+                }
+                _appliedScaleFactor = ScaleFactor;
             }
-            ClampToWorkingArea();
+            finally
+            {
+                for (int i = 0; i < retired.Count; i++)
+                    retired[i].Dispose();
+            }
         }
 
         // ---------- 静态骨架 ----------
@@ -617,6 +705,20 @@ namespace InspectionWidget
             };
             _planToggleButton.FlatAppearance.BorderSize = 1;
             _planToggleButton.Click += OnPlanToggleClicked;
+            _planRecoveryButton = new Button
+            {
+                Text = "恢复进度",
+                Font = font11,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = UiTheme.ErrorSoftColor,
+                ForeColor = ErrorColor,
+                Visible = false,
+                Cursor = Cursors.Hand,
+                AccessibleName = "恢复或重试巡检进度"
+            };
+            _planRecoveryButton.FlatAppearance.BorderColor = Color.FromArgb(0xE6, 0xC2, 0xC2);
+            _planRecoveryButton.FlatAppearance.BorderSize = 1;
+            _planRecoveryButton.Click += OnPlanRecoveryClicked;
             _planProgressLabel = new Label
             {
                 Text = "今日进度",
@@ -683,6 +785,7 @@ namespace InspectionWidget
             };
 
             _planCardPanel.Controls.Add(_planTitleLabel);
+            _planCardPanel.Controls.Add(_planRecoveryButton);
             _planCardPanel.Controls.Add(_planToggleButton);
             _planCardPanel.Controls.Add(_planProgressLabel);
             _planCardPanel.Controls.Add(_planCountLabel);
@@ -816,14 +919,8 @@ namespace InspectionWidget
                 _feedbackTimer.Stop();
                 if (_feedbackPersistent)
                     return;
-                if (_deviceListError != null)
-                {
-                    ShowDeviceListErrorFeedback();
-                }
-                else
-                {
+                if (!RestorePersistentFeedbackIfNeeded())
                     _feedbackLabel.Text = string.Empty;
-                }
             };
         }
 
@@ -870,6 +967,7 @@ namespace InspectionWidget
             _quickLinkHeaderLabel.Font = Font12Bold;
             _quickLinkSubLabel.Font = Font11;
             _planTitleLabel.Font = Font13Bold;
+            _planRecoveryButton.Font = Font11;
             _planToggleButton.Font = Font11;
             _planProgressLabel.Font = Font12;
             _planCountLabel.Font = Font12Bold;
@@ -981,45 +1079,41 @@ namespace InspectionWidget
             int y = M(10);
             int headerH = M(24);
 
-            // 1. 快捷链接
+            int quickHeaderY = y;
             _quickLinkHeaderPanel.Size = new Size(hostWidth, headerH);
-            _quickLinkHeaderPanel.Location = new Point(0, y);
             _quickLinkHeaderLabel.Location = new Point(margin, M(3));
             _quickLinkSubLabel.Location = new Point(Math.Max(margin, hostWidth - margin - _quickLinkSubLabel.Width), M(4));
             y += headerH + M(4);
 
             int quickH = ComputeQuickLinksHeight();
+            int quickZoneY = y;
             _quickLinkZonePanel.Size = new Size(hostWidth, quickH);
-            _quickLinkZonePanel.Location = new Point(0, y);
             LayoutTwoColumnControls(_quickLinkControls, _quickLinkZonePanel, innerWidth,
                 M(PanelLayout.SchemeBQuickLinkHeight), M(PanelLayout.SchemeBQuickLinkGap));
             y += quickH + M(12);
 
-            // 2. 今日巡检计划卡
             int planH = ComputePlanCardHeight();
+            int planCardY = y;
             _planCardPanel.Size = new Size(innerWidth, planH);
-            _planCardPanel.Location = new Point(margin, y);
             LayoutPlanCardInner(innerWidth);
             y += planH + M(12);
 
-            // 3. 凭据
+            int credHeaderY = y;
             _credentialHeaderPanel.Size = new Size(hostWidth, headerH);
-            _credentialHeaderPanel.Location = new Point(0, y);
             _credentialHeaderLabel.Location = new Point(margin, M(3));
             _credentialArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
             y += headerH;
 
             int credH = ComputeCredentialsZoneHeight();
             if (credH > 0) y += M(4);
+            int credZoneY = y;
             _credentialZonePanel.Size = new Size(hostWidth, credH);
-            _credentialZonePanel.Location = new Point(0, y);
             LayoutTwoColumnControls(_credentialControls, _credentialZonePanel, innerWidth,
                 M(PanelLayout.SchemeBCredentialHeight), M(PanelLayout.SchemeBCredentialGap));
             y += credH + M(12);
 
-            // 4. 截图设备
+            int devHeaderY = y;
             _deviceHeaderPanel.Size = new Size(hostWidth, headerH);
-            _deviceHeaderPanel.Location = new Point(0, y);
             _deviceHeaderLabel.Location = new Point(margin, M(3));
             _deviceArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
             _deviceSubLabel.Location = new Point(
@@ -1029,14 +1123,40 @@ namespace InspectionWidget
 
             int devH = ComputeDevicesZoneHeight();
             if (devH > 0) y += M(4);
+            int devZoneY = y;
             _deviceZonePanel.Size = new Size(hostWidth, devH);
-            _deviceZonePanel.Location = new Point(0, y);
             LayoutDeviceZoneInner(innerWidth);
             y += devH + M(12);
 
-            _scrollHost.Location = new Point(0, titleHeight);
-            _scrollHost.Size = new Size(w, scrollHeight);
-            _scrollHost.AutoScrollMinSize = new Size(0, y);
+            _scrollHost.SuspendLayout();
+            try
+            {
+                int desiredScrollY = Math.Max(0, -_scrollHost.AutoScrollPosition.Y);
+                _scrollHost.Location = new Point(0, titleHeight);
+                _scrollHost.Size = new Size(w, scrollHeight);
+                _scrollHost.AutoScrollMinSize = new Size(0, y);
+                int maxScrollY = Math.Max(0, y - _scrollHost.ClientSize.Height);
+                int clampedScrollY = Math.Max(0, Math.Min(desiredScrollY, maxScrollY));
+                if (-_scrollHost.AutoScrollPosition.Y != clampedScrollY || _scrollHost.AutoScrollPosition.X != 0)
+                    _scrollHost.AutoScrollPosition = new Point(0, clampedScrollY);
+
+                int offsetX = _scrollHost.AutoScrollPosition.X;
+                int offsetY = _scrollHost.AutoScrollPosition.Y;
+
+                // _scrollHost 为 AutoScroll 容器：重排其直接子控件必须计入当前滚动偏移，
+                // 嵌套子容器内部（AutoScroll=false）保持相对自身局部坐标。
+                _quickLinkHeaderPanel.Location = new Point(offsetX, quickHeaderY + offsetY);
+                _quickLinkZonePanel.Location = new Point(offsetX, quickZoneY + offsetY);
+                _planCardPanel.Location = new Point(margin + offsetX, planCardY + offsetY);
+                _credentialHeaderPanel.Location = new Point(offsetX, credHeaderY + offsetY);
+                _credentialZonePanel.Location = new Point(offsetX, credZoneY + offsetY);
+                _deviceHeaderPanel.Location = new Point(offsetX, devHeaderY + offsetY);
+                _deviceZonePanel.Location = new Point(offsetX, devZoneY + offsetY);
+            }
+            finally
+            {
+                _scrollHost.ResumeLayout(true);
+            }
             _bottomPanel.Location = new Point(0, ClientSize.Height - bottomHeight);
         }
 
@@ -1051,6 +1171,12 @@ namespace InspectionWidget
             int toggleH = M(22);
             _planToggleButton.Size = new Size(toggleW, toggleH);
             _planToggleButton.Location = new Point(cardWidth - padX - toggleW, padY);
+            if (_planRecoveryButton != null && _planRecoveryButton.Visible)
+            {
+                int recW = M(76);
+                _planRecoveryButton.Size = new Size(recW, toggleH);
+                _planRecoveryButton.Location = new Point(Math.Max(padX, _planToggleButton.Left - recW - M(6)), padY);
+            }
 
             bool enabled = _session != null && _session.PlanModeEnabled;
             _planProgressLabel.Visible = enabled;
@@ -1183,6 +1309,16 @@ namespace InspectionWidget
                 Location = new Point(Left, newTop);
             }
             LayoutSections();
+            UpdateWaitingHookSelfBounds();
+        }
+
+        private void UpdateWaitingHookSelfBounds()
+        {
+            if (_hooks != null && !_hooksDisposed && !IsDisposed
+                && _stateMachine != null && _stateMachine.State == PanelState.Waiting)
+            {
+                _hooks.UpdateSelfBounds(Bounds);
+            }
         }
 
         private void RestorePosition()
@@ -1258,18 +1394,23 @@ namespace InspectionWidget
             _configRevision = load.Revision ?? string.Empty;
             _config = next;
             EnsureConfigLists();
-            string progressErr;
+            string progressErr = null;
             if (_session != null)
                 _session.ReloadConfig(_config, out progressErr);
             if (autoClearChanged)
                 RebuildClipboardGuard();
-            ApplyScaleToStaticLayout();
-            RefreshConfigState();
-            ApplyHeightAnchored();
+            ApplyScaleAndRebuild(true, true);
             if (load.Kind == ConfigLoadKind.CorruptBackedUp)
             {
-                ShowPersistentFeedback("配置损坏已备份并恢复默认："
-                    + (load.BackupPath ?? "备份路径未知"), ErrorColor);
+                string msg = "配置损坏已备份并恢复默认：" + (load.BackupPath ?? "备份路径未知");
+                if (!string.IsNullOrEmpty(progressErr))
+                    msg += "；进度保存失败：" + progressErr;
+                ShowPersistentFeedback(msg, ErrorColor);
+            }
+            else if (!string.IsNullOrEmpty(progressErr) || (_session != null && _session.HasProgressError))
+            {
+                string err = !string.IsNullOrEmpty(progressErr) ? progressErr : _session.ProgressError;
+                ShowPersistentFeedback("配置已重新读取，但进度保存失败：" + err, ErrorColor);
             }
             else
             {
@@ -1328,6 +1469,10 @@ namespace InspectionWidget
             else if (_deviceListError != null)
             {
                 ShowDeviceListErrorFeedback();
+            }
+            else if (_session != null && _session.HasProgressError)
+            {
+                ShowProgressErrorFeedback();
             }
             else if (_feedbackPersistent)
             {
@@ -1410,16 +1555,13 @@ namespace InspectionWidget
                 button.Paint += delegate(object sender, PaintEventArgs e)
                 {
                     var btn = (Button)sender;
-                    using (var arrowFont = new Font(Font11.FontFamily, Font11.Size, FontStyle.Regular, GraphicsUnit.Pixel))
-                    {
-                        TextRenderer.DrawText(
-                            e.Graphics,
-                            "↗",
-                            arrowFont,
-                            new Rectangle(btn.Width - M(18), 0, M(14), btn.Height),
-                            WeakTextColor,
-                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                    }
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        "↗",
+                        Font11,
+                        new Rectangle(btn.Width - M(18), 0, M(14), btn.Height),
+                        WeakTextColor,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 };
                 button.Click += OnQuickLinkButtonClicked;
                 _quickLinkControls.Add(button);
@@ -1452,6 +1594,12 @@ namespace InspectionWidget
             _showVisitedButton.Text = _session.ShowVisitedOverride ? "只看未点过" : "查看已点过";
             _showVisitedButton.Visible = enabled && _session.HideVisitedDevices;
             _resetRoundButton.Enabled = enabled && (visited > 0 || HasSavedPaths());
+            if (_planRecoveryButton != null)
+            {
+                _planRecoveryButton.Visible = _session.HasProgressError;
+                _planRecoveryButton.Text = _session.IsProgressProtected ? "恢复进度" : "重试保存";
+                _rootToolTip.SetToolTip(_planRecoveryButton, _session.ProgressError ?? string.Empty);
+            }
         }
 
         private bool HasSavedPaths()
@@ -1487,6 +1635,12 @@ namespace InspectionWidget
                     Items = new List<DeviceDisplayItem>(),
                     EmptyKind = DeviceListEmptyKind.None
                 };
+            if (_session != null)
+            {
+                _uiRenderedPlanDate = _session.Plan.Date;
+                _session.ConsumePendingRolloverRefresh();
+                _pendingDayRolloverRefresh = false;
+            }
 
             // 截图区折叠（v1.0.3）：区高为 0，不建行控件；展开时照常重建。
             if (_config.IsDeviceCollapsed)
@@ -1894,9 +2048,98 @@ namespace InspectionWidget
             RefreshStateVisuals();
             ApplyHeightAnchored();
             if (!string.IsNullOrEmpty(progressErr))
-                ShowFeedback("进度保存失败：" + progressErr, true);
-            else
+                ShowPersistentFeedback("进度保存失败：" + progressErr, ErrorColor);
+            else if (!_configWriteProtected && _deviceListError == null)
                 ShowSuccessFeedback("已重置本轮巡检进度");
+        }
+
+        private void OnPlanRecoveryClicked(object sender, EventArgs e)
+        {
+            HandleProgressRecoveryAction();
+        }
+
+        private void HandleProgressRecoveryAction()
+        {
+            if (_session == null || !_session.HasProgressError)
+                return;
+
+            string err;
+            if (!_session.IsProgressProtected)
+            {
+                if (_session.RetrySaveProgress(out err))
+                {
+                    RebuildPlanCard();
+                    ApplyHeightAnchored();
+                    RestoreOrClearAfterProgressRecovery();
+                    ShowSuccessFeedback("✓ 巡检进度已重新保存");
+                }
+                else
+                {
+                    RebuildPlanCard();
+                    ApplyHeightAnchored();
+                    ShowProgressErrorFeedback();
+                }
+                return;
+            }
+
+            _settingsDialogOpen = true;
+            try
+            {
+                using (var dialog = new ProgressRecoveryDialog(_progressStore != null ? _progressStore.Path : null, _session.ProgressError))
+                {
+                    UiTheme.ScaleLayout(dialog, ScaleFactor);
+                    DialogResult choice = dialog.ShowDialog(this);
+                    if (choice == DialogResult.Retry)
+                    {
+                        if (_session.RetryLoadProgress(out err))
+                        {
+                            RefreshConfigState();
+                            ApplyHeightAnchored();
+                            ShowSuccessFeedback("已恢复读取巡检进度");
+                        }
+                        else
+                        {
+                            RebuildPlanCard();
+                            ApplyHeightAnchored();
+                            ShowProgressErrorFeedback();
+                        }
+                    }
+                    else if (choice == DialogResult.Yes)
+                    {
+                        string backupPath;
+                        if (_session.BackupAndResetProgress(out backupPath, out err))
+                        {
+                            RefreshConfigState();
+                            ApplyHeightAnchored();
+                            ShowPersistentFeedback(
+                                string.IsNullOrEmpty(backupPath)
+                                    ? "已重置本轮巡检进度"
+                                    : "坏进度已备份至：" + backupPath + "（已重置新轮）",
+                                WarningColor);
+                        }
+                        else
+                        {
+                            RebuildPlanCard();
+                            ApplyHeightAnchored();
+                            ShowProgressErrorFeedback();
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                _settingsDialogOpen = false;
+            }
+        }
+
+        private void RestoreOrClearAfterProgressRecovery()
+        {
+            if (!RestorePersistentFeedbackIfNeeded())
+            {
+                _feedbackPersistent = false;
+                _feedbackTimer.Stop();
+                _feedbackLabel.Text = string.Empty;
+            }
         }
 
         private void OnUnmarkDeviceClicked(string device)
@@ -1911,8 +2154,8 @@ namespace InspectionWidget
                 RefreshStateVisuals();
                 ApplyHeightAnchored();
                 if (!string.IsNullOrEmpty(progressErr))
-                    ShowFeedback("进度保存失败：" + progressErr, true);
-                else
+                    ShowPersistentFeedback("进度保存失败：" + progressErr, ErrorColor);
+                else if (!RestorePersistentFeedbackIfNeeded())
                     ShowFeedback("已恢复未点：" + device, false);
             }
         }
@@ -1930,29 +2173,39 @@ namespace InspectionWidget
             {
                 return;
             }
-            if (_session != null)
-            {
-                // 若正在切换目标或从空闲点下设备，绑定当前等待轮次令牌并刷新可见列表
-                _waitingPlanToken = token;
-            }
 
             if (_stateMachine.State == PanelState.Waiting)
             {
+                if (_session != null)
+                {
+                    // 若正在切换目标或从空闲点下设备，绑定当前等待轮次令牌并刷新可见列表
+                    _waitingPlanToken = token;
+                }
                 _config.LastDevice = _stateMachine.CurrentDevice;
                 SaveBestEffort();
                 RebuildPlanCard();
                 RebuildDeviceButtons();
                 ApplyHeightAnchored();
+                OnStateChanged();
+                if (!string.IsNullOrEmpty(progressErr))
+                {
+                    ShowPersistentFeedback("请点目标窗口（进度落盘失败：" + progressErr + "）", ErrorColor);
+                }
+                else
+                {
+                    ShowFeedback(
+                        "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」（Esc 或右键取消）",
+                        false);
+                }
+                return;
             }
+
+            // 再次点击当前设备取消回 Idle（与 Esc/右键取消路径保持一致，不主动抢焦点）
+            _waitingPlanToken = default(InspectionPlanToken);
             OnStateChanged();
-            if (_stateMachine.State == PanelState.Waiting)
-            {
-                ShowFeedback(
-                    string.IsNullOrEmpty(progressErr)
-                        ? "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」（Esc 或右键取消）"
-                        : "请点目标窗口（进度暂未落盘：" + progressErr + "）",
-                    !string.IsNullOrEmpty(progressErr));
-            }
+            SyncRolloverUiIfIdle();
+            ShowFeedback("已取消选窗", false);
+            TryMaybeShowCompletionPrompt();
         }
 
         private void OnCredentialHeaderClicked(object sender, EventArgs e)
@@ -1997,15 +2250,7 @@ namespace InspectionWidget
             if (_configWriteProtected && !RetryConfigLoad())
                 return;
 
-            double systemDpiScale;
-            try
-            {
-                systemDpiScale = Math.Max(1.0, DeviceDpi / 96.0);
-            }
-            catch
-            {
-                systemDpiScale = 1.0;
-            }
+            double systemDpiScale = GetSystemDpiScale();
             _settingsDialogOpen = true;
             try
             {
@@ -2021,22 +2266,29 @@ namespace InspectionWidget
                         _configWriteProtected = false;
                         _configLoadError = null;
                         EnsureConfigLists();
+                        string progressErr = null;
                         if (_session != null)
                         {
-                            string progressErr;
                             _session.ApplySavedConfig(
                                 _config,
                                 form.LastAppliedDeviceRenames,
                                 form.LastAppliedImportDeviceReplace,
                                 out progressErr);
                         }
-                        ApplyScaleToStaticLayout();
                         if (autoClearChanged)
                             RebuildClipboardGuard();
-                        RefreshConfigState();
-                        ApplyHeightAnchored();
+                        ApplyScaleAndRebuild(true, true);
                         ApplyConfiguredWindowPositionIfVisible();
-                        ShowSuccessFeedback("设置已应用");
+                        if (!string.IsNullOrEmpty(progressErr)
+                            || (_session != null && _session.HasProgressError))
+                        {
+                            string err = !string.IsNullOrEmpty(progressErr) ? progressErr : _session.ProgressError;
+                            ShowPersistentFeedback("设置已应用，但进度保存失败：" + err, ErrorColor);
+                        }
+                        else if (_deviceListError == null)
+                        {
+                            ShowSuccessFeedback("设置已应用");
+                        }
                     };
                     form.ShowDialog(this);
                 }
@@ -2045,6 +2297,7 @@ namespace InspectionWidget
             {
                 _settingsDialogOpen = false;
             }
+            SyncRolloverUiIfIdle();
             TryMaybeShowCompletionPrompt();
         }
 
@@ -2268,6 +2521,7 @@ namespace InspectionWidget
                     ShowFeedback("该窗口已最小化，请先打开", true);
                     _stateMachine.Cancel();
                     OnStateChanged();
+                    SyncRolloverUiIfIdle();
                     TryMaybeShowCompletionPrompt();
                     break;
                 case ResolveReason.Ok:
@@ -2328,6 +2582,7 @@ namespace InspectionWidget
             OnStateChanged();
             if (cancelled)
             {
+                SyncRolloverUiIfIdle();
                 ShowFeedback("已取消选窗", false);
                 TryMaybeShowCompletionPrompt();
             }
@@ -2344,6 +2599,7 @@ namespace InspectionWidget
             OnStateChanged(); // 钩子已自停，Stop 幂等
             if (cancelled)
             {
+                SyncRolloverUiIfIdle();
                 ShowFeedback("等待超时，已取消", true);
                 TryMaybeShowCompletionPrompt();
             }
@@ -2499,6 +2755,7 @@ namespace InspectionWidget
             if (completed)
             {
                 OnStateChanged(); // 回 Idle → 集中点停钩（Capturing 时钩已停，幂等）
+                SyncRolloverUiIfIdle();
                 TryMaybeShowCompletionPrompt();
             }
         }
@@ -2556,11 +2813,7 @@ namespace InspectionWidget
         /// </summary>
         private void OnSaveCompleted(StorageSaveResult result, Bitmap image, CaptureRequest request, bool completesCapture, int saveGeneration)
         {
-            _saveInFlight = false;
-
-            if (completesCapture && _stateMachine.CompleteCapture())
-                OnStateChanged(); // 回 Idle → 集中点停钩（幂等）
-
+            // 先完成成功/失败与待重试登记，再切换 Idle/处理完成弹窗，避免弹窗时失败状态尚未就绪。
             if (result != null && result.Saved)
             {
                 if (object.ReferenceEquals(_pendingImage, image))
@@ -2571,35 +2824,48 @@ namespace InspectionWidget
                 }
                 image.Dispose();
                 _rootToolTip.SetToolTip(_rootLabel, result.FullPath);
+
+                string progressErr = null;
                 if (_session != null)
                 {
-                    string progressErr;
                     InspectionPlanToken token = request != null ? request.PlanToken : default(InspectionPlanToken);
                     _session.RecordSaveSucceeded(result.FullPath, token, out progressErr);
-                    RebuildPlanCard();
-                    ApplyHeightAnchored();
                 }
-                if (result.UsedFallback)
+
+                _saveInFlight = false;
+                if (completesCapture && _stateMachine.CompleteCapture())
+                    OnStateChanged(); // 回 Idle → 集中点停钩（幂等）
+
+                SyncRolloverUiIfIdle();
+                RebuildPlanCard();
+                ApplyHeightAnchored();
+
+                string fileName = Path.GetFileName(result.FullPath);
+                string unresolvedProgressErr = !string.IsNullOrEmpty(progressErr)
+                    ? progressErr
+                    : (_session != null && _session.HasProgressError ? _session.ProgressError : null);
+                if (!string.IsNullOrEmpty(unresolvedProgressErr))
                 {
-                    ShowFeedbackInternal("✓ " + Path.GetFileName(result.FullPath) + "（已暂存）：" + result.FullPath,
+                    string prefix = result.UsedFallback
+                        ? "✓ " + fileName + "（已暂存：" + result.FullPath + "），但进度落盘失败："
+                        : "✓ " + fileName + " 已保存，但进度落盘失败：";
+                    ShowPersistentFeedback(prefix + unresolvedProgressErr, ErrorColor);
+                }
+                else if (result.UsedFallback)
+                {
+                    ShowFeedbackInternal("✓ " + fileName + "（已暂存）：" + result.FullPath,
                         ErrorColor, false, 5000);
                 }
                 else
                 {
-                    ShowSuccessFeedback("✓ " + Path.GetFileName(result.FullPath));
+                    ShowSuccessFeedback("✓ " + fileName);
                 }
                 TryMaybeShowCompletionPrompt();
                 return;
             }
 
-            // 失败：保留原图供重试（Saver 从不 Dispose 传入图，所有权在本方）。
-            // M-1 登记前校验：图若已失效（被释放）不得重新登记为 _pendingImage，
-            // 否则此后点反馈行重试会对已释放图反复保存、反复失败；清掉同引用的
-            // 旧登记并提示重新截图。
-            // 修复轮二（M-1 变体 B）：在此基础上再比对代次——IsImageUsable 只是
-            // 登记前一刻的瞬时探针，若本次保存发起后 _pendingImage 已被 Dispose
-            // 或替换（代次已递增），本结果即迟到结果：图的存活状态已不可信，
-            // 直接丢弃不重登记，避免把已释放图登记成待重试图留下脏状态。
+            // 失败：先校验代次与图有效性并完成 _pendingImage 登记，再结束 _saveInFlight 与切换 Idle。
+            string failFeedback;
             if (saveGeneration != _pendingGeneration || !IsImageUsable(image))
             {
                 if (object.ReferenceEquals(_pendingImage, image))
@@ -2608,10 +2874,16 @@ namespace InspectionWidget
                     _pendingRequest = null;
                     _pendingGeneration++;
                 }
-                ShowFeedback("尚未保存：原图已失效，请重新截图", true);
+                failFeedback = "尚未保存：原图已失效，请重新截图";
+                _saveInFlight = false;
+                if (completesCapture && _stateMachine.CompleteCapture())
+                    OnStateChanged();
+                SyncRolloverUiIfIdle();
+                ShowFeedback(failFeedback, true);
                 TryMaybeShowCompletionPrompt();
                 return;
             }
+
             if (_pendingImage != null && !object.ReferenceEquals(_pendingImage, image))
             {
                 _pendingImage.Dispose();
@@ -2623,9 +2895,15 @@ namespace InspectionWidget
             string detail = result != null ? result.Error : null;
             if (!string.IsNullOrEmpty(detail) && detail.StartsWith("尚未保存：", StringComparison.Ordinal))
                 detail = detail.Substring("尚未保存：".Length);
-            ShowPersistentFeedback(string.IsNullOrEmpty(detail)
+            failFeedback = string.IsNullOrEmpty(detail)
                 ? "尚未保存，点击此处重试"
-                : "尚未保存，点击此处重试：" + detail, ErrorColor);
+                : "尚未保存，点击此处重试：" + detail;
+
+            _saveInFlight = false;
+            if (completesCapture && _stateMachine.CompleteCapture())
+                OnStateChanged();
+            SyncRolloverUiIfIdle();
+            ShowPersistentFeedback(failFeedback, ErrorColor);
             TryMaybeShowCompletionPrompt();
         }
 
@@ -2647,15 +2925,19 @@ namespace InspectionWidget
             }
         }
 
-        /// <summary>反馈行点击：仅当有待重试的图时作为重试入口，其余情况忽略。</summary>
+        /// <summary>反馈行点击：有待重试图优先重试存图；否则若存在进度读取/落盘失败则打开恢复或重试保存。</summary>
         private void OnFeedbackLabelClicked(object sender, EventArgs e)
         {
             if (_saveInFlight)
                 return;
-            if (_pendingImage == null || _pendingRequest == null)
+            if (_pendingImage != null && _pendingRequest != null)
+            {
+                // 字段保留登记：成功后由 OnSaveCompleted 按引用清掉，再失败会重新登记同一图
+                BeginSave(_pendingImage, _pendingRequest, false);
                 return;
-            // 字段保留登记：成功后由 OnSaveCompleted 按引用清掉，再失败会重新登记同一图
-            BeginSave(_pendingImage, _pendingRequest, false);
+            }
+            if (_session != null && _session.HasProgressError)
+                HandleProgressRecoveryAction();
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -2709,6 +2991,41 @@ namespace InspectionWidget
                 ? "配置读取失败，原文件已保留。"
                 : _configLoadError;
             ShowPersistentFeedback("保存已暂停：" + detail + " 点根目录行重试读取。", ErrorColor);
+        }
+
+        private void ShowProgressErrorFeedback()
+        {
+            if (_session == null || !_session.HasProgressError)
+                return;
+            string prefix = _session.IsProgressProtected
+                ? "进度读取失败（已保护原文件，点「恢复进度」处理）："
+                : "进度落盘失败（点「重试保存」重试）：";
+            ShowPersistentFeedback(prefix + _session.ProgressError, ErrorColor);
+        }
+
+        private bool RestorePersistentFeedbackIfNeeded()
+        {
+            if (_configWriteProtected)
+            {
+                ShowConfigLoadErrorFeedback();
+                return true;
+            }
+            if (_deviceListError != null)
+            {
+                ShowDeviceListErrorFeedback();
+                return true;
+            }
+            if (_pendingImage != null && _pendingRequest != null)
+            {
+                ShowPersistentFeedback("尚未保存，点击此处重试", ErrorColor);
+                return true;
+            }
+            if (_session != null && _session.HasProgressError)
+            {
+                ShowProgressErrorFeedback();
+                return true;
+            }
+            return false;
         }
 
         private void ShowFeedbackInternal(string text, Color color, bool persistent)
@@ -2878,7 +3195,7 @@ namespace InspectionWidget
                 ShowPanelFromTray();
         }
 
-        /// <summary>从托盘恢复：显示面板（位置不变、TopMost 照旧）并激活。</summary>
+        /// <summary>从托盘恢复：显示面板（位置不变、TopMost 照旧）并激活，随后补检跨日与完成提示。</summary>
         private void ShowPanelFromTray()
         {
             if (!Visible)
@@ -2886,6 +3203,8 @@ namespace InspectionWidget
             if (WindowState != FormWindowState.Normal)
                 WindowState = FormWindowState.Normal;
             Activate();
+            SyncRolloverUiIfIdle();
+            TryMaybeShowCompletionPrompt();
         }
 
         /// <summary>
@@ -2921,7 +3240,11 @@ namespace InspectionWidget
                 _clipboardGuard.Dispose();
             }
             _hooks.Stop();
-            _hooks.Dispose();
+            if (!_hooksDisposed)
+            {
+                _hooksDisposed = true;
+                _hooks.Dispose();
+            }
             SaveWindowPosition();
         }
 
@@ -2948,9 +3271,12 @@ namespace InspectionWidget
             else if (_stateMachine.State == PanelState.Capturing)
                 _stateMachine.FailCapture();
             OnStateChanged(); // 回 Idle 集中点：刷新视觉 + 停钩（幂等）
+            SyncRolloverUiIfIdle();
 
             if (_pendingImage != null && _pendingRequest != null)
                 ShowPersistentFeedback("尚未保存，点击此处重试", ErrorColor);
+            else if (_session != null && _session.HasProgressError)
+                ShowProgressErrorFeedback();
             else
                 ShowFeedback("发生未预期异常，已恢复待命", true);
         }
@@ -2992,38 +3318,120 @@ namespace InspectionWidget
         {
             if (_session == null || IsDisposed)
                 return;
+            SyncRolloverUiIfIdle();
+        }
+
+        private void SyncRolloverUiIfIdle()
+        {
+            if (_session == null || IsDisposed)
+                return;
             bool rolled;
             _session.EnsureCurrentDayResetIfRolled(out rolled);
+            if (rolled || _session.HasPendingRolloverRefresh || _uiRenderedPlanDate != _session.Plan.Date)
+                _pendingDayRolloverRefresh = true;
+
             string todayText = FormatFullDate(_clock.Now);
             if (_dateLabel != null && !string.Equals(_dateLabel.Text, todayText, StringComparison.Ordinal))
                 _dateLabel.Text = todayText;
-            if (rolled && _stateMachine.State == PanelState.Idle && !_saveInFlight)
+
+            if (_pendingDayRolloverRefresh && _stateMachine.State == PanelState.Idle && !_saveInFlight)
             {
+                _pendingDayRolloverRefresh = false;
+                _session.ConsumePendingRolloverRefresh();
                 RebuildPlanCard();
                 RebuildDeviceButtons();
                 RefreshStateVisuals();
                 ApplyHeightAnchored();
+                _uiRenderedPlanDate = _session.Plan.Date;
             }
         }
 
         private void TryMaybeShowCompletionPrompt()
         {
-            if (_session == null || IsDisposed)
+            if (_session == null || IsDisposed || !Visible || WindowState == FormWindowState.Minimized)
                 return;
+            bool hiddenOrTransparent = _hiddenForCapture || Opacity < 0.5;
+            bool panelVisible = Visible && WindowState != FormWindowState.Minimized;
             string progressErr;
-            if (!_session.TryClaimCompletionPrompt(_saveInFlight, _settingsDialogOpen, _hiddenForCapture || Opacity < 0.5, out progressErr))
+            if (!_session.TryClaimCompletionPrompt(
+                _saveInFlight,
+                _settingsDialogOpen,
+                hiddenOrTransparent,
+                panelVisible,
+                out progressErr))
+            {
                 return;
+            }
+
+            if (!string.IsNullOrEmpty(progressErr))
+            {
+                RebuildPlanCard();
+                ApplyHeightAnchored();
+                ShowPersistentFeedback("已完成全部设备，但“不再重复提醒”未能落盘（重启后可能再次提示）：" + progressErr, ErrorColor);
+            }
 
             bool hasPendingFailure = _pendingImage != null && _pendingRequest != null;
             bool hasSavedFiles = HasSavedPaths();
-            using (var dialog = new CompletionPromptDialog(hasPendingFailure, hasSavedFiles))
+            using (var dialog = new CompletionPromptDialog(hasPendingFailure, hasSavedFiles, progressErr))
             {
                 UiTheme.ScaleLayout(dialog, ScaleFactor);
-                DialogResult answer = Visible
-                    ? dialog.ShowDialog(this)
-                    : dialog.ShowDialog();
+                DialogResult answer = dialog.ShowDialog(this);
                 if (answer == DialogResult.Yes)
                     OpenInspectionFolders();
+            }
+        }
+
+        private sealed class ProgressRecoveryDialog : Form
+        {
+            public ProgressRecoveryDialog(string path, string error)
+            {
+                Text = "巡检进度恢复";
+                StartPosition = FormStartPosition.CenterParent;
+                FormBorderStyle = FormBorderStyle.FixedDialog;
+                MinimizeBox = false;
+                MaximizeBox = false;
+                TopMost = true;
+                AutoScaleMode = AutoScaleMode.None;
+                ClientSize = new Size(460, 200);
+                BackColor = UiTheme.PageBackColor;
+                Font = UiTheme.BodyFont;
+
+                string body = "进度文件读取或校验失败，已暂停覆盖原文件：\n"
+                    + (error ?? "未知错误")
+                    + (string.IsNullOrEmpty(path) ? string.Empty : "\n\n文件位置：" + path)
+                    + "\n\n你可以先检查或替换文件后「重试读取」，或将坏原件备份后再「备份并重置」开启今日新轮。";
+                var message = new Label
+                {
+                    Text = body,
+                    AutoSize = false,
+                    Dock = DockStyle.Fill,
+                    Padding = new Padding(18),
+                    ForeColor = UiTheme.PrimaryTextColor
+                };
+                var buttons = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 52,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(12)
+                };
+                var keep = UiTheme.SecondaryButton("保留原件");
+                keep.Width = 92;
+                keep.DialogResult = DialogResult.Cancel;
+                var backupReset = UiTheme.SecondaryButton("备份并重置");
+                backupReset.ForeColor = UiTheme.ErrorColor;
+                backupReset.Width = 108;
+                backupReset.DialogResult = DialogResult.Yes;
+                var retry = UiTheme.PrimaryButton("重试读取");
+                retry.Width = 96;
+                retry.DialogResult = DialogResult.Retry;
+                buttons.Controls.Add(keep);
+                buttons.Controls.Add(backupReset);
+                buttons.Controls.Add(retry);
+                Controls.Add(message);
+                Controls.Add(buttons);
+                AcceptButton = retry;
+                CancelButton = keep;
             }
         }
 
@@ -3075,7 +3483,7 @@ namespace InspectionWidget
 
         private sealed class CompletionPromptDialog : Form
         {
-            public CompletionPromptDialog(bool hasPendingFailure, bool hasSavedFiles)
+            public CompletionPromptDialog(bool hasPendingFailure, bool hasSavedFiles, string progressSaveError)
             {
                 Text = "今日巡检进度";
                 StartPosition = FormStartPosition.CenterParent;
@@ -3084,7 +3492,7 @@ namespace InspectionWidget
                 MaximizeBox = false;
                 TopMost = true;
                 AutoScaleMode = AutoScaleMode.None;
-                ClientSize = new Size(440, 160);
+                ClientSize = new Size(440, string.IsNullOrEmpty(progressSaveError) ? 160 : 210);
                 BackColor = UiTheme.PageBackColor;
                 Font = UiTheme.BodyFont;
 
@@ -3100,6 +3508,11 @@ namespace InspectionWidget
                 else
                 {
                     body = "今日所有设备均已点过。\n\n是否立即打开巡检文件夹？";
+                }
+                if (!string.IsNullOrEmpty(progressSaveError))
+                {
+                    body += "\n\n注意：本次“不再重复提醒”标记未能写入进度文件（"
+                        + progressSaveError + "），下次重启后可能再次提示。";
                 }
 
                 var message = new Label

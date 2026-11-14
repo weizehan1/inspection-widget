@@ -1,0 +1,56 @@
+[
+  {
+    "name": "主仓基线测试（macOS Mono，协调者预构建产物）",
+    "status": "passed",
+    "note": "直接检查协调者运行 build.sh 生成的测试日志尾部与产物时间，macOS Mono 无头测试 433/433 通过，未在本审计中重复改动或重跑 build.sh。注：协调者随后仅更新了图标资产（assets/app-icon.png、assets/app.ico.base64.txt、assets/app.ico），未改 src/tests，新产物哈希绑定与 AppIcon 嵌入构建验证由主负责人另行绑定。",
+    "evidence": "/tmp/opencode/inspection-v110/codex-candidate-build.log 末尾：用例总数：433，通过：433，失败：0；受审构建产物 build/InspectionWidget.exe (427008 bytes) 对应受审提交 96165980503e3c764eb4a45811afdbbad54b0553。"
+  },
+  {
+    "name": "独立复现 REPRO-1：损坏 progress.json 读取失败被吞且后续操作覆盖原文件",
+    "status": "failed",
+    "note": "实跑复现成功（证明存在缺陷）：针对损坏 JSON，InspectionProgressStore.TryLoad 返回 false（error 长度 163），但构造 InspectionSessionController 后未保留任何错误状态，随后 TrySelectDevice 直接将损坏的 progress.json 覆盖为 228 字节新快照。",
+    "evidence": "/tmp/opencode/inspection-v110/audit/AuditRepro.cs 编译引用 build/InspectionWidget.exe 运行日志（/tmp/opencode/inspection-v110/audit/repro.log）：REPRO-1 storeOk=False storeErr_len=163 visited_after_ctor=0 selected=True select_err=<null> progress_overwritten=True after_len=228。"
+  },
+  {
+    "name": "独立复现 REPRO-2：PlanModeEnabled=false 时丢弃兜底保存路径导致目录解析为空",
+    "status": "failed",
+    "note": "实跑复现成功（证明存在缺陷）：PlanModeEnabled=false 且配置主目录不存在时，截图写入 FallbackScreenshots 目录后调用 RecordSaveSucceeded 返回 false，SavedPaths=0 且 ResolveOpenFolders 返回 0 个可打开目录。",
+    "evidence": "/tmp/opencode/inspection-v110/audit/repro.log：REPRO-2 planMode=False recorded=False savedPaths=0 openFolders=0。"
+  },
+  {
+    "name": "独立复现 REPRO-3：非合并导入缺少 Devices 字段的新版配置仍清空当日计划进度",
+    "status": "failed",
+    "note": "实跑复现成功（证明存在缺陷）：导入仅含 HideVisitedDevices=false 的 Exchange JSON（docHasDevices=False），在 MergeDevicesOnly=false 下 TryBuildPlan 保留原设备列表，但 SettingsDraft.ApplyPlan(plan, false) 仍将 PendingImportDeviceReplace 设为 true，调用 ApplySavedConfig 后 VisitedCount 从 1 归零。",
+    "evidence": "/tmp/opencode/inspection-v110/audit/repro.log：REPRO-3 parsed=True parseErr=<null> docHasDevices=False built=True planErr=<null> pendingImportDeviceReplace=True visitedBefore=1 visitedAfter=0。"
+  },
+  {
+    "name": "独立复现 REPRO-4：跨午夜忙碌期间首次触发 rolled=true，二次检测已丢失重置信号",
+    "status": "failed",
+    "note": "实跑复现成功（证明控制器/定时器协作缺口）：跨午夜后第一次 EnsureCurrentDayResetIfRolled 将当日进度清零并输出 rolledTick1=True（此时若 MainForm 处于 Waiting 或 saveInFlight 会跳过 UI 重建），第二次调用时 rolledTick2=False；结合 MainForm.OnDayRolloverTick 源码（src/MainForm.cs:2995-3006）可见界面设备列表与取消/保存回调不再补充 RebuildDeviceButtons。",
+    "evidence": "/tmp/opencode/inspection-v110/audit/repro.log：REPRO-4 day1Visible=1 rolledTick1=True rolledTick2=False visitedAfterMidnight=0 recordedDay1TokenAfterMidnight=False；源码依据 src/MainForm.cs:2991-3007。"
+  },
+  {
+    "name": "独立复现 REPRO-5：Waiting 态再次点击同一设备切换回 Idle 时依赖分支判断遗漏完成检查",
+    "status": "failed",
+    "note": "实跑复现 PanelStateMachine 状态切换（Waiting -> Idle，visited 保持不变），结合 MainForm.OnDeviceRowActivated（src/MainForm.cs:1939-1955）源码推理确认：仅在 State == Waiting 分支更新反馈条，且函数全程未在切换回 Idle 后调用 TryMaybeShowCompletionPrompt。",
+    "evidence": "/tmp/opencode/inspection-v110/audit/repro.log：REPRO-5 first=True(Waiting) second=True(Idle) visited=1；源码依据 src/MainForm.cs:1939-1955。"
+  },
+  {
+    "name": "源码审查：MainForm 四处 progressErr 被吞或被常规成功反馈覆盖，以及托盘隐藏态弹窗门控缺失",
+    "status": "failed",
+    "note": "基于源码直接阅读确认：RetryConfigLoad、OnSettingsClicked、OnSaveCompleted、TryMaybeShowCompletionPrompt 均忽略 progressErr；TryMaybeShowCompletionPrompt 未检查 !Visible 且 ShowPanelFromTray 未补检完成提示。",
+    "evidence": "src/MainForm.cs:1261-1277, 1950-1955, 2024-2039, 2574-2590, 3009-3028。"
+  },
+  {
+    "name": "源码审查：HookManager.UpdateSelfBounds、高 DPI OnHandleCreated 释放字体、AutoScroll 子控件偏移",
+    "status": "failed",
+    "note": "基于源码直接阅读确认：Waiting 态多次调用 ApplyHeightAnchored 未刷新 _hooks.UpdateSelfBounds；OnHandleCreated 触发 ApplyScaleToStaticLayout 释放旧字体未刷新动态子控件；LayoutSections 与 SettingsForm 行排布未加 AutoScrollPosition.Y。",
+    "evidence": "src/MainForm.cs:226-235, 425-433, 984-1040, 1825, 1868, 1878, 1895, 1912, 1964；src/SettingsForm.cs:1544, 1672。"
+  },
+  {
+    "name": "Windows 真机 WinForms GUI / 高 DPI / 系统托盘 / 全局钩子与 Explorer 实测",
+    "status": "untested",
+    "note": "当前审查环境为 macOS（无 Windows 桌面与 Win32 消息循环），--windows-ui 在实现交接报告中退出码 2（环境跳过）；MainForm/SettingsForm 实际绘制、125%/150%/200% DPI 文本截断与 Font Dispose 崩溃、托盘气泡与 Explorer 拉起均未在 Windows 实机运行。",
+    "evidence": "work/v110/hydrogen-implementation-report.md 明确记录 --windows-ui 在 macOS Mono 退出码 2；本次审计未具备 Windows 环境。"
+  }
+]

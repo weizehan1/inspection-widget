@@ -7,6 +7,17 @@ using InspectionWidget.Native;
 
 namespace InspectionWidget.Capture
 {
+    internal interface IWindowPickHooks : IDisposable
+    {
+        event Action<Point, int> ExternalClick;
+        event Action CancelRequested;
+        event Action TimeoutElapsed;
+        Rectangle CurrentSelfBounds { get; }
+        int Start(Rectangle selfBounds);
+        bool UpdateSelfBounds(Rectangle selfBounds);
+        void Stop();
+    }
+
     /// <summary>
     /// 全局低级钩子管理（选窗期间运行）：钩子挂在专用线程上并跑消息循环，
     /// 回调内只做坐标判定，事件一律投递（Start 时捕获的 SynchronizationContext，
@@ -18,7 +29,7 @@ namespace InspectionWidget.Capture
     /// - 任意位置右键按下、任意焦点下 Esc 均吞掉并投递 CancelRequested；
     /// - 进入等待后固定 30 秒超时（不滑动续期），到期先自停再投递 TimeoutElapsed。
     /// </summary>
-    public sealed class HookManager : IDisposable
+    public sealed class HookManager : IWindowPickHooks
     {
         /// <summary>
         /// 外部左键点击（物理像素坐标，取 Down 点；第二参数为事件所属钩子会话号，
@@ -129,6 +140,25 @@ namespace InspectionWidget.Capture
                 delegate(object state) { OnTimeoutTimer(session); },
                 null, TimeoutMilliseconds, Timeout.Infinite);
             return session.Id;
+        }
+
+        /// <summary>当前运行中会话的自身矩形（测试可检查）；未运行时返回 Empty。</summary>
+        internal Rectangle CurrentSelfBounds
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    if (_session == null || _session.TeardownRequested)
+                        return Rectangle.Empty;
+                    return _session.SelfBounds;
+                }
+            }
+        }
+
+        Rectangle IWindowPickHooks.CurrentSelfBounds
+        {
+            get { return CurrentSelfBounds; }
         }
 
         /// <summary>

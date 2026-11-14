@@ -253,8 +253,11 @@ namespace InspectionWidget.Config
                 QuickLinkCloner.ReplaceInto(QuickLinks, plan.Result.QuickLinks);
                 PlanModeEnabled = plan.Result.PlanModeEnabled;
                 HideVisitedDevices = plan.Result.HideVisitedDevices;
-                PendingImportDeviceReplace = true;
-                PendingDeviceRenames.Clear();
+                if (plan.DevicesReplaced)
+                {
+                    PendingImportDeviceReplace = true;
+                    PendingDeviceRenames.Clear();
+                }
             }
 
             if (plan.CredentialsReplaced)

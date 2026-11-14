@@ -1530,22 +1530,60 @@ namespace InspectionWidget
             return row;
         }
 
+        private static void PrepareAutoScrollPanel(
+            Panel panel,
+            int totalHeight,
+            int minimumWidth,
+            out int rowWidth,
+            out int offsetX,
+            out int offsetY)
+        {
+            if (panel == null)
+            {
+                rowWidth = minimumWidth;
+                offsetX = 0;
+                offsetY = 0;
+                return;
+            }
+            int desiredScrollY = Math.Max(0, -panel.AutoScrollPosition.Y);
+            panel.AutoScrollMinSize = new Size(0, Math.Max(0, totalHeight));
+            int maxScrollY = Math.Max(0, totalHeight - panel.ClientSize.Height);
+            int clampedScrollY = Math.Max(0, Math.Min(desiredScrollY, maxScrollY));
+            if (-panel.AutoScrollPosition.Y != clampedScrollY || panel.AutoScrollPosition.X != 0)
+                panel.AutoScrollPosition = new Point(0, clampedScrollY);
+            rowWidth = Math.Max(minimumWidth, panel.ClientSize.Width);
+            offsetX = panel.AutoScrollPosition.X;
+            offsetY = panel.AutoScrollPosition.Y;
+        }
+
         private void LayoutCredentialRows()
         {
+            int step = L(48);
+            int totalHeight = _credentialRows.Count * step;
             int minimumWidth = L(520);
-            int width = _credentialRowsPanel == null
-                ? minimumWidth
-                : _credentialRowsPanel.ClientSize.Width - L(12);
-            width = Math.Max(minimumWidth, width);
-            for (int i = 0; i < _credentialRows.Count; i++)
+            int width;
+            int offsetX;
+            int offsetY;
+            if (_credentialRowsPanel != null) _credentialRowsPanel.SuspendLayout();
+            try
             {
-                CredentialRow row = _credentialRows[i];
-                row.Panel.Width = width;
-                row.Panel.Location = new Point(0, i * L(48));
-                row.UpButton.Enabled = i > 0;
-                row.DownButton.Enabled = i < _credentialRows.Count - 1;
-                row.ClearButton.Enabled = !row.Draft.IsNew && !row.Draft.Cleared;
-                row.UndoButton.Enabled = row.Draft.Cleared;
+                PrepareAutoScrollPanel(_credentialRowsPanel, totalHeight, minimumWidth, out width, out offsetX, out offsetY);
+                if (_credentialRowsPanel != null)
+                    width = Math.Max(minimumWidth, _credentialRowsPanel.ClientSize.Width - L(12));
+                for (int i = 0; i < _credentialRows.Count; i++)
+                {
+                    CredentialRow row = _credentialRows[i];
+                    row.Panel.Width = width;
+                    row.Panel.Location = new Point(offsetX, i * step + offsetY);
+                    row.UpButton.Enabled = i > 0;
+                    row.DownButton.Enabled = i < _credentialRows.Count - 1;
+                    row.ClearButton.Enabled = !row.Draft.IsNew && !row.Draft.Cleared;
+                    row.UndoButton.Enabled = row.Draft.Cleared;
+                }
+            }
+            finally
+            {
+                if (_credentialRowsPanel != null) _credentialRowsPanel.ResumeLayout(true);
             }
         }
 
@@ -1663,18 +1701,36 @@ namespace InspectionWidget
         {
             if (_linkRowsPanel == null)
                 return;
+            int step = L(44);
+            int totalHeight = _linkRows.Count * step;
             int minimumWidth = L(500);
-            int width = Math.Max(minimumWidth, _linkRowsPanel.ClientSize.Width - L(12));
-            for (int i = 0; i < _linkRows.Count; i++)
+            int width;
+            int offsetX;
+            int offsetY;
+            _linkRowsPanel.SuspendLayout();
+            try
             {
-                LinkRow row = _linkRows[i];
-                row.Panel.Width = width;
-                row.Panel.Location = new Point(0, i * L(44));
-                row.UpButton.Enabled = i > 0;
-                row.DownButton.Enabled = i < _linkRows.Count - 1;
+                PrepareAutoScrollPanel(_linkRowsPanel, totalHeight, minimumWidth, out width, out offsetX, out offsetY);
+                width = Math.Max(minimumWidth, _linkRowsPanel.ClientSize.Width - L(12));
+                for (int i = 0; i < _linkRows.Count; i++)
+                {
+                    LinkRow row = _linkRows[i];
+                    row.Panel.Width = width;
+                    row.Panel.Location = new Point(offsetX, i * step + offsetY);
+                    row.UpButton.Enabled = i > 0;
+                    row.DownButton.Enabled = i < _linkRows.Count - 1;
+                }
+                if (_linkEmptyLabel != null)
+                {
+                    _linkEmptyLabel.Visible = _linkRows.Count == 0;
+                    if (_linkEmptyLabel.Visible)
+                        _linkEmptyLabel.Location = new Point(offsetX, L(8) + offsetY);
+                }
             }
-            if (_linkEmptyLabel != null)
-                _linkEmptyLabel.Visible = _linkRows.Count == 0;
+            finally
+            {
+                _linkRowsPanel.ResumeLayout(true);
+            }
         }
 
         private void AddLink()
@@ -1694,6 +1750,7 @@ namespace InspectionWidget
             LayoutLinkRows();
             UpdateLinkAddState();
             MarkDirty();
+            _linkRowsPanel.ScrollControlIntoView(row.Panel);
             row.TitleBox.Focus();
             ClearFeedback();
         }
@@ -1784,6 +1841,7 @@ namespace InspectionWidget
             LayoutCredentialRows();
             UpdateCredentialAddState();
             MarkDirty();
+            _credentialRowsPanel.ScrollControlIntoView(row.Panel);
             row.NameBox.Focus();
             ClearFeedback();
         }

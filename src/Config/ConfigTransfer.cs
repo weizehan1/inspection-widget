@@ -26,6 +26,7 @@ namespace InspectionWidget.Config
         public int UsableCredentialCount;
         public int ResetCredentialCount;
         public bool CredentialsReplaced;
+        public bool DevicesReplaced;
         public readonly List<string> SettingChanges = new List<string>();
         public readonly List<string> FieldSources = new List<string>();
     }
@@ -162,6 +163,7 @@ namespace InspectionWidget.Config
             else if (document.Has("Devices"))
             {
                 finalDevices = new List<string>(source.Devices ?? new List<string>());
+                plan.DevicesReplaced = true;
                 plan.SettingChanges.Add("设备名单：替换");
                 AddSource(plan, document, "Devices");
             }

@@ -77,3 +77,4 @@ Codex 结构化验证报告 `/tmp/opencode/inspection-v110/codex-candidate-tests
 
 用户追加要求用 ImageGen 重做图标，已生成并接入统一嵌入资源；原图/提示词/ICO编码在assets，验证见 `work/v110/icon-generation.md`。ICO兼容性缺口已精确复现并修正，真实 AppIcon.Load 加载成功，整仓433/433通过。
 独立审计针对源码9616598发现5High/5Medium，暂不通过；Codex 已独立运行审计复现程序，确认损坏进度被覆盖、计划关闭丢暂存目录、缺Devices的部分导入清进度等行为。审计资料保留在work/v110/hydrogen-audit*，将退回原Hydrogen实现者修复，代码与图标分开归因。
+已将10项返修交回原实现会话 `acc0783b-7da0-46fb-8153-63da84b19d83`，任务 `work/v110/hydrogen-audit-fix-brief.md`；新图标已提交 `1cb70d8`，执行者不改assets，Codex暂不并行改源码。修复完成后由原独立审计会话复审。

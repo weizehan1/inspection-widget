@@ -20,6 +20,7 @@ namespace InspectionWidget.Planning
 
         private readonly string _path;
         private readonly AtomicConfigWriter _writer;
+        private byte[] _lastLoadedBytes;
 
         public InspectionProgressStore(string path)
             : this(path, new AtomicConfigWriter())
@@ -45,12 +46,14 @@ namespace InspectionWidget.Planning
         {
             snapshot = null;
             error = null;
+            _lastLoadedBytes = null;
             try
             {
                 if (!File.Exists(_path)) return true;
                 var info = new FileInfo(_path);
                 if (info.Length == 0)
                 {
+                    _lastLoadedBytes = new byte[0];
                     error = "巡检进度文件为空，未恢复。";
                     return false;
                 }
@@ -60,9 +63,10 @@ namespace InspectionWidget.Planning
                     return false;
                 }
 
+                byte[] rawBytes = File.ReadAllBytes(_path);
+                _lastLoadedBytes = rawBytes;
                 var serializer = new DataContractJsonSerializer(typeof(InspectionProgressSnapshot));
-                using (var stream = new FileStream(_path, FileMode.Open, FileAccess.Read,
-                    FileShare.Read))
+                using (var stream = new MemoryStream(rawBytes, false))
                 {
                     var loaded = serializer.ReadObject(stream) as InspectionProgressSnapshot;
                     if (loaded == null)
@@ -78,6 +82,44 @@ namespace InspectionWidget.Planning
             {
                 snapshot = null;
                 error = "读取巡检进度失败：" + ex.Message;
+                return false;
+            }
+        }
+
+        public bool TryBackupCorruptCopy(out string backupPath, out string error)
+        {
+            backupPath = null;
+            error = null;
+            try
+            {
+                if (!File.Exists(_path))
+                    return true;
+
+                byte[] bytes = _lastLoadedBytes;
+                if (bytes == null)
+                    bytes = File.ReadAllBytes(_path);
+
+                string dir = System.IO.Path.GetDirectoryName(_path);
+                if (string.IsNullOrEmpty(dir))
+                    dir = ".";
+                string name = "progress.corrupt."
+                    + DateTime.Now.ToString("yyyyMMdd-HHmmss")
+                    + "." + Guid.NewGuid().ToString("N").Substring(0, 8)
+                    + ".json";
+                string candidate = System.IO.Path.Combine(dir, name);
+                AtomicWriteResult writeResult = _writer.WriteAllBytes(candidate, bytes);
+                if (!writeResult.Written)
+                {
+                    error = writeResult.Error ?? "写入损坏进度备份失败。";
+                    return false;
+                }
+                backupPath = candidate;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                backupPath = null;
+                error = "备份损坏进度文件失败：" + ex.Message;
                 return false;
             }
         }
