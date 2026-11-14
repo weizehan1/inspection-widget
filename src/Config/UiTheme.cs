@@ -13,22 +13,32 @@ namespace InspectionWidget
         private static readonly Dictionary<double, FontSet> FontCache =
             new Dictionary<double, FontSet>();
 
-        public static readonly Color AccentColor = Color.FromArgb(0x00, 0x67, 0xC0);
-        public static readonly Color AccentHoverColor = Color.FromArgb(0x00, 0x5A, 0xA8);
-        public static readonly Color SuccessColor = Color.FromArgb(0x0F, 0x7B, 0x0F);
-        public static readonly Color ErrorColor = Color.FromArgb(0xC4, 0x2B, 0x1C);
-        public static readonly Color PrimaryTextColor = Color.FromArgb(0x1B, 0x1B, 0x1B);
-        public static readonly Color SecondaryTextColor = Color.FromArgb(0x42, 0x42, 0x42);
-        public static readonly Color WeakTextColor = Color.FromArgb(0x61, 0x61, 0x61);
-        public static readonly Color PageBackColor = Color.FromArgb(0xF9, 0xF9, 0xF9);
-        public static readonly Color SelectedNavBackColor = Color.FromArgb(0xEF, 0xF6, 0xFC);
-        public static readonly Color BorderColor = Color.FromArgb(0xE0, 0xE0, 0xE0);
+        public static readonly Color AccentColor = Color.FromArgb(0x24, 0x63, 0xA0);
+        public static readonly Color AccentHoverColor = Color.FromArgb(0x19, 0x4D, 0x80);
+        public static readonly Color AccentSoftColor = Color.FromArgb(0xEA, 0xF2, 0xFA);
+        public static readonly Color AccentBorderColor = Color.FromArgb(0xC9, 0xD6, 0xE2);
+        public static readonly Color SuccessColor = Color.FromArgb(0x21, 0x6A, 0x48);
+        public static readonly Color SuccessSoftColor = Color.FromArgb(0xE9, 0xF4, 0xEE);
+        public static readonly Color ErrorColor = Color.FromArgb(0xB1, 0x32, 0x32);
+        public static readonly Color ErrorSoftColor = Color.FromArgb(0xFF, 0xF0, 0xEF);
+        public static readonly Color WarningColor = Color.FromArgb(0x81, 0x53, 0x15);
+        public static readonly Color WarningSoftColor = Color.FromArgb(0xFB, 0xF5, 0xEB);
+        public static readonly Color PrimaryTextColor = Color.FromArgb(0x20, 0x2A, 0x35);
+        public static readonly Color SecondaryTextColor = Color.FromArgb(0x5B, 0x68, 0x75);
+        public static readonly Color WeakTextColor = Color.FromArgb(0x74, 0x80, 0x8D);
+        public static readonly Color PageBackColor = Color.FromArgb(0xFF, 0xFF, 0xFF);
+        public static readonly Color SurfaceColor = Color.FromArgb(0xF4, 0xF7, 0xFA);
+        public static readonly Color SelectedNavBackColor = Color.FromArgb(0xEA, 0xF2, 0xFA);
+        public static readonly Color BorderColor = Color.FromArgb(0xD5, 0xDD, 0xE5);
+        public static readonly Color BorderSoftColor = Color.FromArgb(0xE5, 0xEB, 0xF1);
 
         private sealed class FontSet
         {
             public readonly Font Body;
             public readonly Font BodyBold;
             public readonly Font Small;
+            public readonly Font Subtitle;
+            public readonly Font PanelTitle;
             public readonly Font Title;
 
             public FontSet(double scale)
@@ -36,6 +46,8 @@ namespace InspectionWidget
                 Body = CreateFont(13f * (float)scale, FontStyle.Regular);
                 BodyBold = CreateFont(13f * (float)scale, FontStyle.Bold);
                 Small = CreateFont(11f * (float)scale, FontStyle.Regular);
+                Subtitle = CreateFont(12f * (float)scale, FontStyle.Regular);
+                PanelTitle = CreateFont(15f * (float)scale, FontStyle.Bold);
                 Title = CreateFont(20f * (float)scale, FontStyle.Bold);
             }
         }
@@ -53,6 +65,16 @@ namespace InspectionWidget
         public static Font SmallFont
         {
             get { return CurrentFontSet.Small; }
+        }
+
+        public static Font SubtitleFont
+        {
+            get { return CurrentFontSet.Subtitle; }
+        }
+
+        public static Font PanelTitleFont
+        {
+            get { return CurrentFontSet.PanelTitle; }
         }
 
         public static Font TitleFont
@@ -196,7 +218,7 @@ namespace InspectionWidget
             grid.ColumnHeadersHeight = 34;
             grid.RowTemplate.Height = 34;
             grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(0xF3, 0xF3, 0xF3);
+            grid.ColumnHeadersDefaultCellStyle.BackColor = SurfaceColor;
             grid.ColumnHeadersDefaultCellStyle.ForeColor = SecondaryTextColor;
             grid.DefaultCellStyle.SelectionBackColor = SelectedNavBackColor;
             grid.DefaultCellStyle.SelectionForeColor = PrimaryTextColor;

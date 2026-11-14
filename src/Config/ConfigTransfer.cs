@@ -61,6 +61,10 @@ namespace InspectionWidget.Config
             fields.Add("    \"AutoClearClipboard\": " + BoolJson(config.AutoClearClipboard));
             fields.Add("    \"IsDeviceCollapsed\": " + BoolJson(config.IsDeviceCollapsed));
             fields.Add("    \"IsCredentialCollapsed\": " + BoolJson(config.IsCredentialCollapsed));
+            // v1.1.0：普通交换和完整备份都携带链接、计划开关与显示方式，但不携带每日进度/凭据正文。
+            fields.Add("    \"QuickLinks\": " + QuickLinksJson(config.QuickLinks));
+            fields.Add("    \"PlanModeEnabled\": " + BoolJson(config.PlanModeEnabled));
+            fields.Add("    \"HideVisitedDevices\": " + BoolJson(config.HideVisitedDevices));
 
             if (credentialMode == ConfigJsonReader.CredentialModeDpapi)
             {
@@ -141,6 +145,13 @@ namespace InspectionWidget.Config
                 error = rootValidation;
                 return false;
             }
+            // 文档也可能由调用方直接构造；生成可提交候选前统一再校验一次新字段。
+            string quickLinksError = QuickLinkValidator.ValidateAll(source.QuickLinks);
+            if (quickLinksError != null)
+            {
+                error = "快捷链接无效：" + quickLinksError;
+                return false;
+            }
 
             List<string> finalDevices;
             if (options.MergeDevicesOnly)
@@ -193,6 +204,40 @@ namespace InspectionWidget.Config
                 CopyField(document, result, source, "IsCredentialCollapsed",
                     delegate(AppConfig c, AppConfig s) { c.IsCredentialCollapsed = s.IsCredentialCollapsed; },
                     plan, "凭据区折叠状态");
+
+                // 源存在新字段才替换；缺字段保留克隆自 current 的本机值，绝不抹除。
+                if (document.Has("QuickLinks"))
+                {
+                    result.QuickLinks = QuickLinkCloner.CloneList(source.QuickLinks);
+                    plan.SettingChanges.Add("快捷链接：采用源文件中的值（"
+                        + result.QuickLinks.Count + " 条）");
+                    AddSource(plan, document, "QuickLinks");
+                }
+                else
+                {
+                    plan.SettingChanges.Add("快捷链接：保留当前值（源文件未提供）");
+                }
+                if (document.Has("PlanModeEnabled"))
+                {
+                    result.PlanModeEnabled = source.PlanModeEnabled;
+                    plan.SettingChanges.Add("计划模式：采用源文件中的值");
+                    AddSource(plan, document, "PlanModeEnabled");
+                }
+                else
+                {
+                    plan.SettingChanges.Add("计划模式：保留当前值（源文件未提供）");
+                }
+                if (document.Has("HideVisitedDevices"))
+                {
+                    result.HideVisitedDevices = source.HideVisitedDevices;
+                    plan.SettingChanges.Add("已点过设备显示方式：采用源文件中的值（"
+                        + (result.HideVisitedDevices ? "隐藏已点过" : "保留并显示对勾") + "）");
+                    AddSource(plan, document, "HideVisitedDevices");
+                }
+                else
+                {
+                    plan.SettingChanges.Add("已点过设备显示方式：保留当前值（源文件未提供）");
+                }
 
                 if (document.CredentialsPresent && options.ReplaceCredentials)
                 {
@@ -253,6 +298,9 @@ namespace InspectionWidget.Config
             {
                 plan.Credentials = CloneCredentials(current.Credentials);
                 plan.SettingChanges.Add("其他设置：保留当前草稿值");
+                plan.SettingChanges.Add("快捷链接：保留当前草稿值（仅合并设备）");
+                plan.SettingChanges.Add("计划模式：保留当前草稿值（仅合并设备）");
+                plan.SettingChanges.Add("已点过设备显示方式：保留当前草稿值（仅合并设备）");
                 plan.SettingChanges.Add("凭据：保留当前草稿值");
             }
 
@@ -505,6 +553,23 @@ namespace InspectionWidget.Config
             }
             json.Append(']');
             return json.ToString();
+        }
+
+        private static string QuickLinksJson(IList<QuickLinkEntry> links)
+        {
+            var parts = new List<string>();
+            if (links != null)
+            {
+                for (int i = 0; i < links.Count; i++)
+                {
+                    QuickLinkEntry entry = links[i];
+                    if (entry == null) continue;
+                    parts.Add("{\"Title\": \"" + JsonEscape(entry.Title ?? string.Empty)
+                        + "\", \"Url\": \"" + JsonEscape(entry.Url ?? string.Empty)
+                        + "\", \"Enabled\": " + BoolJson(entry.Enabled) + "}");
+                }
+            }
+            return "[" + string.Join(", ", parts.ToArray()) + "]";
         }
 
         private static string CredentialsJson(IList<CredentialEntry> credentials)

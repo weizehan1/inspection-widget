@@ -8,7 +8,10 @@ using System.Windows.Forms;
 using InspectionWidget.Capture;
 using InspectionWidget.Config;
 using InspectionWidget.Credentials;
+using InspectionWidget.Links;
+using InspectionWidget.Planning;
 using IClock = InspectionWidget.Storage.IClock;
+using InspectionFolderNavigator = InspectionWidget.Storage.InspectionFolderNavigator;
 using ScreenshotSaver = InspectionWidget.Storage.ScreenshotSaver;
 using StorageSaveResult = InspectionWidget.Storage.SaveResult;
 using SystemClock = InspectionWidget.Storage.SystemClock;
@@ -16,25 +19,32 @@ using SystemClock = InspectionWidget.Storage.SystemClock;
 namespace InspectionWidget
 {
     /// <summary>
-    /// 主面板：无边框置顶面板。标题栏（短名+日期+设置/最小化/关闭）、设备按钮列、
-    /// 可折叠凭据区、底部反馈行与根目录行；高度变化一律 Bottom 锚定。
-    /// 配置加载/刷新走同一入口 RefreshConfigState（含设备名单校验 Minor-5 接线）。
+    /// 主面板（v1.1.0 方案 B）：无边框置顶面板，352px 宽，含标题与完整日期、
+    /// 快捷链接、今日巡检计划卡、两列凭据、带已点状态与恢复未点的截图设备区，
+    /// 以及固定底部“打开巡检文件夹”主操作、反馈区和路径显示。
     /// </summary>
     public class MainForm : Form
     {
-        // 颜色令牌（计划 Global Constraints）
-        private static readonly Color AccentColor = Color.FromArgb(0x00, 0x67, 0xC0);
-        private static readonly Color SuccessColor = Color.FromArgb(0x0F, 0x7B, 0x0F);
-        private static readonly Color ErrorColor = Color.FromArgb(0xC4, 0x2B, 0x1C);
-        private static readonly Color PrimaryTextColor = Color.FromArgb(0x1B, 0x1B, 0x1B);
-        private static readonly Color SecondaryTextColor = Color.FromArgb(0x42, 0x42, 0x42);
-        private static readonly Color WeakTextColor = Color.FromArgb(0x61, 0x61, 0x61);
-        private static readonly Color PanelBackColor = Color.FromArgb(0xF9, 0xF9, 0xF9);
-        private static readonly Color BorderColor = Color.FromArgb(0xE0, 0xE0, 0xE0);
-        private static readonly Color LastDeviceBackColor = Color.FromArgb(0xEF, 0xF6, 0xFC);
+        // 颜色令牌（v1.1.0 方案 B 与 UiTheme 对齐）
+        private static readonly Color AccentColor = UiTheme.AccentColor;
+        private static readonly Color AccentSoftColor = UiTheme.AccentSoftColor;
+        private static readonly Color AccentBorderColor = UiTheme.AccentBorderColor;
+        private static readonly Color SuccessColor = UiTheme.SuccessColor;
+        private static readonly Color SuccessSoftColor = UiTheme.SuccessSoftColor;
+        private static readonly Color ErrorColor = UiTheme.ErrorColor;
+        private static readonly Color WarningColor = UiTheme.WarningColor;
+        private static readonly Color WarningSoftColor = UiTheme.WarningSoftColor;
+        private static readonly Color PrimaryTextColor = UiTheme.PrimaryTextColor;
+        private static readonly Color SecondaryTextColor = UiTheme.SecondaryTextColor;
+        private static readonly Color WeakTextColor = UiTheme.WeakTextColor;
+        private static readonly Color PanelBackColor = UiTheme.PageBackColor;
+        private static readonly Color SurfaceColor = UiTheme.SurfaceColor;
+        private static readonly Color BorderColor = UiTheme.BorderColor;
+        private static readonly Color BorderSoftColor = UiTheme.BorderSoftColor;
+        private static readonly Color LastDeviceBackColor = UiTheme.AccentSoftColor;
         private static readonly Color ButtonBackColor = Color.White;
 
-        private const int SideMargin = 10;
+        private const int SideMargin = 12;
 
         // 界面缩放（v1.0.1）：度量一律经 M() 按当前配置档位缩放，布局公式在 PanelLayout。
         private double ScaleFactor
@@ -57,7 +67,7 @@ namespace InspectionWidget
 
         private int M(int value) { return PanelLayout.Scale(value, ScaleFactor); }
 
-        private int PanelWidthNow { get { return PanelLayout.ScaledPanelWidth(ScaleFactor); } }
+        private int PanelWidthNow { get { return PanelLayout.ScaledSchemeBPanelWidth(ScaleFactor); } }
 
         private int ContentWidthNow
         {
@@ -71,6 +81,11 @@ namespace InspectionWidget
         private readonly ConfigStore _store;
         private readonly PanelStateMachine _stateMachine;
         private readonly HookManager _hooks;
+        private readonly QuickLinkLauncher _linkLauncher = new QuickLinkLauncher();
+        private readonly InspectionFolderNavigator _folderNavigator = new InspectionFolderNavigator();
+        private InspectionProgressStore _progressStore;
+        private InspectionSessionController _session;
+        private InspectionPlanToken _waitingPlanToken;
         private AppConfig _config;
         private string _configRevision = string.Empty;
         private bool _configWriteProtected;
@@ -97,6 +112,7 @@ namespace InspectionWidget
             public int RequestId;
             // 日期文件夹名模式快照（v1.0.2）：与 Date 同刻固定，保存/重试共用
             public string FolderPattern;
+            public InspectionPlanToken PlanToken;
         }
 
         private readonly IClock _clock = new SystemClock();
@@ -122,6 +138,9 @@ namespace InspectionWidget
         // Waiting 会话代次守卫（Task 3 审查 M-3）：进入 Waiting 时记录 HookManager
         // 返回的钩子会话号，ExternalClick 消费前比对，上一会话的迟到事件直接丢弃。
         private int _waitingSessionId;
+        private bool _settingsDialogOpen;
+        private bool _hiddenForCapture;
+        private Timer _dayRolloverTimer;
 
         private Panel _titleBarPanel;
         private Label _titleLabel;
@@ -137,31 +156,70 @@ namespace InspectionWidget
 
         // 系统托盘（v1.0.2）：常驻 NotifyIcon，最小化 = 隐藏到托盘，托盘恢复/退出。
         private NotifyIcon _trayIcon;
-        private Label _deviceHeaderLabel;
+
         private Panel _scrollHost;
-        private Panel _deviceZonePanel;
+        private Panel _quickLinkHeaderPanel;
+        private Label _quickLinkHeaderLabel;
+        private Label _quickLinkSubLabel;
+        private Panel _quickLinkZonePanel;
+        private readonly List<Control> _quickLinkControls = new List<Control>();
+
+        private Panel _planCardPanel;
+        private Label _planTitleLabel;
+        private CheckBox _planToggleButton;
+        private Label _planProgressLabel;
+        private Label _planCountLabel;
+        private Panel _planTrackPanel;
+        private Panel _planFillPanel;
+        private Panel _planActionPanel;
+        private Button _showVisitedButton;
+        private Button _resetRoundButton;
+        private Label _planDisabledHintLabel;
+
+        private Panel _deviceHeaderPanel;
+        private Label _deviceHeaderLabel;
+        private Label _deviceSubLabel;
         private Panel _credentialHeaderPanel;
         private Label _credentialHeaderLabel;
         private Label _credentialArrowLabel;
         private Label _deviceArrowLabel;
         private Panel _credentialZonePanel;
+        private Panel _deviceZonePanel;
+        private Panel _bottomPanel;
+        private Button _openFolderButton;
         private Label _feedbackLabel;
         private Label _rootLabel;
         private Timer _feedbackTimer;
         private bool _feedbackPersistent;
 
         private Control _deviceHint;
-        private readonly List<Button> _deviceButtons = new List<Button>();
+        private DeviceDisplaySnapshot _deviceDisplay = new DeviceDisplaySnapshot
+        {
+            Items = new List<DeviceDisplayItem>(),
+            EmptyKind = DeviceListEmptyKind.None
+        };
+        private readonly List<DeviceRowWidget> _deviceRows = new List<DeviceRowWidget>();
         private readonly List<Control> _credentialControls = new List<Control>();
+
+        private sealed class DeviceRowWidget
+        {
+            public string Device;
+            public bool Visited;
+            public Panel Panel;
+            public Label NameLabel;
+            public Label StatusLabel;
+            public Button UnmarkButton;
+        }
 
         private bool _dragging;
         private Point _dragOffset;
 
-        // 缓存字体（13 常规 / 13 加粗 / 11 三档）：全窗体复用，避免每次刷新状态或
-        // 重建按钮时 CreateFont 新建字体又不释放造成 GDI 泄漏（审查 M-4）。
-        // 按钮/标签只是引用缓存字体，WinForms 控件 Dispose 不释放所赋 Font，故无重复释放。
+        // 缓存字体（15 加粗 / 13 常规 / 13 加粗 / 12 常规 / 12 加粗 / 11 常规）：全窗体复用。
+        private Font _font15Bold;
         private Font _font13;
         private Font _font13Bold;
+        private Font _font12;
+        private Font _font12Bold;
         private Font _font11;
 
         /// <summary>因子感知字体缓存：目标字号随当前缩放档位变，变了才重建（旧字体先释放）。</summary>
@@ -176,6 +234,11 @@ namespace InspectionWidget
             return cache;
         }
 
+        private Font Font15Bold
+        {
+            get { return GetScaledFont(ref _font15Bold, 15f, FontStyle.Bold); }
+        }
+
         private Font Font13
         {
             get { return GetScaledFont(ref _font13, 13f, FontStyle.Regular); }
@@ -184,6 +247,16 @@ namespace InspectionWidget
         private Font Font13Bold
         {
             get { return GetScaledFont(ref _font13Bold, 13f, FontStyle.Bold); }
+        }
+
+        private Font Font12
+        {
+            get { return GetScaledFont(ref _font12, 12f, FontStyle.Regular); }
+        }
+
+        private Font Font12Bold
+        {
+            get { return GetScaledFont(ref _font12Bold, 12f, FontStyle.Bold); }
         }
 
         private Font Font11
@@ -264,13 +337,34 @@ namespace InspectionWidget
                 if (_deviceToolTip != null) _deviceToolTip.Dispose();
                 if (_trayIcon != null) _trayIcon.Dispose();
                 if (_feedbackTimer != null) _feedbackTimer.Dispose();
+                if (_dayRolloverTimer != null) _dayRolloverTimer.Dispose();
+                if (_font15Bold != null) _font15Bold.Dispose();
                 if (_font13 != null) _font13.Dispose();
                 if (_font13Bold != null) _font13Bold.Dispose();
+                if (_font12 != null) _font12.Dispose();
+                if (_font12Bold != null) _font12Bold.Dispose();
                 if (_font11 != null) _font11.Dispose();
                 if (_fontGear != null) _fontGear.Dispose();
                 if (_gearImage != null) _gearImage.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private static string FormatFullDate(DateTime date)
+        {
+            string[] weekdays = { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" };
+            return date.ToString("yyyy年M月d日 ") + weekdays[(int)date.DayOfWeek];
+        }
+
+        private static string ResolveProgressPath(ConfigStore store)
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrEmpty(localAppData))
+                return Path.Combine(Path.Combine(localAppData, "InspectionWidget"), "progress.json");
+            string dir = store != null && !string.IsNullOrEmpty(store.AuthoritativePath)
+                ? Path.GetDirectoryName(store.AuthoritativePath)
+                : Path.GetTempPath();
+            return Path.Combine(dir ?? Path.GetTempPath(), "progress.json");
         }
 
         public MainForm()
@@ -297,26 +391,32 @@ namespace InspectionWidget
             if (appIcon != null)
                 Icon = appIcon;
 
-            BuildStaticLayout();
-            BuildTrayIcon();
-
             LoadResult load = _store.Load();
             _config = load.Config != null ? load.Config : AppConfig.CreateDefault();
             _configRevision = load.Revision ?? string.Empty;
             _configWriteProtected = load.Kind == ConfigLoadKind.IoErrorKept;
             _configLoadError = load.Error;
             EnsureConfigLists();
+            _progressStore = new InspectionProgressStore(ResolveProgressPath(_store));
+            _session = new InspectionSessionController(
+                _clock, _stateMachine, _progressStore, _config, _folderNavigator);
+
+            BuildStaticLayout();
+            BuildTrayIcon();
             RebuildClipboardGuard();
 
             ApplyScaleToStaticLayout();
+            RefreshConfigState();
             ClientSize = new Size(PanelWidthNow, ComputeCurrentHeight());
             RestorePosition();
             LayoutSections();
 
-            // 加载/刷新配置的同一入口：名单校验 + 动态按钮 + 可用性 + 常驻提示
-            RefreshConfigState();
             if (_configWriteProtected)
                 ShowConfigLoadErrorFeedback();
+
+            _dayRolloverTimer = new Timer { Interval = 30000 };
+            _dayRolloverTimer.Tick += OnDayRolloverTick;
+            _dayRolloverTimer.Start();
 
             Shown += OnFirstShown;
             FormClosing += OnFormClosing;
@@ -339,6 +439,8 @@ namespace InspectionWidget
                 return;
             int scrollPosition = _scrollHost != null ? _scrollHost.VerticalScroll.Value : 0;
             ApplyScaleToStaticLayout();
+            RebuildQuickLinks();
+            RebuildPlanCard();
             RebuildDeviceButtons();
             RebuildCredentialControls();
             RefreshStateVisuals();
@@ -358,30 +460,42 @@ namespace InspectionWidget
 
         private void BuildStaticLayout()
         {
+            Font font15Bold = Font15Bold;
             Font font13 = Font13;
             Font font13Bold = Font13Bold;
+            Font font12 = Font12;
+            Font font12Bold = Font12Bold;
             Font font11 = Font11;
 
-            // 标题栏
-            _titleBarPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.TitleBarHeight) };
+            // 标题栏：第 1 行应用标题 + 右上三图标按钮；第 2 行独立完整日期
+            _titleBarPanel = new Panel
+            {
+                BackColor = PanelBackColor,
+                Size = new Size(PanelLayout.SchemeBPanelWidth, PanelLayout.SchemeBHeaderHeight)
+            };
+            _titleBarPanel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (var pen = new Pen(BorderSoftColor, 1f))
+                {
+                    e.Graphics.DrawLine(pen, 1, _titleBarPanel.Height - 1, _titleBarPanel.Width - 2, _titleBarPanel.Height - 1);
+                }
+            };
             var titleLabel = _titleLabel = new Label
             {
                 Text = "巡检助手",
-                Font = font13Bold,
+                Font = font15Bold,
                 ForeColor = PrimaryTextColor,
                 AutoSize = true,
-                Location = new Point(SideMargin, 9)
+                Location = new Point(SideMargin, 10)
             };
             var dateLabel = _dateLabel = new Label
             {
-                Text = DateTime.Now.ToString("yyyy-MM-dd"),
-                Font = font11,
-                ForeColor = WeakTextColor,
+                Text = FormatFullDate(_clock.Now),
+                Font = font12,
+                ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(68, 11)
+                Location = new Point(SideMargin, 34)
             };
-            // 标题栏右侧三按钮（v1.0.2）：设置（槽 2）/ 最小化（槽 1）/ 关闭（槽 0），
-            // 位置统一走 PanelLayout.TitleBarButtonX，缩放重排在 ApplyScaleToStaticLayout。
             _titleToolTip = new ToolTip();
             _deviceToolTip = new ToolTip();
             var settingsButton = _settingsButton = new Button
@@ -392,7 +506,7 @@ namespace InspectionWidget
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
                 Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
-                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.PanelWidth, 2, 1.0), PanelLayout.TitleBarButtonTop)
+                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.SchemeBPanelWidth, 2, 1.0), 8)
             };
             settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += OnSettingsClicked;
@@ -406,7 +520,7 @@ namespace InspectionWidget
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
                 Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
-                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.PanelWidth, 1, 1.0), PanelLayout.TitleBarButtonTop)
+                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.SchemeBPanelWidth, 1, 1.0), 8)
             };
             minimizeButton.FlatAppearance.BorderSize = 0;
             minimizeButton.Click += OnMinimizeClicked;
@@ -420,10 +534,9 @@ namespace InspectionWidget
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
                 Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
-                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.PanelWidth, 0, 1.0), PanelLayout.TitleBarButtonTop)
+                Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.SchemeBPanelWidth, 0, 1.0), 8)
             };
             closeButton.FlatAppearance.BorderSize = 0;
-            // 关闭 = Close()：走既有 FormClosing（先清剪贴板→停钩→存位置），不另写退出路径
             closeButton.Click += delegate { Close(); };
             closeButton.AccessibleName = "退出巡检助手";
             _titleToolTip.SetToolTip(closeButton, "关闭");
@@ -446,55 +559,154 @@ namespace InspectionWidget
             };
             Controls.Add(_scrollHost);
 
-            // 设备区标题行
-            var deviceHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.SectionHeaderHeight) };
-            _deviceHeaderLabel = new Label
+            // 1. 快捷链接区
+            _quickLinkHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 24) };
+            _quickLinkHeaderLabel = new Label
             {
-                Text = "截图",
-                Font = font13,
+                Text = "快捷链接",
+                Font = font12Bold,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(SideMargin, 5)
+                Location = new Point(SideMargin, 2)
             };
-            deviceHeaderPanel.Controls.Add(_deviceHeaderLabel);
-            // 截图区折叠箭头（v1.0.3，与凭据区同一套交互：点标题行任意处切换）
-            _deviceArrowLabel = new Label
+            _quickLinkSubLabel = new Label
             {
-                Text = "˅",
-                Font = font13,
+                Text = "在浏览器打开",
+                Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
-                Location = new Point(PanelLayout.PanelWidth - 26, 5)
+                Location = new Point(PanelLayout.SchemeBPanelWidth - 82, 4)
             };
-            deviceHeaderPanel.Controls.Add(_deviceArrowLabel);
-            deviceHeaderPanel.Click += OnDeviceHeaderClicked;
-            _deviceHeaderLabel.Click += OnDeviceHeaderClicked;
-            _deviceArrowLabel.Click += OnDeviceHeaderClicked;
-            _scrollHost.Controls.Add(deviceHeaderPanel);
-            deviceHeaderPanel.Name = "DeviceHeaderPanel";
-            _deviceHeaderPanel = deviceHeaderPanel;
+            _quickLinkHeaderPanel.Controls.Add(_quickLinkHeaderLabel);
+            _quickLinkHeaderPanel.Controls.Add(_quickLinkSubLabel);
+            _scrollHost.Controls.Add(_quickLinkHeaderPanel);
 
-            // 设备区
-            _deviceZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.PanelWidth };
-            _scrollHost.Controls.Add(_deviceZonePanel);
+            _quickLinkZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.SchemeBPanelWidth };
+            _scrollHost.Controls.Add(_quickLinkZonePanel);
 
-            // 凭据区标题行（整行点击折叠）
-            _credentialHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.SectionHeaderHeight) };
+            // 2. 今日巡检计划卡
+            _planCardPanel = new Panel
+            {
+                BackColor = AccentSoftColor,
+                Width = PanelLayout.SchemeBPanelWidth - SideMargin * 2
+            };
+            _planCardPanel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (var pen = new Pen(AccentBorderColor, 1f))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, _planCardPanel.Width - 1, _planCardPanel.Height - 1);
+                }
+            };
+            _planTitleLabel = new Label
+            {
+                Text = "今日巡检计划",
+                Font = font13Bold,
+                ForeColor = AccentColor,
+                AutoSize = true
+            };
+            _planToggleButton = new CheckBox
+            {
+                Appearance = Appearance.Button,
+                FlatStyle = FlatStyle.Flat,
+                Text = "计划",
+                Font = font11,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Cursor = Cursors.Hand,
+                AccessibleName = "开启或关闭今日巡检计划"
+            };
+            _planToggleButton.FlatAppearance.BorderSize = 1;
+            _planToggleButton.Click += OnPlanToggleClicked;
+            _planProgressLabel = new Label
+            {
+                Text = "今日进度",
+                Font = font12,
+                ForeColor = SecondaryTextColor,
+                AutoSize = true
+            };
+            _planCountLabel = new Label
+            {
+                Text = "已点过 0 / 0",
+                Font = font12Bold,
+                ForeColor = AccentColor,
+                AutoSize = true
+            };
+            _planTrackPanel = new Panel
+            {
+                BackColor = Color.FromArgb(0xD6, 0xE2, 0xEE)
+            };
+            _planFillPanel = new Panel
+            {
+                BackColor = AccentColor,
+                Location = new Point(0, 0)
+            };
+            _planTrackPanel.Controls.Add(_planFillPanel);
+
+            _planActionPanel = new Panel { BackColor = AccentSoftColor };
+            _showVisitedButton = new Button
+            {
+                Text = "查看已点过",
+                Font = font11,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ButtonBackColor,
+                ForeColor = SecondaryTextColor,
+                Cursor = Cursors.Hand,
+                AccessibleName = "切换显示已点过设备"
+            };
+            _showVisitedButton.FlatAppearance.BorderColor = AccentBorderColor;
+            _showVisitedButton.FlatAppearance.BorderSize = 1;
+            _showVisitedButton.Click += OnToggleShowVisitedClicked;
+
+            _resetRoundButton = new Button
+            {
+                Text = "重置本轮",
+                Font = font11,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ButtonBackColor,
+                ForeColor = ErrorColor,
+                Cursor = Cursors.Hand,
+                AccessibleName = "重置本轮巡检进度"
+            };
+            _resetRoundButton.FlatAppearance.BorderColor = Color.FromArgb(0xE6, 0xC2, 0xC2);
+            _resetRoundButton.FlatAppearance.BorderSize = 1;
+            _resetRoundButton.Click += OnResetRoundClicked;
+
+            _planActionPanel.Controls.Add(_showVisitedButton);
+            _planActionPanel.Controls.Add(_resetRoundButton);
+
+            _planDisabledHintLabel = new Label
+            {
+                Text = "开启后记录今日已点项目，不改变截图方式。",
+                Font = font11,
+                ForeColor = SecondaryTextColor,
+                AutoSize = false
+            };
+
+            _planCardPanel.Controls.Add(_planTitleLabel);
+            _planCardPanel.Controls.Add(_planToggleButton);
+            _planCardPanel.Controls.Add(_planProgressLabel);
+            _planCardPanel.Controls.Add(_planCountLabel);
+            _planCardPanel.Controls.Add(_planTrackPanel);
+            _planCardPanel.Controls.Add(_planActionPanel);
+            _planCardPanel.Controls.Add(_planDisabledHintLabel);
+            _scrollHost.Controls.Add(_planCardPanel);
+
+            // 3. 凭据区（整行点击折叠，两列快捷复制）
+            _credentialHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 24) };
             var credentialHeaderLabel = _credentialHeaderLabel = new Label
             {
                 Text = "凭据",
-                Font = font13,
+                Font = font12Bold,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(SideMargin, 5)
+                Location = new Point(SideMargin, 2)
             };
             _credentialArrowLabel = new Label
             {
                 Text = "˅",
                 Font = font13,
                 ForeColor = WeakTextColor,
-                AutoSize = true,
-                Location = new Point(PanelLayout.PanelWidth - 26, 5)
+                AutoSize = true
             };
             _credentialHeaderPanel.Controls.Add(credentialHeaderLabel);
             _credentialHeaderPanel.Controls.Add(_credentialArrowLabel);
@@ -503,39 +715,100 @@ namespace InspectionWidget
             _credentialArrowLabel.Click += OnCredentialHeaderClicked;
             _scrollHost.Controls.Add(_credentialHeaderPanel);
 
-            // 凭据区
-            _credentialZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.PanelWidth };
+            _credentialZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.SchemeBPanelWidth };
             _scrollHost.Controls.Add(_credentialZonePanel);
 
-            // 底部状态区：反馈行 + 根目录行
-            var bottomPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.PanelWidth, PanelLayout.BottomStatusHeight) };
+            // 4. 截图设备区（整行点击折叠）
+            var deviceHeaderPanel = _deviceHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 24) };
+            _deviceHeaderLabel = new Label
+            {
+                Text = "截图设备",
+                Font = font12Bold,
+                ForeColor = SecondaryTextColor,
+                AutoSize = true,
+                Location = new Point(SideMargin, 2)
+            };
+            _deviceSubLabel = new Label
+            {
+                Text = "点击设备，再选窗口",
+                Font = font11,
+                ForeColor = WeakTextColor,
+                AutoSize = true
+            };
+            _deviceArrowLabel = new Label
+            {
+                Text = "˅",
+                Font = font13,
+                ForeColor = WeakTextColor,
+                AutoSize = true
+            };
+            deviceHeaderPanel.Controls.Add(_deviceHeaderLabel);
+            deviceHeaderPanel.Controls.Add(_deviceSubLabel);
+            deviceHeaderPanel.Controls.Add(_deviceArrowLabel);
+            deviceHeaderPanel.Click += OnDeviceHeaderClicked;
+            _deviceHeaderLabel.Click += OnDeviceHeaderClicked;
+            _deviceSubLabel.Click += OnDeviceHeaderClicked;
+            _deviceArrowLabel.Click += OnDeviceHeaderClicked;
+            deviceHeaderPanel.Name = "DeviceHeaderPanel";
+            _scrollHost.Controls.Add(deviceHeaderPanel);
+
+            _deviceZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.SchemeBPanelWidth };
+            _scrollHost.Controls.Add(_deviceZonePanel);
+
+            // 底部固定区：反馈行 + 主操作「打开巡检文件夹」按钮 + 路径行
+            var bottomPanel = _bottomPanel = new Panel
+            {
+                BackColor = SurfaceColor,
+                Size = new Size(PanelLayout.SchemeBPanelWidth, PanelLayout.SchemeBFooterHeight)
+            };
             bottomPanel.Name = "BottomPanel";
+            bottomPanel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (var pen = new Pen(BorderSoftColor, 1f))
+                {
+                    e.Graphics.DrawLine(pen, 1, 0, bottomPanel.Width - 2, 0);
+                }
+            };
             _feedbackLabel = new Label
             {
-                Font = font13,
+                Font = font12,
                 ForeColor = SecondaryTextColor,
+                BackColor = SurfaceColor,
                 AutoSize = false,
                 AutoEllipsis = true,
-                Size = new Size(ContentWidthNow, 24),
-                Location = new Point(SideMargin, 4)
+                TextAlign = ContentAlignment.MiddleLeft
             };
-            // 保存失败时反馈行即重试入口（Task 5 口径，见 OnSaveCompleted）
             _feedbackLabel.Click += OnFeedbackLabelClicked;
+            _openFolderButton = new Button
+            {
+                Text = "打开巡检文件夹 ↗",
+                Font = font13Bold,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = AccentColor,
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand,
+                AccessibleName = "打开巡检文件夹"
+            };
+            _openFolderButton.FlatAppearance.BorderSize = 0;
+            _openFolderButton.FlatAppearance.MouseOverBackColor = UiTheme.AccentHoverColor;
+            _openFolderButton.Click += OnRootLabelClicked;
+
             _rootToolTip = new ToolTip();
             _rootLabel = new Label
             {
                 Font = font11,
                 ForeColor = WeakTextColor,
+                BackColor = SurfaceColor,
                 AutoSize = false,
-                Size = new Size(ContentWidthNow, 22),
-                Location = new Point(SideMargin, 31),
+                AutoEllipsis = true,
+                TextAlign = ContentAlignment.MiddleLeft,
                 Cursor = Cursors.Hand
             };
             _rootLabel.Click += OnRootLabelClicked;
             bottomPanel.Controls.Add(_feedbackLabel);
+            bottomPanel.Controls.Add(_openFolderButton);
             bottomPanel.Controls.Add(_rootLabel);
             Controls.Add(bottomPanel);
-            _bottomPanel = bottomPanel;
 
             _feedbackTimer = new Timer { Interval = 2000 };
             _feedbackTimer.Tick += delegate
@@ -545,9 +818,6 @@ namespace InspectionWidget
                     return;
                 if (_deviceListError != null)
                 {
-                    // 名单错误是常驻提示：普通反馈的 2 秒计时结束要恢复它，
-                    // 不能被普通反馈覆盖后清空（审查 M-2）；按钮禁用状态由
-                    // ScreenshotAvailable 决定、与反馈文案相互独立，始终一致。
                     ShowDeviceListErrorFeedback();
                 }
                 else
@@ -556,9 +826,6 @@ namespace InspectionWidget
                 }
             };
         }
-
-        private Panel _deviceHeaderPanel;
-        private Panel _bottomPanel;
 
         private static Font CreateFont(float sizePx, FontStyle style)
         {
@@ -576,93 +843,331 @@ namespace InspectionWidget
 
         // ---------- 布局 ----------
 
-        /// <summary>
-        /// 静态骨架的字体与几何按当前缩放档位重设（v1.0.1）：构造时配置加载后、
-        /// 设置保存后各调一次；动态按钮由 RefreshConfigState 另行重建。
-        /// 设备标题行字体不在此列（等待态由 RefreshStateVisuals 管 Font13/13Bold 切换）。
-        /// </summary>
         private void ApplyScaleToStaticLayout()
         {
             int w = PanelWidthNow;
             int margin = M(SideMargin);
+            int fullContent = w - margin * 2;
 
-            _titleBarPanel.Size = new Size(w, M(PanelLayout.TitleBarHeight));
-            _titleLabel.Font = Font13Bold;
-            _titleLabel.Location = new Point(margin, M(9));
-            _dateLabel.Font = Font11;
-            _dateLabel.Location = new Point(M(68), M(11));
+            _titleBarPanel.Size = new Size(w, M(PanelLayout.SchemeBHeaderHeight));
+            _titleLabel.Font = Font15Bold;
+            _titleLabel.Location = new Point(M(14), M(10));
+            _dateLabel.Font = Font12;
+            _dateLabel.Text = FormatFullDate(_clock.Now);
+            _dateLabel.Location = new Point(M(14), M(34));
             ApplySettingsButtonVisual();
-            _settingsButton.Size = new Size(M(PanelLayout.TitleBarButtonSize), M(PanelLayout.TitleBarButtonSize));
-            _settingsButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 2, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
+            int btnSize = M(PanelLayout.TitleBarButtonSize);
+            int btnTop = M(8);
+            _settingsButton.Size = new Size(btnSize, btnSize);
+            _settingsButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 2, ScaleFactor), btnTop);
             _minimizeButton.Font = Font13;
-            _minimizeButton.Size = new Size(M(PanelLayout.TitleBarButtonSize), M(PanelLayout.TitleBarButtonSize));
-            _minimizeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 1, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
+            _minimizeButton.Size = new Size(btnSize, btnSize);
+            _minimizeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 1, ScaleFactor), btnTop);
             _closeButton.Font = Font13;
-            _closeButton.Size = new Size(M(PanelLayout.TitleBarButtonSize), M(PanelLayout.TitleBarButtonSize));
-            _closeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 0, ScaleFactor), M(PanelLayout.TitleBarButtonTop));
+            _closeButton.Size = new Size(btnSize, btnSize);
+            _closeButton.Location = new Point(PanelLayout.TitleBarButtonX(w, 0, ScaleFactor), btnTop);
 
-            _deviceHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
-            _deviceHeaderLabel.Font = Font13;
-            _deviceHeaderLabel.Location = new Point(margin, M(5));
-            _deviceArrowLabel.Font = Font13;
-            _deviceArrowLabel.Location = new Point(w - M(26), M(5));
+            _quickLinkHeaderLabel.Font = Font12Bold;
+            _quickLinkSubLabel.Font = Font11;
+            _planTitleLabel.Font = Font13Bold;
+            _planToggleButton.Font = Font11;
+            _planProgressLabel.Font = Font12;
+            _planCountLabel.Font = Font12Bold;
+            _showVisitedButton.Font = Font11;
+            _resetRoundButton.Font = Font11;
+            _planDisabledHintLabel.Font = Font11;
 
-            _deviceZonePanel.Width = w;
-
-            _credentialHeaderPanel.Size = new Size(w, M(PanelLayout.SectionHeaderHeight));
-            _credentialHeaderLabel.Font = Font13;
-            _credentialHeaderLabel.Location = new Point(margin, M(5));
+            _credentialHeaderLabel.Font = Font12Bold;
             _credentialArrowLabel.Font = Font13;
-            _credentialArrowLabel.Location = new Point(w - M(26), M(5));
+            _deviceHeaderLabel.Font = Font12Bold;
+            _deviceSubLabel.Font = Font11;
+            _deviceArrowLabel.Font = Font13;
 
-            _credentialZonePanel.Width = w;
-
-            _bottomPanel.Size = new Size(w, M(PanelLayout.BottomStatusHeight));
-            _feedbackLabel.Font = Font13;
-            _feedbackLabel.Size = new Size(ContentWidthNow, M(24));
-            _feedbackLabel.Location = new Point(margin, M(4));
+            _bottomPanel.Size = new Size(w, M(PanelLayout.SchemeBFooterHeight));
+            _feedbackLabel.Font = Font12;
+            _feedbackLabel.Size = new Size(fullContent, M(24));
+            _feedbackLabel.Location = new Point(margin, M(8));
+            _openFolderButton.Font = Font13Bold;
+            _openFolderButton.Size = new Size(fullContent, M(36));
+            _openFolderButton.Location = new Point(margin, M(36));
             _rootLabel.Font = Font11;
-            _rootLabel.Size = new Size(ContentWidthNow, M(22));
-            _rootLabel.Location = new Point(margin, M(31));
+            _rootLabel.Size = new Size(fullContent, M(20));
+            _rootLabel.Location = new Point(margin, M(78));
+        }
+
+        private int ComputePlanCardHeight()
+        {
+            if (_session != null && _session.PlanModeEnabled)
+                return M(104);
+            return M(66);
+        }
+
+        private int ComputeQuickLinksHeight()
+        {
+            int enabledCount = CountEnabledQuickLinks();
+            if (enabledCount <= 0)
+                return M(34);
+            int rows = (enabledCount + 1) / 2;
+            return rows * M(PanelLayout.SchemeBQuickLinkHeight)
+                + (rows - 1) * M(PanelLayout.SchemeBQuickLinkGap);
+        }
+
+        private int ComputeCredentialsZoneHeight()
+        {
+            if (_config != null && _config.IsCredentialCollapsed)
+                return 0;
+            int count = _config != null && _config.Credentials != null ? _config.Credentials.Count : 0;
+            if (count <= 0)
+                return M(34);
+            int rows = (count + 1) / 2;
+            return rows * M(PanelLayout.SchemeBCredentialHeight)
+                + (rows - 1) * M(PanelLayout.SchemeBCredentialGap);
+        }
+
+        private int ComputeDevicesZoneHeight()
+        {
+            if (_config != null && _config.IsDeviceCollapsed)
+                return 0;
+            int count = _deviceDisplay != null ? _deviceDisplay.Items.Count : 0;
+            if (count <= 0)
+            {
+                return _deviceDisplay != null && _deviceDisplay.EmptyKind == DeviceListEmptyKind.NoDevicesConfigured
+                    ? M(58)
+                    : M(46);
+            }
+            return count * M(PanelLayout.SchemeBDeviceRowHeight)
+                + (count - 1) * M(PanelLayout.SchemeBDeviceRowGap);
+        }
+
+        private int ComputeScrollContentHeight()
+        {
+            int headerH = M(24);
+            int quickH = ComputeQuickLinksHeight();
+            int planH = ComputePlanCardHeight();
+            int credH = ComputeCredentialsZoneHeight();
+            int devH = ComputeDevicesZoneHeight();
+
+            int y = M(10);
+            y += headerH + M(4) + quickH + M(12);
+            y += planH + M(12);
+            y += headerH + (credH > 0 ? M(4) + credH : 0) + M(12);
+            y += headerH + (devH > 0 ? M(4) + devH : 0) + M(12);
+            return y;
         }
 
         private int ComputeCurrentHeight()
         {
-            int devices = _config != null && _config.Devices != null ? _config.Devices.Count : 0;
-            int credentials = _config != null && _config.Credentials != null ? _config.Credentials.Count : 0;
-            bool deviceCollapsed = _config != null && _config.IsDeviceCollapsed;
-            bool credentialCollapsed = _config != null && _config.IsCredentialCollapsed;
-            int desired = PanelLayout.ComputeHeight(devices, deviceCollapsed, credentials, credentialCollapsed, ScaleFactor);
+            int natural = M(PanelLayout.SchemeBHeaderHeight)
+                + ComputeScrollContentHeight()
+                + M(PanelLayout.SchemeBFooterHeight);
             int workingHeight = Screen.FromControl(this).WorkingArea.Height;
-            return PanelLayout.ClampHeight(desired, workingHeight, M(8));
+            return PanelLayout.ClampHeight(natural, workingHeight, M(8));
         }
 
-        /// <summary>标题与底栏固定；中间内容放滚动宿主，长设备/凭据列表不再顶出工作区。</summary>
+        /// <summary>标题与底栏固定；中间内容放入滚动宿主并随可用宽度自动对齐（无横向滚动条）。</summary>
         private void LayoutSections()
         {
-            int deviceZone = PanelLayout.DeviceZoneHeight(_config.Devices.Count, _config.IsDeviceCollapsed, ScaleFactor);
-            int credentialZone = PanelLayout.CredentialZoneHeight(_config.Credentials.Count, _config.IsCredentialCollapsed, ScaleFactor);
+            int titleHeight = M(PanelLayout.SchemeBHeaderHeight);
+            int bottomHeight = M(PanelLayout.SchemeBFooterHeight);
+            int scrollHeight = Math.Max(0, ClientSize.Height - titleHeight - bottomHeight);
+            int totalContentHeight = ComputeScrollContentHeight();
+            bool needsVScroll = totalContentHeight > scrollHeight;
+            int w = PanelWidthNow;
+            int margin = M(SideMargin);
+            int hostWidth = w - (needsVScroll ? SystemInformation.VerticalScrollBarWidth : 0);
+            int innerWidth = Math.Max(M(180), hostWidth - margin * 2);
 
             _titleBarPanel.Location = new Point(0, 0);
-            int y = 0;
-            _deviceHeaderPanel.Location = new Point(0, y);
-            y += M(PanelLayout.SectionHeaderHeight);
-            _deviceZonePanel.Location = new Point(0, y);
-            _deviceZonePanel.Height = deviceZone;
-            y += deviceZone;
-            _credentialHeaderPanel.Location = new Point(0, y);
-            y += M(PanelLayout.SectionHeaderHeight);
-            _credentialZonePanel.Location = new Point(0, y);
-            _credentialZonePanel.Height = credentialZone;
-            y += credentialZone;
+            int y = M(10);
+            int headerH = M(24);
 
-            int titleHeight = M(PanelLayout.TitleBarHeight);
-            int bottomHeight = M(PanelLayout.BottomStatusHeight);
-            int scrollHeight = Math.Max(0, ClientSize.Height - titleHeight - bottomHeight);
+            // 1. 快捷链接
+            _quickLinkHeaderPanel.Size = new Size(hostWidth, headerH);
+            _quickLinkHeaderPanel.Location = new Point(0, y);
+            _quickLinkHeaderLabel.Location = new Point(margin, M(3));
+            _quickLinkSubLabel.Location = new Point(Math.Max(margin, hostWidth - margin - _quickLinkSubLabel.Width), M(4));
+            y += headerH + M(4);
+
+            int quickH = ComputeQuickLinksHeight();
+            _quickLinkZonePanel.Size = new Size(hostWidth, quickH);
+            _quickLinkZonePanel.Location = new Point(0, y);
+            LayoutTwoColumnControls(_quickLinkControls, _quickLinkZonePanel, innerWidth,
+                M(PanelLayout.SchemeBQuickLinkHeight), M(PanelLayout.SchemeBQuickLinkGap));
+            y += quickH + M(12);
+
+            // 2. 今日巡检计划卡
+            int planH = ComputePlanCardHeight();
+            _planCardPanel.Size = new Size(innerWidth, planH);
+            _planCardPanel.Location = new Point(margin, y);
+            LayoutPlanCardInner(innerWidth);
+            y += planH + M(12);
+
+            // 3. 凭据
+            _credentialHeaderPanel.Size = new Size(hostWidth, headerH);
+            _credentialHeaderPanel.Location = new Point(0, y);
+            _credentialHeaderLabel.Location = new Point(margin, M(3));
+            _credentialArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
+            y += headerH;
+
+            int credH = ComputeCredentialsZoneHeight();
+            if (credH > 0) y += M(4);
+            _credentialZonePanel.Size = new Size(hostWidth, credH);
+            _credentialZonePanel.Location = new Point(0, y);
+            LayoutTwoColumnControls(_credentialControls, _credentialZonePanel, innerWidth,
+                M(PanelLayout.SchemeBCredentialHeight), M(PanelLayout.SchemeBCredentialGap));
+            y += credH + M(12);
+
+            // 4. 截图设备
+            _deviceHeaderPanel.Size = new Size(hostWidth, headerH);
+            _deviceHeaderPanel.Location = new Point(0, y);
+            _deviceHeaderLabel.Location = new Point(margin, M(3));
+            _deviceArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
+            _deviceSubLabel.Location = new Point(
+                Math.Max(_deviceHeaderLabel.Right + M(8), _deviceArrowLabel.Left - _deviceSubLabel.Width - M(6)),
+                M(4));
+            y += headerH;
+
+            int devH = ComputeDevicesZoneHeight();
+            if (devH > 0) y += M(4);
+            _deviceZonePanel.Size = new Size(hostWidth, devH);
+            _deviceZonePanel.Location = new Point(0, y);
+            LayoutDeviceZoneInner(innerWidth);
+            y += devH + M(12);
+
             _scrollHost.Location = new Point(0, titleHeight);
-            _scrollHost.Size = new Size(PanelWidthNow, scrollHeight);
-            _scrollHost.AutoScrollMinSize = new Size(PanelWidthNow, y);
+            _scrollHost.Size = new Size(w, scrollHeight);
+            _scrollHost.AutoScrollMinSize = new Size(0, y);
             _bottomPanel.Location = new Point(0, ClientSize.Height - bottomHeight);
+        }
+
+        private void LayoutPlanCardInner(int cardWidth)
+        {
+            int padX = M(12);
+            int padY = M(10);
+            int innerW = Math.Max(M(120), cardWidth - padX * 2);
+
+            _planTitleLabel.Location = new Point(padX, padY + M(2));
+            int toggleW = M(56);
+            int toggleH = M(22);
+            _planToggleButton.Size = new Size(toggleW, toggleH);
+            _planToggleButton.Location = new Point(cardWidth - padX - toggleW, padY);
+
+            bool enabled = _session != null && _session.PlanModeEnabled;
+            _planProgressLabel.Visible = enabled;
+            _planCountLabel.Visible = enabled;
+            _planTrackPanel.Visible = enabled;
+            _planActionPanel.Visible = enabled;
+            _planDisabledHintLabel.Visible = !enabled;
+
+            if (!enabled)
+            {
+                _planDisabledHintLabel.Size = new Size(innerW, M(22));
+                _planDisabledHintLabel.Location = new Point(padX, padY + M(28));
+                return;
+            }
+
+            int row2Y = padY + M(28);
+            _planProgressLabel.Location = new Point(padX, row2Y);
+            _planCountLabel.Location = new Point(Math.Max(padX, cardWidth - padX - _planCountLabel.Width), row2Y);
+
+            int barY = row2Y + M(20);
+            _planTrackPanel.Size = new Size(innerW, M(4));
+            _planTrackPanel.Location = new Point(padX, barY);
+            int total = _session.Plan.TotalCount;
+            int visited = _session.Plan.VisitedCount;
+            int fillW = total > 0 ? (int)Math.Round(innerW * ((double)visited / total)) : 0;
+            if (visited > 0 && fillW < M(4)) fillW = M(4);
+            _planFillPanel.Size = new Size(Math.Min(innerW, fillW), M(4));
+
+            int actionY = barY + M(10);
+            _planActionPanel.Size = new Size(innerW, M(26));
+            _planActionPanel.Location = new Point(padX, actionY);
+            int resetW = M(72);
+            int showW = M(88);
+            _resetRoundButton.Size = new Size(resetW, M(24));
+            _resetRoundButton.Location = new Point(innerW - resetW, 0);
+            _showVisitedButton.Visible = _session.HideVisitedDevices;
+            if (_showVisitedButton.Visible)
+            {
+                _showVisitedButton.Size = new Size(showW, M(24));
+                _showVisitedButton.Location = new Point(Math.Max(0, _resetRoundButton.Left - showW - M(6)), 0);
+            }
+        }
+
+        private void LayoutTwoColumnControls(List<Control> items, Panel host, int innerWidth, int rowHeight, int gap)
+        {
+            if (items.Count == 0)
+                return;
+            int margin = M(SideMargin);
+            if (items.Count == 1 && !(items[0] is Button))
+            {
+                items[0].Size = new Size(innerWidth, rowHeight);
+                items[0].Location = new Point(margin, 0);
+                return;
+            }
+            int colW = Math.Max(M(60), (innerWidth - gap) / 2);
+            int rightColW = Math.Max(M(60), innerWidth - gap - colW);
+            for (int i = 0; i < items.Count; i++)
+            {
+                int col = i % 2;
+                int row = i / 2;
+                int x = col == 0 ? margin : (margin + colW + gap);
+                int w = col == 0 ? colW : rightColW;
+                int y = row * (rowHeight + gap);
+                items[i].Size = new Size(w, rowHeight);
+                items[i].Location = new Point(x, y);
+            }
+        }
+
+        private void LayoutDeviceZoneInner(int innerWidth)
+        {
+            int margin = M(SideMargin);
+            if (_deviceHint != null)
+            {
+                _deviceHint.Size = new Size(innerWidth, _deviceHint.Height);
+                _deviceHint.Location = new Point(margin, 0);
+                var innerBtn = _deviceHint.Tag as Button;
+                if (innerBtn != null)
+                {
+                    innerBtn.Location = new Point(Math.Max(M(8), innerWidth - innerBtn.Width - M(10)),
+                        (_deviceHint.Height - innerBtn.Height) / 2);
+                }
+                return;
+            }
+
+            int rowH = M(PanelLayout.SchemeBDeviceRowHeight);
+            int gap = M(PanelLayout.SchemeBDeviceRowGap);
+            for (int i = 0; i < _deviceRows.Count; i++)
+            {
+                DeviceRowWidget row = _deviceRows[i];
+                row.Panel.Size = new Size(innerWidth, rowH);
+                row.Panel.Location = new Point(margin, i * (rowH + gap));
+                LayoutSingleDeviceRow(row, innerWidth, rowH);
+            }
+        }
+
+        private void LayoutSingleDeviceRow(DeviceRowWidget row, int width, int height)
+        {
+            int leftX = M(34);
+            int rightPad = M(10);
+            int rightEdge = width - rightPad;
+
+            if (row.UnmarkButton != null && row.UnmarkButton.Visible)
+            {
+                int btnW = M(62);
+                int btnH = M(24);
+                row.UnmarkButton.Size = new Size(btnW, btnH);
+                row.UnmarkButton.Location = new Point(rightEdge - btnW, (height - btnH) / 2);
+                rightEdge = row.UnmarkButton.Left - M(6);
+            }
+
+            int statusW = M(66);
+            row.StatusLabel.Size = new Size(statusW, M(20));
+            row.StatusLabel.Location = new Point(rightEdge - statusW, (height - M(20)) / 2);
+
+            int nameW = Math.Max(M(40), row.StatusLabel.Left - leftX - M(6));
+            row.NameLabel.Size = new Size(nameW, M(22));
+            row.NameLabel.Location = new Point(leftX, (height - M(22)) / 2);
         }
 
         /// <summary>高度变化统一入口：先按 Bottom 锚定算 Top，再改尺寸与分区布局。</summary>
@@ -753,8 +1258,9 @@ namespace InspectionWidget
             _configRevision = load.Revision ?? string.Empty;
             _config = next;
             EnsureConfigLists();
-            // 重读可能带回另一份 AutoClearClipboard；服务与配置必须同代。
-            // 开关未变时保留原 Guard，避免清掉尚未到期的剪贴板计时。
+            string progressErr;
+            if (_session != null)
+                _session.ReloadConfig(_config, out progressErr);
             if (autoClearChanged)
                 RebuildClipboardGuard();
             ApplyScaleToStaticLayout();
@@ -776,6 +1282,7 @@ namespace InspectionWidget
         {
             if (_config.Devices == null) _config.Devices = new List<string>();
             if (_config.Credentials == null) _config.Credentials = new List<CredentialEntry>();
+            if (_config.QuickLinks == null) _config.QuickLinks = new List<QuickLinkEntry>();
             // 密文为空的条目视同需重设（与设置层口径一致，仅运行时标记不落盘）
             foreach (CredentialEntry entry in _config.Credentials)
             {
@@ -805,6 +1312,8 @@ namespace InspectionWidget
         {
             _deviceListError = DeviceNameValidator.ValidateAll(_config.Devices);
 
+            RebuildQuickLinks();
+            RebuildPlanCard();
             RebuildDeviceButtons();
             RebuildCredentialControls();
             UpdateCredentialHeader();
@@ -840,14 +1349,130 @@ namespace InspectionWidget
             }
         }
 
-        private void RebuildDeviceButtons()
+        private int CountEnabledQuickLinks()
         {
-            foreach (Button old in _deviceButtons)
+            if (_config == null || _config.QuickLinks == null)
+                return 0;
+            int count = 0;
+            for (int i = 0; i < _config.QuickLinks.Count; i++)
             {
-                _deviceZonePanel.Controls.Remove(old);
+                QuickLinkEntry entry = _config.QuickLinks[i];
+                if (entry != null && entry.Enabled && !string.IsNullOrWhiteSpace(entry.Title))
+                    count++;
+            }
+            return count;
+        }
+
+        private void RebuildQuickLinks()
+        {
+            foreach (Control old in _quickLinkControls)
+            {
+                _quickLinkZonePanel.Controls.Remove(old);
                 old.Dispose();
             }
-            _deviceButtons.Clear();
+            _quickLinkControls.Clear();
+
+            int enabled = CountEnabledQuickLinks();
+            _quickLinkSubLabel.Visible = enabled > 0;
+            if (enabled <= 0)
+            {
+                Control hint = CreateHintLabel("尚未启用快捷链接，点击去设置添加", WeakTextColor, M(PanelLayout.SchemeBQuickLinkHeight));
+                hint.Cursor = Cursors.Hand;
+                hint.Click += OnSettingsClicked;
+                _quickLinkControls.Add(hint);
+                _quickLinkZonePanel.Controls.Add(hint);
+                return;
+            }
+
+            for (int i = 0; i < _config.QuickLinks.Count; i++)
+            {
+                QuickLinkEntry entry = _config.QuickLinks[i];
+                if (entry == null || !entry.Enabled || string.IsNullOrWhiteSpace(entry.Title))
+                    continue;
+
+                var button = new Button
+                {
+                    Text = entry.Title,
+                    Tag = entry,
+                    Font = Font12,
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = ButtonBackColor,
+                    ForeColor = PrimaryTextColor,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    AutoEllipsis = true,
+                    Padding = new Padding(M(8), 0, M(18), 0),
+                    Cursor = Cursors.Hand,
+                    AccessibleName = "快捷链接：" + entry.Title
+                };
+                button.FlatAppearance.BorderColor = BorderColor;
+                button.FlatAppearance.BorderSize = 1;
+                button.FlatAppearance.MouseOverBackColor = AccentSoftColor;
+                button.Paint += delegate(object sender, PaintEventArgs e)
+                {
+                    var btn = (Button)sender;
+                    using (var arrowFont = new Font(Font11.FontFamily, Font11.Size, FontStyle.Regular, GraphicsUnit.Pixel))
+                    {
+                        TextRenderer.DrawText(
+                            e.Graphics,
+                            "↗",
+                            arrowFont,
+                            new Rectangle(btn.Width - M(18), 0, M(14), btn.Height),
+                            WeakTextColor,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    }
+                };
+                button.Click += OnQuickLinkButtonClicked;
+                _quickLinkControls.Add(button);
+                _quickLinkZonePanel.Controls.Add(button);
+                if (!string.IsNullOrEmpty(entry.Url))
+                    _deviceToolTip.SetToolTip(button, entry.Url);
+            }
+        }
+
+        private void RebuildPlanCard()
+        {
+            if (_session == null || _planToggleButton == null)
+                return;
+
+            bool enabled = _session.PlanModeEnabled;
+            _planToggleButton.Checked = enabled;
+            _planToggleButton.Text = enabled ? "已开启" : "已关闭";
+            _planToggleButton.BackColor = enabled ? AccentColor : ButtonBackColor;
+            _planToggleButton.ForeColor = enabled ? Color.White : SecondaryTextColor;
+            _planToggleButton.FlatAppearance.BorderColor = enabled ? AccentColor : BorderColor;
+
+            int visited = _session.Plan.VisitedCount;
+            int total = _session.Plan.TotalCount;
+            bool complete = enabled && total > 0 && visited >= total;
+
+            _planCountLabel.Text = "已点过 " + visited + " / " + total;
+            _planCountLabel.ForeColor = complete ? SuccessColor : AccentColor;
+            _planFillPanel.BackColor = complete ? SuccessColor : AccentColor;
+
+            _showVisitedButton.Text = _session.ShowVisitedOverride ? "只看未点过" : "查看已点过";
+            _showVisitedButton.Visible = enabled && _session.HideVisitedDevices;
+            _resetRoundButton.Enabled = enabled && (visited > 0 || HasSavedPaths());
+        }
+
+        private bool HasSavedPaths()
+        {
+            if (_session == null) return false;
+            foreach (string path in _session.Plan.SavedPaths)
+            {
+                if (!string.IsNullOrEmpty(path))
+                    return true;
+            }
+            return false;
+        }
+
+        private void RebuildDeviceButtons()
+        {
+            foreach (DeviceRowWidget old in _deviceRows)
+            {
+                _deviceZonePanel.Controls.Remove(old.Panel);
+                old.Panel.Dispose();
+            }
+            _deviceRows.Clear();
             if (_deviceHint != null)
             {
                 _deviceZonePanel.Controls.Remove(_deviceHint);
@@ -855,40 +1480,232 @@ namespace InspectionWidget
                 _deviceHint = null;
             }
 
-            // 截图区折叠（v1.0.3）：区高为 0，不建按钮；展开时照常重建。
-            // 折叠只影响显示，选窗等进行中状态与此无关。
+            _deviceDisplay = _session != null
+                ? _session.BuildDeviceDisplay()
+                : new DeviceDisplaySnapshot
+                {
+                    Items = new List<DeviceDisplayItem>(),
+                    EmptyKind = DeviceListEmptyKind.None
+                };
+
+            // 截图区折叠（v1.0.3）：区高为 0，不建行控件；展开时照常重建。
             if (_config.IsDeviceCollapsed)
                 return;
 
-            if (_config.Devices.Count == 0)
+            if (_deviceDisplay.Items.Count == 0)
             {
-                _deviceHint = CreateHintLabel("暂无设备，去设置添加", WeakTextColor, M(PanelLayout.DeviceRowHeight));
+                if (_deviceDisplay.EmptyKind == DeviceListEmptyKind.AllVisitedHidden)
+                {
+                    _deviceHint = CreateAllVisitedEmptyCard();
+                }
+                else
+                {
+                    _deviceHint = CreateNoDevicesEmptyCard();
+                }
                 _deviceZonePanel.Controls.Add(_deviceHint);
                 return;
             }
 
-            for (int i = 0; i < _config.Devices.Count; i++)
+            for (int i = 0; i < _deviceDisplay.Items.Count; i++)
             {
-                string device = _config.Devices[i];
-                var button = new Button
+                DeviceDisplayItem item = _deviceDisplay.Items[i];
+                DeviceRowWidget widget = CreateDeviceRowWidget(item);
+                _deviceRows.Add(widget);
+                _deviceZonePanel.Controls.Add(widget.Panel);
+            }
+        }
+
+        private Control CreateNoDevicesEmptyCard()
+        {
+            var card = new Panel
+            {
+                BackColor = SurfaceColor,
+                Size = new Size(ContentWidthNow, M(58))
+            };
+            card.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (var pen = new Pen(BorderColor))
                 {
-                    Text = device,
-                    Tag = device,
-                    Font = Font13,
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = ButtonBackColor,
-                    ForeColor = PrimaryTextColor,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Size = new Size(ContentWidthNow, M(PanelLayout.DeviceRowHeight)),
-                    Location = new Point(M(SideMargin), i * (M(PanelLayout.DeviceRowHeight) + M(PanelLayout.DeviceRowGap)))
-                };
-                button.FlatAppearance.BorderColor = BorderColor;
-                button.FlatAppearance.BorderSize = 1;
-                button.AccessibleName = "设备：" + device;
-                button.Click += OnDeviceButtonClicked;
-                _deviceButtons.Add(button);
-                _deviceZonePanel.Controls.Add(button);
-                _deviceToolTip.SetToolTip(button, device);
+                    pen.DashStyle = DashStyle.Dash;
+                    e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+                }
+            };
+            var text = new Label
+            {
+                Text = "尚未配置截图设备",
+                Font = Font12,
+                ForeColor = SecondaryTextColor,
+                AutoSize = true,
+                Location = new Point(M(12), M(19))
+            };
+            var addBtn = new Button
+            {
+                Text = "去设置添加",
+                Font = Font11,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ButtonBackColor,
+                ForeColor = AccentColor,
+                Size = new Size(M(84), M(28)),
+                Cursor = Cursors.Hand,
+                AccessibleName = "打开设置添加截图设备"
+            };
+            addBtn.FlatAppearance.BorderColor = AccentBorderColor;
+            addBtn.FlatAppearance.BorderSize = 1;
+            addBtn.Click += OnSettingsClicked;
+            card.Controls.Add(text);
+            card.Controls.Add(addBtn);
+            card.Tag = addBtn;
+            return card;
+        }
+
+        private Control CreateAllVisitedEmptyCard()
+        {
+            var card = new Panel
+            {
+                BackColor = SuccessSoftColor,
+                Size = new Size(ContentWidthNow, M(46))
+            };
+            card.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (var pen = new Pen(Color.FromArgb(0xB8, 0xDB, 0xC8), 1f))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+                }
+            };
+            var label = new Label
+            {
+                Text = "✓ 本轮已全部点过",
+                Font = Font13Bold,
+                ForeColor = SuccessColor,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            card.Controls.Add(label);
+            return card;
+        }
+
+        private DeviceRowWidget CreateDeviceRowWidget(DeviceDisplayItem item)
+        {
+            string device = item.Name;
+            var rowPanel = new Panel
+            {
+                BackColor = ButtonBackColor,
+                Size = new Size(ContentWidthNow, M(PanelLayout.SchemeBDeviceRowHeight)),
+                Cursor = Cursors.Hand,
+                AccessibleName = "设备：" + device
+            };
+            var nameLabel = new Label
+            {
+                Text = device,
+                Font = Font13,
+                ForeColor = PrimaryTextColor,
+                AutoSize = false,
+                AutoEllipsis = true,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Cursor = Cursors.Hand
+            };
+            var statusLabel = new Label
+            {
+                Text = item.Visited ? "✓ 已点过" : "待截图",
+                Font = Font11,
+                ForeColor = item.Visited ? SuccessColor : WeakTextColor,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleRight,
+                Cursor = Cursors.Hand
+            };
+            var unmarkBtn = new Button
+            {
+                Text = "恢复未点",
+                Font = Font11,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = SurfaceColor,
+                ForeColor = SecondaryTextColor,
+                Visible = item.Visited,
+                Cursor = Cursors.Hand,
+                AccessibleName = "恢复未点：" + device
+            };
+            unmarkBtn.FlatAppearance.BorderColor = BorderColor;
+            unmarkBtn.FlatAppearance.BorderSize = 1;
+
+            var widget = new DeviceRowWidget
+            {
+                Device = device,
+                Visited = item.Visited,
+                Panel = rowPanel,
+                NameLabel = nameLabel,
+                StatusLabel = statusLabel,
+                UnmarkButton = unmarkBtn
+            };
+
+            rowPanel.Tag = widget;
+            rowPanel.Paint += OnDeviceRowPaint;
+            rowPanel.Click += delegate { OnDeviceRowActivated(device); };
+            nameLabel.Click += delegate { OnDeviceRowActivated(device); };
+            statusLabel.Click += delegate { OnDeviceRowActivated(device); };
+            unmarkBtn.Click += delegate { OnUnmarkDeviceClicked(device); };
+
+            rowPanel.Controls.Add(nameLabel);
+            rowPanel.Controls.Add(statusLabel);
+            rowPanel.Controls.Add(unmarkBtn);
+            _deviceToolTip.SetToolTip(rowPanel, device);
+            _deviceToolTip.SetToolTip(nameLabel, device);
+            return widget;
+        }
+
+        private void OnDeviceRowPaint(object sender, PaintEventArgs e)
+        {
+            var panel = (Panel)sender;
+            var widget = panel.Tag as DeviceRowWidget;
+            if (widget == null)
+                return;
+
+            bool waitingTarget = _stateMachine.State == PanelState.Waiting
+                && string.Equals(widget.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
+            bool capturingTarget = _stateMachine.State == PanelState.Capturing
+                && string.Equals(widget.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
+
+            Color border = waitingTarget
+                ? AccentColor
+                : (capturingTarget ? WarningColor : BorderColor);
+            using (var pen = new Pen(border, waitingTarget ? 1.5f : 1f))
+            {
+                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
+            }
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int circleSize = M(16);
+            int cx = M(10);
+            int cy = (panel.Height - circleSize) / 2;
+
+            if (waitingTarget)
+            {
+                using (var brush = new SolidBrush(AccentColor))
+                    e.Graphics.FillEllipse(brush, cx, cy, circleSize, circleSize);
+                int inner = Math.Max(4, M(6));
+                using (var brush = new SolidBrush(Color.White))
+                    e.Graphics.FillEllipse(brush, cx + (circleSize - inner) / 2, cy + (circleSize - inner) / 2, inner, inner);
+            }
+            else if (widget.Visited)
+            {
+                using (var brush = new SolidBrush(SuccessColor))
+                    e.Graphics.FillEllipse(brush, cx, cy, circleSize, circleSize);
+                using (var pen = new Pen(Color.White, Math.Max(1.5f, (float)(1.8 * ScaleFactor))))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    Point[] pts = new[]
+                    {
+                        new Point(cx + M(4), cy + M(8)),
+                        new Point(cx + M(7), cy + M(11)),
+                        new Point(cx + M(12), cy + M(5))
+                    };
+                    e.Graphics.DrawLines(pen, pts);
+                }
+            }
+            else
+            {
+                using (var pen = new Pen(Color.FromArgb(0xB8, 0xC4, 0xD0), Math.Max(1f, (float)ScaleFactor)))
+                    e.Graphics.DrawEllipse(pen, cx, cy, circleSize, circleSize);
             }
         }
 
@@ -906,7 +1723,9 @@ namespace InspectionWidget
 
             if (_config.Credentials.Count == 0)
             {
-                Control hint = CreateHintLabel("未设置凭据，去设置添加", AccentColor, M(PanelLayout.CredentialRowHeight));
+                Control hint = CreateHintLabel("尚未配置凭据，点击去设置添加", AccentColor, M(PanelLayout.SchemeBCredentialHeight));
+                hint.Cursor = Cursors.Hand;
+                hint.Click += OnSettingsClicked;
                 _credentialControls.Add(hint);
                 _credentialZonePanel.Controls.Add(hint);
                 return;
@@ -919,20 +1738,42 @@ namespace InspectionWidget
                 {
                     Text = entry.NeedsReset ? entry.Title + "（需重设）" : entry.Title,
                     Tag = entry,
-                    Font = Font13,
+                    Font = Font12,
                     FlatStyle = FlatStyle.Flat,
                     BackColor = ButtonBackColor,
                     ForeColor = entry.NeedsReset ? ErrorColor : PrimaryTextColor,
                     TextAlign = ContentAlignment.MiddleLeft,
-                    Size = new Size(ContentWidthNow, M(PanelLayout.CredentialRowHeight)),
-                    Location = new Point(M(SideMargin), i * (M(PanelLayout.CredentialRowHeight) + M(PanelLayout.CredentialRowGap)))
+                    AutoEllipsis = true,
+                    Padding = new Padding(M(22), 0, M(6), 0),
+                    Cursor = Cursors.Hand,
+                    AccessibleName = "凭据：" + entry.Title
                 };
                 button.FlatAppearance.BorderColor = BorderColor;
                 button.FlatAppearance.BorderSize = 1;
-                button.AccessibleName = "凭据：" + entry.Title;
+                button.FlatAppearance.MouseOverBackColor = SurfaceColor;
+                button.Paint += PaintCredentialCopyIcon;
                 button.Click += OnCredentialButtonClicked;
                 _credentialControls.Add(button);
                 _credentialZonePanel.Controls.Add(button);
+                _deviceToolTip.SetToolTip(button, "复制凭据：" + entry.Title);
+            }
+        }
+
+        private void PaintCredentialCopyIcon(object sender, PaintEventArgs e)
+        {
+            var btn = (Button)sender;
+            var entry = btn.Tag as CredentialEntry;
+            Color ink = entry != null && entry.NeedsReset ? ErrorColor : WeakTextColor;
+            int iconX = M(8);
+            int iconY = (btn.Height - M(12)) / 2;
+            int backW = M(7);
+            int backH = M(9);
+            using (var pen = new Pen(ink, 1f))
+            {
+                e.Graphics.DrawRectangle(pen, iconX, iconY, backW, backH);
+                using (var bg = new SolidBrush(btn.BackColor))
+                    e.Graphics.FillRectangle(bg, iconX + M(3), iconY + M(3), backW, backH);
+                e.Graphics.DrawRectangle(pen, iconX + M(3), iconY + M(3), backW, backH);
             }
         }
 
@@ -942,9 +1783,10 @@ namespace InspectionWidget
             var hint = new Label
             {
                 Text = text,
-                Font = Font13,
+                Font = Font12,
                 ForeColor = foreColor,
                 TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(M(10), 0, M(8), 0),
                 Size = new Size(ContentWidthNow, height),
                 Location = new Point(M(SideMargin), 0)
             };
@@ -989,32 +1831,128 @@ namespace InspectionWidget
             {
                 _rootLabel.Text = "配置读取失败，点击此处重试（保存已暂停）";
                 _rootLabel.ForeColor = ErrorColor;
+                _openFolderButton.Text = "重试读取配置";
                 return;
             }
+            _openFolderButton.Text = "打开巡检文件夹 ↗";
             _rootLabel.Text = string.IsNullOrEmpty(_config.RootPath)
                 ? "尚未设置保存目录"
-                : "保存到：" + _config.RootPath;
+                : _config.RootPath;
             _rootLabel.ForeColor = WeakTextColor;
+            if (!string.IsNullOrEmpty(_config.RootPath))
+                _rootToolTip.SetToolTip(_rootLabel, _config.RootPath);
         }
 
         // ---------- 交互 ----------
 
-        private void OnDeviceButtonClicked(object sender, EventArgs e)
+        private void OnQuickLinkButtonClicked(object sender, EventArgs e)
         {
-            var button = sender as Button;
-            if (button == null) return;
-            string device = button.Tag as string;
-            if (device == null) return;
+            var btn = sender as Button;
+            if (btn == null) return;
+            var entry = btn.Tag as QuickLinkEntry;
+            if (entry == null) return;
+            string error;
+            if (!_linkLauncher.TryOpen(entry.Url, out error))
+                ShowFeedback("打开链接失败：" + error, true);
+        }
 
-            if (!_stateMachine.SelectDevice(device))
+        private void OnPlanToggleClicked(object sender, EventArgs e)
+        {
+            if (_session == null) return;
+            bool next = !_session.PlanModeEnabled;
+            _session.SetPlanModeEnabled(next);
+            SaveBestEffort();
+            RebuildPlanCard();
+            RebuildDeviceButtons();
+            RefreshStateVisuals();
+            ApplyHeightAnchored();
+        }
+
+        private void OnToggleShowVisitedClicked(object sender, EventArgs e)
+        {
+            if (_session == null) return;
+            _session.ToggleShowVisited();
+            RebuildPlanCard();
+            RebuildDeviceButtons();
+            RefreshStateVisuals();
+            ApplyHeightAnchored();
+        }
+
+        private void OnResetRoundClicked(object sender, EventArgs e)
+        {
+            if (_session == null) return;
+            using (var confirm = new ResetRoundConfirmDialog())
+            {
+                UiTheme.ScaleLayout(confirm, ScaleFactor);
+                if (confirm.ShowDialog(this) != DialogResult.Yes)
+                    return;
+            }
+            string progressErr;
+            _session.ResetRound(out progressErr);
+            RebuildPlanCard();
+            RebuildDeviceButtons();
+            RefreshStateVisuals();
+            ApplyHeightAnchored();
+            if (!string.IsNullOrEmpty(progressErr))
+                ShowFeedback("进度保存失败：" + progressErr, true);
+            else
+                ShowSuccessFeedback("已重置本轮巡检进度");
+        }
+
+        private void OnUnmarkDeviceClicked(string device)
+        {
+            if (_session == null || string.IsNullOrEmpty(device))
                 return;
+            string progressErr;
+            if (_session.UnmarkDevice(device, out progressErr))
+            {
+                RebuildPlanCard();
+                RebuildDeviceButtons();
+                RefreshStateVisuals();
+                ApplyHeightAnchored();
+                if (!string.IsNullOrEmpty(progressErr))
+                    ShowFeedback("进度保存失败：" + progressErr, true);
+                else
+                    ShowFeedback("已恢复未点：" + device, false);
+            }
+        }
+
+        private void OnDeviceRowActivated(string device)
+        {
+            if (string.IsNullOrEmpty(device) || !ScreenshotAvailable)
+                return;
+
+            string progressErr = null;
+            InspectionPlanToken token = default(InspectionPlanToken);
+            if (_session == null
+                ? !_stateMachine.SelectDevice(device)
+                : !_session.TrySelectDevice(device, out token, out progressErr))
+            {
+                return;
+            }
+            if (_session != null)
+            {
+                // 若正在切换目标或从空闲点下设备，绑定当前等待轮次令牌并刷新可见列表
+                _waitingPlanToken = token;
+            }
 
             if (_stateMachine.State == PanelState.Waiting)
             {
                 _config.LastDevice = _stateMachine.CurrentDevice;
                 SaveBestEffort();
+                RebuildPlanCard();
+                RebuildDeviceButtons();
+                ApplyHeightAnchored();
             }
             OnStateChanged();
+            if (_stateMachine.State == PanelState.Waiting)
+            {
+                ShowFeedback(
+                    string.IsNullOrEmpty(progressErr)
+                        ? "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」（Esc 或右键取消）"
+                        : "请点目标窗口（进度暂未落盘：" + progressErr + "）",
+                    !string.IsNullOrEmpty(progressErr));
+            }
         }
 
         private void OnCredentialHeaderClicked(object sender, EventArgs e)
@@ -1039,12 +1977,13 @@ namespace InspectionWidget
             switch (result)
             {
                 case CopyResult.Copied:
-                    ShowSuccessFeedback("已复制");
+                    ShowSuccessFeedback("已复制「" + entry.Title + "」");
                     break;
                 case CopyResult.NeedsReset:
                     // 运行时标记并刷新按钮显示（内存标记，不落盘）
                     entry.NeedsReset = true;
                     RebuildCredentialControls();
+                    ApplyHeightAnchored();
                     ShowFeedback("该凭据需重新设置，请到设置中重新填写", true);
                     break;
                 default: // Failed
@@ -1067,33 +2006,54 @@ namespace InspectionWidget
             {
                 systemDpiScale = 1.0;
             }
-            using (var form = new SettingsForm(_config, _store, _protector, systemDpiScale))
+            _settingsDialogOpen = true;
+            try
             {
-                form.Saved += delegate
+                using (var form = new SettingsForm(_config, _store, _protector, systemDpiScale))
                 {
-                    // 成功落盘即刷新运行态，不等 ShowDialog 返回；一次提交只走一次。
-                    bool autoClearChanged =
-                        ConfigStore.ShouldRebuildClipboardGuard(_config, form.ResultConfig);
-                    _config = AppConfigCloner.Clone(form.ResultConfig);
-                    _configRevision = _store.CurrentRevision;
-                    _configWriteProtected = false;
-                    _configLoadError = null;
-                    EnsureConfigLists();
-                    ApplyScaleToStaticLayout();
-                    // 未改变自动清空档位时保留 Guard 的未到期计时，避免刚复制的
-                    // 凭据因一次无关保存而失去 30 秒自动清空保护。
-                    if (autoClearChanged)
-                        RebuildClipboardGuard();
-                    RefreshConfigState();
-                    ApplyHeightAnchored();
-                    ApplyConfiguredWindowPositionIfVisible();
-                    ShowSuccessFeedback("设置已应用");
-                };
-                form.ShowDialog(this);
+                    form.Saved += delegate
+                    {
+                        // 成功落盘即刷新运行态，不等 ShowDialog 返回；一次提交只走一次。
+                        bool autoClearChanged =
+                            ConfigStore.ShouldRebuildClipboardGuard(_config, form.ResultConfig);
+                        _config = AppConfigCloner.Clone(form.ResultConfig);
+                        _configRevision = _store.CurrentRevision;
+                        _configWriteProtected = false;
+                        _configLoadError = null;
+                        EnsureConfigLists();
+                        if (_session != null)
+                        {
+                            string progressErr;
+                            _session.ApplySavedConfig(
+                                _config,
+                                form.LastAppliedDeviceRenames,
+                                form.LastAppliedImportDeviceReplace,
+                                out progressErr);
+                        }
+                        ApplyScaleToStaticLayout();
+                        if (autoClearChanged)
+                            RebuildClipboardGuard();
+                        RefreshConfigState();
+                        ApplyHeightAnchored();
+                        ApplyConfiguredWindowPositionIfVisible();
+                        ShowSuccessFeedback("设置已应用");
+                    };
+                    form.ShowDialog(this);
+                }
             }
+            finally
+            {
+                _settingsDialogOpen = false;
+            }
+            TryMaybeShowCompletionPrompt();
         }
 
         private void OnRootLabelClicked(object sender, EventArgs e)
+        {
+            OpenInspectionFolders();
+        }
+
+        private void OpenInspectionFolders()
         {
             if (_configWriteProtected)
             {
@@ -1103,25 +2063,52 @@ namespace InspectionWidget
             }
             if (string.IsNullOrEmpty(_config.RootPath))
             {
-                // 未设根目录与「今日目录不存在」是两回事，文案须准确（审查 M-5）
                 ShowFeedback("尚未设置保存目录，请先在设置中选择", true);
                 return;
             }
-            string todayDir = Path.Combine(_config.RootPath,
-                FolderNamePattern.Format(_config.FolderNamePattern, _clock.Now));
-            if (!Directory.Exists(todayDir))
+
+            List<string> folders = _session != null
+                ? _session.ResolveOpenFolders()
+                : _folderNavigator.ResolveFolders(
+                    _config.RootPath, _config.FolderNamePattern, _clock.Now, null);
+            if (folders.Count == 0)
             {
-                // 只提示不建夹：没有今日截图就不该凭空多出一个空日期夹
-                ShowFeedback("今天尚无截图", true);
+                ShowFeedback(HasSavedPaths() ? "已保存的目录已不存在" : "今天尚无截图", true);
                 return;
             }
-            // 打开今日文件夹并以 explorer /select 选中最新一张图（Task 5）；
-            // 枚举失败或夹内无图时退化为只打开目录。
+            if (folders.Count == 1)
+            {
+                OpenSingleInspectionFolder(folders[0]);
+                return;
+            }
+
+            // 本轮有主目录和暂存目录等多处文件：让用户清晰选择打开哪一处，避免漏看暂存图
+            var menu = new ContextMenuStrip();
+            for (int i = 0; i < folders.Count; i++)
+            {
+                string folder = folders[i];
+                var item = new ToolStripMenuItem((i == 0 ? "今日目录：" : "暂存目录：") + folder);
+                item.Click += delegate { OpenSingleInspectionFolder(folder); };
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new ToolStripSeparator());
+            var openAll = new ToolStripMenuItem("全部打开（" + folders.Count + " 个目录）");
+            openAll.Click += delegate
+            {
+                for (int i = 0; i < folders.Count; i++)
+                    OpenSingleInspectionFolder(folders[i]);
+            };
+            menu.Items.Add(openAll);
+            menu.Show(_openFolderButton, new Point(0, 0));
+        }
+
+        private void OpenSingleInspectionFolder(string dir)
+        {
             string latest = null;
             DateTime latestTime = DateTime.MinValue;
             try
             {
-                foreach (string file in Directory.GetFiles(todayDir, "*.png"))
+                foreach (string file in Directory.GetFiles(dir, "*.png"))
                 {
                     DateTime written = File.GetLastWriteTime(file);
                     if (latest == null || written > latestTime)
@@ -1140,7 +2127,11 @@ namespace InspectionWidget
                 if (latest != null)
                     Process.Start("explorer.exe", "/select,\"" + latest + "\"");
                 else
-                    Process.Start("explorer.exe", "\"" + todayDir + "\"");
+                {
+                    string err;
+                    if (!_folderNavigator.TryOpenFolder(dir, out err))
+                        ShowFeedback("打开文件夹失败：" + err, true);
+                }
             }
             catch (Exception ex)
             {
@@ -1152,31 +2143,62 @@ namespace InspectionWidget
         private void RefreshStateVisuals()
         {
             bool waiting = _stateMachine.State == PanelState.Waiting;
+            bool capturing = _stateMachine.State == PanelState.Capturing;
 
-            _deviceHeaderLabel.Text = waiting ? "请点击要截图的窗口" : "截图";
-            _deviceHeaderLabel.Font = waiting ? Font13Bold : Font13;
-            _deviceHeaderLabel.ForeColor = waiting ? AccentColor : SecondaryTextColor;
+            _deviceHeaderLabel.Text = waiting
+                ? "请点击要截图的窗口"
+                : (capturing ? "正在截图…" : "截图设备");
+            _deviceHeaderLabel.Font = waiting ? Font13Bold : Font12Bold;
+            _deviceHeaderLabel.ForeColor = waiting ? AccentColor : (capturing ? WarningColor : SecondaryTextColor);
+            _deviceSubLabel.Text = waiting
+                ? (_stateMachine.CurrentDevice ?? "等待选窗")
+                : (capturing ? (_stateMachine.CurrentDevice ?? "截图中") : "点击设备，再选窗口");
+            _deviceSubLabel.ForeColor = waiting ? AccentColor : WeakTextColor;
 
-            foreach (Button button in _deviceButtons)
+            for (int i = 0; i < _deviceRows.Count; i++)
             {
-                string device = button.Tag as string;
-                if (waiting && device == _stateMachine.CurrentDevice)
+                DeviceRowWidget row = _deviceRows[i];
+                bool isWaitingTarget = waiting && string.Equals(row.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
+                bool isCapturingTarget = capturing && string.Equals(row.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
+
+                if (isWaitingTarget)
                 {
-                    button.BackColor = AccentColor;
-                    button.ForeColor = Color.White;
+                    row.Panel.BackColor = AccentSoftColor;
+                    row.NameLabel.ForeColor = AccentColor;
+                    row.NameLabel.Font = Font13Bold;
+                    row.StatusLabel.Text = "等待选窗";
+                    row.StatusLabel.ForeColor = AccentColor;
                 }
-                else if (!waiting && _stateMachine.State == PanelState.Idle
-                    && device != null && device == _config.LastDevice)
+                else if (isCapturingTarget)
                 {
-                    button.BackColor = LastDeviceBackColor;
-                    button.ForeColor = PrimaryTextColor;
+                    row.Panel.BackColor = WarningSoftColor;
+                    row.NameLabel.ForeColor = WarningColor;
+                    row.NameLabel.Font = Font13Bold;
+                    row.StatusLabel.Text = "截图中";
+                    row.StatusLabel.ForeColor = WarningColor;
+                }
+                else if (!waiting && !capturing
+                    && string.Equals(row.Device, _config.LastDevice, StringComparison.OrdinalIgnoreCase))
+                {
+                    row.Panel.BackColor = row.Visited ? Color.FromArgb(0xF6, 0xFB, 0xF8) : LastDeviceBackColor;
+                    row.NameLabel.ForeColor = PrimaryTextColor;
+                    row.NameLabel.Font = Font13;
+                    row.StatusLabel.Text = row.Visited ? "✓ 已点过" : "待截图";
+                    row.StatusLabel.ForeColor = row.Visited ? SuccessColor : WeakTextColor;
                 }
                 else
                 {
-                    button.BackColor = ButtonBackColor;
-                    button.ForeColor = PrimaryTextColor;
+                    row.Panel.BackColor = ButtonBackColor;
+                    row.NameLabel.ForeColor = ScreenshotAvailable ? PrimaryTextColor : WeakTextColor;
+                    row.NameLabel.Font = Font13;
+                    row.StatusLabel.Text = row.Visited ? "✓ 已点过" : "待截图";
+                    row.StatusLabel.ForeColor = row.Visited ? SuccessColor : WeakTextColor;
                 }
-                button.Enabled = ScreenshotAvailable;
+
+                row.UnmarkButton.Visible = row.Visited && !isWaitingTarget && !isCapturingTarget;
+                row.Panel.Enabled = ScreenshotAvailable;
+                LayoutSingleDeviceRow(row, row.Panel.Width, row.Panel.Height);
+                row.Panel.Invalidate();
             }
 
             Invalidate();
@@ -1246,20 +2268,22 @@ namespace InspectionWidget
                     ShowFeedback("该窗口已最小化，请先打开", true);
                     _stateMachine.Cancel();
                     OnStateChanged();
+                    TryMaybeShowCompletionPrompt();
                     break;
                 case ResolveReason.Ok:
                     if (!_stateMachine.BeginCapture())
                         return;
                     OnStateChanged(); // Capturing → 停钩
                     // 进 Capturing 即组请求快照（Task 5）：根目录取当前配置、
-                    // 日期在此刻以 IClock 固定，保存与失败重试全程共用。
+                    // 日期与计划代次在此刻固定，保存与失败重试全程共用。
                     _currentRequest = new CaptureRequest
                     {
                         Device = _stateMachine.CurrentDevice,
                         RootPath = _config.RootPath,
                         Date = _clock.Now,
                         RequestId = _stateMachine.CurrentRequestId,
-                        FolderPattern = _config.FolderNamePattern
+                        FolderPattern = _config.FolderNamePattern,
+                        PlanToken = _waitingPlanToken
                     };
                     OnTargetResolved(result, _stateMachine.CurrentRequestId);
                     break;
@@ -1303,7 +2327,10 @@ namespace InspectionWidget
             bool cancelled = _stateMachine.Cancel();
             OnStateChanged();
             if (cancelled)
+            {
                 ShowFeedback("已取消选窗", false);
+                TryMaybeShowCompletionPrompt();
+            }
         }
 
         private void OnHookTimeoutElapsed()
@@ -1316,7 +2343,10 @@ namespace InspectionWidget
             bool cancelled = _stateMachine.Cancel();
             OnStateChanged(); // 钩子已自停，Stop 幂等
             if (cancelled)
+            {
                 ShowFeedback("等待超时，已取消", true);
+                TryMaybeShowCompletionPrompt();
+            }
         }
 
         /// <summary>
@@ -1358,12 +2388,20 @@ namespace InspectionWidget
             Action hideSelf = delegate
             {
                 if (IsDisposed) return;
-                Invoke(new Action(delegate { Opacity = 0; }));
+                Invoke(new Action(delegate
+                {
+                    _hiddenForCapture = true;
+                    Opacity = 0;
+                }));
             };
             Action showSelf = delegate
             {
                 if (IsDisposed) return;
-                Invoke(new Action(delegate { Opacity = 1; }));
+                Invoke(new Action(delegate
+                {
+                    Opacity = 1;
+                    _hiddenForCapture = false;
+                }));
             };
 
             var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
@@ -1459,7 +2497,10 @@ namespace InspectionWidget
             }
 
             if (completed)
+            {
                 OnStateChanged(); // 回 Idle → 集中点停钩（Capturing 时钩已停，幂等）
+                TryMaybeShowCompletionPrompt();
+            }
         }
 
         // ---------- 保存接线（Task 5） ----------
@@ -1530,6 +2571,14 @@ namespace InspectionWidget
                 }
                 image.Dispose();
                 _rootToolTip.SetToolTip(_rootLabel, result.FullPath);
+                if (_session != null)
+                {
+                    string progressErr;
+                    InspectionPlanToken token = request != null ? request.PlanToken : default(InspectionPlanToken);
+                    _session.RecordSaveSucceeded(result.FullPath, token, out progressErr);
+                    RebuildPlanCard();
+                    ApplyHeightAnchored();
+                }
                 if (result.UsedFallback)
                 {
                     ShowFeedbackInternal("✓ " + Path.GetFileName(result.FullPath) + "（已暂存）：" + result.FullPath,
@@ -1539,6 +2588,7 @@ namespace InspectionWidget
                 {
                     ShowSuccessFeedback("✓ " + Path.GetFileName(result.FullPath));
                 }
+                TryMaybeShowCompletionPrompt();
                 return;
             }
 
@@ -1559,6 +2609,7 @@ namespace InspectionWidget
                     _pendingGeneration++;
                 }
                 ShowFeedback("尚未保存：原图已失效，请重新截图", true);
+                TryMaybeShowCompletionPrompt();
                 return;
             }
             if (_pendingImage != null && !object.ReferenceEquals(_pendingImage, image))
@@ -1575,6 +2626,7 @@ namespace InspectionWidget
             ShowPersistentFeedback(string.IsNullOrEmpty(detail)
                 ? "尚未保存，点击此处重试"
                 : "尚未保存，点击此处重试：" + detail, ErrorColor);
+            TryMaybeShowCompletionPrompt();
         }
 
         /// <summary>
@@ -1931,6 +2983,152 @@ namespace InspectionWidget
             catch
             {
                 return null;
+            }
+        }
+
+        // ---------- 跨日自动重置与全部点过提示 ----------
+
+        private void OnDayRolloverTick(object sender, EventArgs e)
+        {
+            if (_session == null || IsDisposed)
+                return;
+            bool rolled;
+            _session.EnsureCurrentDayResetIfRolled(out rolled);
+            string todayText = FormatFullDate(_clock.Now);
+            if (_dateLabel != null && !string.Equals(_dateLabel.Text, todayText, StringComparison.Ordinal))
+                _dateLabel.Text = todayText;
+            if (rolled && _stateMachine.State == PanelState.Idle && !_saveInFlight)
+            {
+                RebuildPlanCard();
+                RebuildDeviceButtons();
+                RefreshStateVisuals();
+                ApplyHeightAnchored();
+            }
+        }
+
+        private void TryMaybeShowCompletionPrompt()
+        {
+            if (_session == null || IsDisposed)
+                return;
+            string progressErr;
+            if (!_session.TryClaimCompletionPrompt(_saveInFlight, _settingsDialogOpen, _hiddenForCapture || Opacity < 0.5, out progressErr))
+                return;
+
+            bool hasPendingFailure = _pendingImage != null && _pendingRequest != null;
+            bool hasSavedFiles = HasSavedPaths();
+            using (var dialog = new CompletionPromptDialog(hasPendingFailure, hasSavedFiles))
+            {
+                UiTheme.ScaleLayout(dialog, ScaleFactor);
+                DialogResult answer = Visible
+                    ? dialog.ShowDialog(this)
+                    : dialog.ShowDialog();
+                if (answer == DialogResult.Yes)
+                    OpenInspectionFolders();
+            }
+        }
+
+        private sealed class ResetRoundConfirmDialog : Form
+        {
+            public ResetRoundConfirmDialog()
+            {
+                Text = "重置本轮进度";
+                StartPosition = FormStartPosition.CenterParent;
+                FormBorderStyle = FormBorderStyle.FixedDialog;
+                MinimizeBox = false;
+                MaximizeBox = false;
+                TopMost = true;
+                AutoScaleMode = AutoScaleMode.None;
+                ClientSize = new Size(420, 148);
+                BackColor = UiTheme.PageBackColor;
+                Font = UiTheme.BodyFont;
+
+                var message = new Label
+                {
+                    Text = "确定清空今日所有设备的“已点过”记录并重新开始本轮吗？\n\n已保存的截图文件不会被删除。",
+                    AutoSize = false,
+                    Dock = DockStyle.Fill,
+                    Padding = new Padding(18),
+                    ForeColor = UiTheme.PrimaryTextColor
+                };
+                var buttons = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 52,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(12)
+                };
+                var confirm = UiTheme.PrimaryButton("确定重置");
+                confirm.BackColor = UiTheme.ErrorColor;
+                confirm.Width = 104;
+                confirm.DialogResult = DialogResult.Yes;
+                var cancel = UiTheme.SecondaryButton("取消");
+                cancel.Width = 84;
+                cancel.DialogResult = DialogResult.No;
+                buttons.Controls.Add(confirm);
+                buttons.Controls.Add(cancel);
+                Controls.Add(message);
+                Controls.Add(buttons);
+                AcceptButton = cancel;
+                CancelButton = cancel;
+            }
+        }
+
+        private sealed class CompletionPromptDialog : Form
+        {
+            public CompletionPromptDialog(bool hasPendingFailure, bool hasSavedFiles)
+            {
+                Text = "今日巡检进度";
+                StartPosition = FormStartPosition.CenterParent;
+                FormBorderStyle = FormBorderStyle.FixedDialog;
+                MinimizeBox = false;
+                MaximizeBox = false;
+                TopMost = true;
+                AutoScaleMode = AutoScaleMode.None;
+                ClientSize = new Size(440, 160);
+                BackColor = UiTheme.PageBackColor;
+                Font = UiTheme.BodyFont;
+
+                string body;
+                if (hasPendingFailure)
+                {
+                    body = "今日所有设备均已点过，但当前仍有截图尚未保存成功，请先点击底部反馈区重试。\n\n是否仍要打开巡检文件夹？";
+                }
+                else if (!hasSavedFiles)
+                {
+                    body = "今日所有设备均已点过，但本轮尚未记录到已保存的截图文件。\n\n是否检查并打开巡检文件夹？";
+                }
+                else
+                {
+                    body = "今日所有设备均已点过。\n\n是否立即打开巡检文件夹？";
+                }
+
+                var message = new Label
+                {
+                    Text = body,
+                    AutoSize = false,
+                    Dock = DockStyle.Fill,
+                    Padding = new Padding(18),
+                    ForeColor = UiTheme.PrimaryTextColor
+                };
+                var buttons = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 52,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(12)
+                };
+                var open = UiTheme.PrimaryButton("打开文件夹");
+                open.Width = 116;
+                open.DialogResult = DialogResult.Yes;
+                var later = UiTheme.SecondaryButton("稍后");
+                later.Width = 84;
+                later.DialogResult = DialogResult.No;
+                buttons.Controls.Add(open);
+                buttons.Controls.Add(later);
+                Controls.Add(message);
+                Controls.Add(buttons);
+                AcceptButton = open;
+                CancelButton = later;
             }
         }
     }

@@ -41,6 +41,13 @@ namespace InspectionWidget.Config
         }
     }
 
+    /// <summary>待提交的设备改名记录；用于应用设置后把已点过状态迁移到新设备名。</summary>
+    public sealed class DeviceRenameRecord
+    {
+        public string OldName;
+        public string NewName;
+    }
+
     /// <summary>
     /// 设置窗口唯一编辑态：DataGridView、凭据行和导入候选都引用这里，
     /// 不再维护第二份可漂移的字符串列表。
@@ -49,6 +56,10 @@ namespace InspectionWidget.Config
     {
         public readonly BindingList<DeviceDraftItem> Devices = new BindingList<DeviceDraftItem>();
         public readonly List<CredentialDraft> Credentials = new List<CredentialDraft>();
+        /// <summary>快捷链接草稿（v1.1.0）：与配置原列表不共享引用。</summary>
+        public readonly BindingList<QuickLinkEntry> QuickLinks = new BindingList<QuickLinkEntry>();
+        public readonly List<DeviceRenameRecord> PendingDeviceRenames = new List<DeviceRenameRecord>();
+        public bool PendingImportDeviceReplace;
 
         public string RootPath;
         public string FolderPattern;
@@ -57,6 +68,8 @@ namespace InspectionWidget.Config
         public CaptureMode CaptureMode;
         public bool IsDeviceCollapsed;
         public bool IsCredentialCollapsed;
+        public bool PlanModeEnabled;
+        public bool HideVisitedDevices = true;
         public string LastDevice;
         public int? WindowLeft;
         public int? WindowTop;
@@ -123,6 +136,11 @@ namespace InspectionWidget.Config
             WindowLeft = config.WindowLeft;
             WindowTop = config.WindowTop;
             TrayHintShown = config.TrayHintShown;
+            QuickLinkCloner.ReplaceInto(QuickLinks, config.QuickLinks);
+            PlanModeEnabled = config.PlanModeEnabled;
+            HideVisitedDevices = config.HideVisitedDevices;
+            PendingDeviceRenames.Clear();
+            PendingImportDeviceReplace = false;
         }
 
         public List<string> DeviceNames()
@@ -163,6 +181,17 @@ namespace InspectionWidget.Config
                 return;
             if (string.Equals(LastDevice, oldName, StringComparison.OrdinalIgnoreCase))
                 LastDevice = newName;
+            string oldTrimmed = oldName.Trim();
+            string newTrimmed = newName.Trim();
+            if (!string.IsNullOrEmpty(oldTrimmed) && !string.IsNullOrEmpty(newTrimmed)
+                && !string.Equals(oldTrimmed, newTrimmed, StringComparison.Ordinal))
+            {
+                PendingDeviceRenames.Add(new DeviceRenameRecord
+                {
+                    OldName = oldTrimmed,
+                    NewName = newTrimmed
+                });
+            }
         }
 
         public bool ContainsDevice(string name)
@@ -219,6 +248,13 @@ namespace InspectionWidget.Config
                 WindowLeft = plan.Result.WindowLeft;
                 WindowTop = plan.Result.WindowTop;
                 TrayHintShown = plan.Result.TrayHintShown;
+                // 源存在新字段才替换；缺字段时 plan.Result 已保留本机值，
+                // 这里只做深拷贝，不抹除草稿中已有的链接与开关。
+                QuickLinkCloner.ReplaceInto(QuickLinks, plan.Result.QuickLinks);
+                PlanModeEnabled = plan.Result.PlanModeEnabled;
+                HideVisitedDevices = plan.Result.HideVisitedDevices;
+                PendingImportDeviceReplace = true;
+                PendingDeviceRenames.Clear();
             }
 
             if (plan.CredentialsReplaced)
@@ -269,7 +305,10 @@ namespace InspectionWidget.Config
                 LastDevice = LastDevice,
                 UiScalePercent = UiScalePercent,
                 FolderNamePattern = FolderPattern,
-                TrayHintShown = TrayHintShown
+                TrayHintShown = TrayHintShown,
+                QuickLinks = QuickLinkCloner.CloneList(QuickLinks),
+                PlanModeEnabled = PlanModeEnabled,
+                HideVisitedDevices = HideVisitedDevices
             };
             for (int i = 0; i < Credentials.Count; i++)
             {

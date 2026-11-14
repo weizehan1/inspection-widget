@@ -71,7 +71,8 @@ namespace InspectionWidget.Config
         {
             "RootPath", "Devices", "Credentials", "IsCredentialCollapsed", "IsDeviceCollapsed",
             "AutoClearClipboard", "CaptureMode", "WindowLeft", "WindowTop", "LastDevice",
-            "UiScalePercent", "FolderNamePattern", "TrayHintShown"
+            "UiScalePercent", "FolderNamePattern", "TrayHintShown",
+            "QuickLinks", "PlanModeEnabled", "HideVisitedDevices"
         };
 
         private readonly ConfigPaths _paths;
@@ -481,6 +482,14 @@ namespace InspectionWidget.Config
                         return "凭据列表第 " + (i + 1) + " 项名称为空。";
                 }
             }
+            if (config.QuickLinks != null)
+            {
+                for (int i = 0; i < config.QuickLinks.Count; i++)
+                {
+                    if (config.QuickLinks[i] == null)
+                        return "快捷链接列表第 " + (i + 1) + " 项为空。";
+                }
+            }
             return null;
         }
 
@@ -507,6 +516,10 @@ namespace InspectionWidget.Config
                 config.Credentials = new List<CredentialEntry>();
                 defaulted = true;
             }
+            // 快捷链接允许显式 null（可空列表），归一为空表但不额外标 Defaulted，
+            // 避免把老版本程序写出的 null 列表当成需要重写的缺字段配置。
+            if (config.QuickLinks == null)
+                config.QuickLinks = new List<QuickLinkEntry>();
             foreach (CredentialEntry entry in config.Credentials)
                 entry.NeedsReset = string.IsNullOrEmpty(entry.EncryptedSecret);
             return defaulted;

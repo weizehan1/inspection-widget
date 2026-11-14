@@ -26,6 +26,33 @@ namespace InspectionWidget.Config
         public bool NeedsReset { get; set; }
     }
 
+    /// <summary>一条快捷链接；缺 Enabled 字段反序列化时默认启用，列表顺序即显示顺序。</summary>
+    [DataContract]
+    public sealed class QuickLinkEntry
+    {
+        [DataMember]
+        public string Title { get; set; }
+
+        [DataMember]
+        public string Url { get; set; }
+
+        [DataMember]
+        public bool Enabled { get; set; }
+
+        public QuickLinkEntry()
+        {
+            Enabled = true;
+        }
+
+        // DataContract 反序列化不走构造函数：先把 Enabled 设成默认 true，
+        // JSON 里显式写出的 false 再覆盖，这样老配置/缺字段的条目仍然启用。
+        [OnDeserializing]
+        private void OnDeserializing(StreamingContext context)
+        {
+            Enabled = true;
+        }
+    }
+
     /// <summary>应用配置（config.json 的 DataContract 模型）。</summary>
     [DataContract]
     public sealed class AppConfig
@@ -75,6 +102,30 @@ namespace InspectionWidget.Config
         [DataMember]
         public bool TrayHintShown { get; set; }
 
+        /// <summary>快捷链接（v1.1.0）：列表顺序即显示顺序，缺字段为空表。</summary>
+        [DataMember]
+        public List<QuickLinkEntry> QuickLinks { get; set; }
+
+        /// <summary>计划模式开关（v1.1.0），缺字段默认 false。</summary>
+        [DataMember]
+        public bool PlanModeEnabled { get; set; }
+
+        /// <summary>计划模式下是否默认隐藏已点过设备（v1.1.0），默认 true。</summary>
+        [DataMember]
+        public bool HideVisitedDevices { get; set; }
+
+        public AppConfig()
+        {
+            AutoClearClipboard = true;
+            CaptureMode = CaptureMode.Auto;
+            UiScalePercent = UiScale.DefaultPercent;
+            FolderNamePattern = global::InspectionWidget.Config.FolderNamePattern.Default;
+            Devices = new List<string>();
+            Credentials = new List<CredentialEntry>();
+            QuickLinks = new List<QuickLinkEntry>();
+            HideVisitedDevices = true;
+        }
+
         // DataContract 反序列化不走构造函数：先把字段设成默认值，JSON 里有的字段再覆盖。
         // 这样缺 AutoClearClipboard 字段的老/手改配置加载后仍是默认 true，列表也不会是 null。
         [OnDeserializing]
@@ -89,6 +140,9 @@ namespace InspectionWidget.Config
             TrayHintShown = false;
             Devices = new List<string>();
             Credentials = new List<CredentialEntry>();
+            QuickLinks = new List<QuickLinkEntry>();
+            PlanModeEnabled = false;
+            HideVisitedDevices = true;
         }
 
         /// <summary>默认配置：两条示例设备，其余按约定默认值。</summary>
@@ -108,7 +162,10 @@ namespace InspectionWidget.Config
                 LastDevice = null,
                 UiScalePercent = UiScale.DefaultPercent,
                 FolderNamePattern = global::InspectionWidget.Config.FolderNamePattern.Default,
-                TrayHintShown = false
+                TrayHintShown = false,
+                QuickLinks = new List<QuickLinkEntry>(),
+                PlanModeEnabled = false,
+                HideVisitedDevices = true
             };
         }
     }

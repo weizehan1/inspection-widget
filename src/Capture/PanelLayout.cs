@@ -28,6 +28,35 @@ namespace InspectionWidget.Capture
         public const int TitleBarButtonStride = 32;
         public const int TitleBarButtonTop = 4;
 
+        // v1.1.0 方案 B（Scheme B）主面板度量常量（96 DPI 逻辑像素）。
+        public const int SchemeBPanelWidth = 352;
+        public const int SchemeBDefaultHeight = 660;
+        public const int SchemeBHeaderHeight = 60;
+        public const int SchemeBQuickLinkHeight = 34;
+        public const int SchemeBQuickLinkGap = 7;
+        public const int SchemeBCredentialHeight = 34;
+        public const int SchemeBCredentialGap = 7;
+        public const int SchemeBDeviceRowHeight = 44;
+        public const int SchemeBDeviceRowGap = 7;
+        public const int SchemeBFooterHeight = 104;
+
+        /// <summary>v1.1.0 方案 B 缩放后的面板宽（352 * factor）。</summary>
+        public static int ScaledSchemeBPanelWidth(double factor)
+        {
+            return Scale(SchemeBPanelWidth, factor);
+        }
+
+        /// <summary>
+        /// v1.1.0 方案 B 面板目标高度：随内容自然高度收缩至最多 660（逻辑像素），
+        /// 再受当前工作区可用高度与外边距钳制，不强行设置固定最小高度。
+        /// </summary>
+        public static int ComputeSchemeBHeight(int naturalContentHeight, int workingAreaHeight, int margin, double factor)
+        {
+            int maxPreferred = Scale(SchemeBDefaultHeight, factor);
+            int desired = Math.Min(Math.Max(0, naturalContentHeight), maxPreferred);
+            return ClampHeight(desired, workingAreaHeight, margin);
+        }
+
         /// <summary>
         /// 标题栏右侧按钮左缘 X：slotFromRight=0 为最右一枚。每令牌先各自取整再组合，
         /// 与全窗体缩放口径一致。1.0 档三槽为 W-34 / W-66 / W-98。

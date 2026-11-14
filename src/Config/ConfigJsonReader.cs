@@ -184,7 +184,8 @@ namespace InspectionWidget.Config
             {
                 "Devices", "Credentials", "RootPath", "FolderNamePattern", "CaptureMode",
                 "UiScalePercent", "AutoClearClipboard", "IsDeviceCollapsed",
-                "IsCredentialCollapsed", "LastDevice", "WindowLeft", "WindowTop", "TrayHintShown"
+                "IsCredentialCollapsed", "LastDevice", "WindowLeft", "WindowTop", "TrayHintShown",
+                "QuickLinks", "PlanModeEnabled", "HideVisitedDevices"
             };
             if ((unknown = FindUnknown(configObject, allowedConfig)) != null)
             {
@@ -553,6 +554,119 @@ namespace InspectionWidget.Config
                 doc.FieldSources["TrayHintShown"] = "源文件";
             }
 
+            if (source.TryGetValue("PlanModeEnabled", out value))
+            {
+                bool? flag = AsBool(value);
+                if (!flag.HasValue)
+                {
+                    error = "PlanModeEnabled 必须是布尔值。";
+                    return false;
+                }
+                config.PlanModeEnabled = flag.Value;
+                doc.PresentFields.Add("PlanModeEnabled");
+                doc.FieldSources["PlanModeEnabled"] = "源文件";
+            }
+
+            if (source.TryGetValue("HideVisitedDevices", out value))
+            {
+                bool? flag = AsBool(value);
+                if (!flag.HasValue)
+                {
+                    error = "HideVisitedDevices 必须是布尔值。";
+                    return false;
+                }
+                config.HideVisitedDevices = flag.Value;
+                doc.PresentFields.Add("HideVisitedDevices");
+                doc.FieldSources["HideVisitedDevices"] = "源文件";
+            }
+
+            if (source.TryGetValue("QuickLinks", out value))
+            {
+                List<QuickLinkEntry> links;
+                if (!TryReadQuickLinks(value, out links, out error))
+                    return false;
+                string linksError = QuickLinkValidator.ValidateAll(links);
+                if (linksError != null)
+                {
+                    error = "快捷链接无效：" + linksError;
+                    return false;
+                }
+                config.QuickLinks = links;
+                doc.PresentFields.Add("QuickLinks");
+                doc.FieldSources["QuickLinks"] = "源文件";
+            }
+
+            return true;
+        }
+
+        /// <summary>v1.1.0 新增可选字段：链接列表可空，条目结构损坏在导入预览阶段拒绝。</summary>
+        private static bool TryReadQuickLinks(object value,
+            out List<QuickLinkEntry> result, out string error)
+        {
+            result = new List<QuickLinkEntry>();
+            error = null;
+            if (value == null || value == JsonNull.Value)
+                return true;
+            var array = value as List<object>;
+            if (array == null)
+            {
+                error = "QuickLinks 必须是数组或 null。";
+                return false;
+            }
+            for (int i = 0; i < array.Count; i++)
+            {
+                object itemValue = array[i];
+                if (itemValue == null || itemValue == JsonNull.Value)
+                {
+                    error = "快捷链接第 " + (i + 1) + " 项不能为空。";
+                    return false;
+                }
+                var item = itemValue as Dictionary<string, object>;
+                if (item == null)
+                {
+                    error = "快捷链接第 " + (i + 1) + " 项必须是对象。";
+                    return false;
+                }
+                string unknown = FindUnknown(item, new[] { "Title", "Url", "Enabled" });
+                if (unknown != null)
+                {
+                    error = "快捷链接第 " + (i + 1) + " 项包含未知字段：" + unknown;
+                    return false;
+                }
+                object field;
+                string title = null;
+                string url = null;
+                if (item.TryGetValue("Title", out field) && field != null && field != JsonNull.Value)
+                {
+                    title = field as string;
+                    if (title == null)
+                    {
+                        error = "快捷链接第 " + (i + 1) + " 项 Title 必须是字符串。";
+                        return false;
+                    }
+                }
+                if (item.TryGetValue("Url", out field) && field != null && field != JsonNull.Value)
+                {
+                    url = field as string;
+                    if (url == null)
+                    {
+                        error = "快捷链接第 " + (i + 1) + " 项 Url 必须是字符串。";
+                        return false;
+                    }
+                }
+                bool enabled = true;
+                if (item.TryGetValue("Enabled", out field))
+                {
+                    bool? flag = AsBool(field);
+                    if (!flag.HasValue)
+                    {
+                        error = "快捷链接第 " + (i + 1) + " 项 Enabled 必须是布尔值。";
+                        return false;
+                    }
+                    enabled = flag.Value;
+                }
+                result.Add(new QuickLinkEntry { Title = title, Url = url, Enabled = enabled });
+            }
             return true;
         }
 

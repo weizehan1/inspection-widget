@@ -35,6 +35,11 @@ namespace InspectionWidget.Tests
             SettingsApplyCoordinatorTests.RunAll();
             InspectionPlanTests.RunAll();
             InspectionProgressStoreTests.RunAll();
+            QuickLinkTests.RunAll();
+            QuickLinkConfigTests.RunAll();
+            InspectionFolderNavigatorTests.RunAll();
+            HideVisitedDevicesTests.RunAll();
+            SchemeBIntegrationTests.RunAll();
 
             bool windowsUiSkipped = false;
             if (windowsUiRequested)
