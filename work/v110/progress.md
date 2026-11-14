@@ -72,3 +72,8 @@ Codex 已独立运行 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib bash build.s
 实现已固定为候选提交 `96165980503e3c764eb4a45811afdbbad54b0553`。Windows UI 11条与实机交互未验收；下一步独立Hydrogen审计，不以实现者自查替代。
 独立审计实例已启动：`6350a12e-db4f-4ff1-9e95-692e8d5c4199`，新上下文，同一指定 Hydrogen 模型，只读产品源码；范围与输出见 `work/v110/hydrogen-audit-brief.md`。重点真实 UI 接线、异常恢复、计划关闭时的实际目录与通知时机。
 Codex 结构化验证报告 `/tmp/opencode/inspection-v110/codex-candidate-tests.json`、`candidate-artifacts.json`。Paseo list_hosts 仅有当前 Mac，无注册 Windows 主机，现场 Windows 实测入口暂不可用；不将其当作通过。
+
+## ImageGen 与审计结果
+
+用户追加要求用 ImageGen 重做图标，已生成并接入统一嵌入资源；原图/提示词/ICO编码在assets，验证见 `work/v110/icon-generation.md`。ICO兼容性缺口已精确复现并修正，真实 AppIcon.Load 加载成功，整仓433/433通过。
+独立审计针对源码9616598发现5High/5Medium，暂不通过；Codex 已独立运行审计复现程序，确认损坏进度被覆盖、计划关闭丢暂存目录、缺Devices的部分导入清进度等行为。审计资料保留在work/v110/hydrogen-audit*，将退回原Hydrogen实现者修复，代码与图标分开归因。
