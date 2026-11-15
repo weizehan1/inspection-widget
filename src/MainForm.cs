@@ -25,12 +25,14 @@ namespace InspectionWidget
     /// </summary>
     public class MainForm : Form
     {
-        // 颜色令牌（v1.1.0 方案 B 与 UiTheme 对齐）
+        // 颜色令牌（暖石板 + 深海青终端风，与 UiTheme 对齐）
         private static readonly Color AccentColor = UiTheme.AccentColor;
+        private static readonly Color AccentHoverColor = UiTheme.AccentHoverColor;
         private static readonly Color AccentSoftColor = UiTheme.AccentSoftColor;
         private static readonly Color AccentBorderColor = UiTheme.AccentBorderColor;
         private static readonly Color SuccessColor = UiTheme.SuccessColor;
         private static readonly Color SuccessSoftColor = UiTheme.SuccessSoftColor;
+        private static readonly Color SuccessBorderColor = UiTheme.SuccessBorderColor;
         private static readonly Color ErrorColor = UiTheme.ErrorColor;
         private static readonly Color WarningColor = UiTheme.WarningColor;
         private static readonly Color WarningSoftColor = UiTheme.WarningSoftColor;
@@ -38,13 +40,13 @@ namespace InspectionWidget
         private static readonly Color SecondaryTextColor = UiTheme.SecondaryTextColor;
         private static readonly Color WeakTextColor = UiTheme.WeakTextColor;
         private static readonly Color PanelBackColor = UiTheme.PageBackColor;
+        private static readonly Color CardBackColor = UiTheme.CardBackColor;
         private static readonly Color SurfaceColor = UiTheme.SurfaceColor;
         private static readonly Color BorderColor = UiTheme.BorderColor;
         private static readonly Color BorderSoftColor = UiTheme.BorderSoftColor;
-        private static readonly Color LastDeviceBackColor = UiTheme.AccentSoftColor;
         private static readonly Color ButtonBackColor = Color.White;
 
-        private const int SideMargin = 12;
+        private const int SideMargin = 14;
 
         // 界面缩放（v1.0.1）：度量一律经 M() 按当前配置档位缩放，布局公式在 PanelLayout。
         private double ScaleFactor
@@ -157,8 +159,11 @@ namespace InspectionWidget
         private Button _closeButton;
         private ToolTip _titleToolTip;
         private ToolTip _deviceToolTip;
-        private Font _fontGear;
         private Bitmap _gearImage;
+        private Bitmap _gearHoverImage;
+        private bool _settingsHovered;
+        private bool _minimizeHovered;
+        private bool _closeHovered;
 
         // 系统托盘（v1.0.2）：常驻 NotifyIcon，最小化 = 隐藏到托盘，托盘恢复/退出。
         private NotifyIcon _trayIcon;
@@ -216,10 +221,59 @@ namespace InspectionWidget
         private readonly List<DeviceRowWidget> _deviceRows = new List<DeviceRowWidget>();
         private readonly List<Control> _credentialControls = new List<Control>();
 
+        private sealed class DeviceRowPanel : Panel
+        {
+            public Action ActivateAction;
+
+            public DeviceRowPanel()
+            {
+                SetStyle(ControlStyles.Selectable
+                    | ControlStyles.UserPaint
+                    | ControlStyles.AllPaintingInWmPaint
+                    | ControlStyles.OptimizedDoubleBuffer
+                    | ControlStyles.ResizeRedraw, true);
+                DoubleBuffered = true;
+                ResizeRedraw = true;
+                TabStop = true;
+            }
+
+            protected override bool IsInputKey(Keys keyData)
+            {
+                if (keyData == Keys.Enter || keyData == Keys.Space)
+                    return true;
+                return base.IsInputKey(keyData);
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                base.OnKeyDown(e);
+                if (!e.Handled && (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space))
+                {
+                    e.Handled = true;
+                    if (ActivateAction != null)
+                        ActivateAction();
+                }
+            }
+
+            protected override void OnEnter(EventArgs e)
+            {
+                base.OnEnter(e);
+                Invalidate();
+            }
+
+            protected override void OnLeave(EventArgs e)
+            {
+                base.OnLeave(e);
+                Invalidate();
+            }
+        }
+
         private sealed class DeviceRowWidget
         {
             public string Device;
             public bool Visited;
+            public bool Hovered;
+            public Color BaseBackColor = ButtonBackColor;
             public Panel Panel;
             public Label NameLabel;
             public Label StatusLabel;
@@ -229,7 +283,8 @@ namespace InspectionWidget
         private bool _dragging;
         private Point _dragOffset;
 
-        // 缓存字体（15 加粗 / 13 常规 / 13 加粗 / 12 常规 / 12 加粗 / 11 常规）：全窗体复用。
+        // 缓存字体（18 等宽加粗 / 15 加粗 / 13 常规 / 13 加粗 / 12 常规 / 12 加粗 / 11 常规）：全窗体复用。
+        private Font _font18BoldMono;
         private Font _font15Bold;
         private Font _font13;
         private Font _font13Bold;
@@ -259,6 +314,16 @@ namespace InspectionWidget
         private void EnsureScaledFonts(List<IDisposable> retired)
         {
             double scale = ScaleFactor;
+            float monoTarget = 18f * (float)scale;
+            if (_font18BoldMono == null || Math.Abs(_font18BoldMono.Size - monoTarget) > 0.01f)
+            {
+                if (_font18BoldMono != null)
+                {
+                    if (retired != null) retired.Add(_font18BoldMono);
+                    else _font18BoldMono.Dispose();
+                }
+                _font18BoldMono = UiTheme.CreateMonoFont(monoTarget, FontStyle.Bold);
+            }
             SwapScaledFont(ref _font15Bold, 15f, FontStyle.Bold, scale, retired);
             SwapScaledFont(ref _font13, 13f, FontStyle.Regular, scale, retired);
             SwapScaledFont(ref _font13Bold, 13f, FontStyle.Bold, scale, retired);
@@ -266,29 +331,34 @@ namespace InspectionWidget
             SwapScaledFont(ref _font12Bold, 12f, FontStyle.Bold, scale, retired);
             SwapScaledFont(ref _font11, 11f, FontStyle.Regular, scale, retired);
 
-            float gearTarget = 16f * (float)scale;
-            if (_fontGear == null || Math.Abs(_fontGear.Size - gearTarget) > 0.01f)
+            int imageSize = M(16);
+            if (_gearImage == null || _gearImage.Width != imageSize)
             {
-                if (_fontGear != null)
+                if (_gearImage != null)
                 {
-                    if (retired != null) retired.Add(_fontGear);
-                    else _fontGear.Dispose();
+                    if (retired != null) retired.Add(_gearImage);
+                    else _gearImage.Dispose();
                 }
-                _fontGear = new Font("Segoe UI Symbol", gearTarget, FontStyle.Regular, GraphicsUnit.Pixel);
+                _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
             }
-
-            if (!UiTheme.HasSymbolFont)
+            if (_gearHoverImage == null || _gearHoverImage.Width != imageSize)
             {
-                int imageSize = M(18);
-                if (_gearImage == null || _gearImage.Width != imageSize)
+                if (_gearHoverImage != null)
                 {
-                    if (_gearImage != null)
-                    {
-                        if (retired != null) retired.Add(_gearImage);
-                        else _gearImage.Dispose();
-                    }
-                    _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
+                    if (retired != null) retired.Add(_gearHoverImage);
+                    else _gearHoverImage.Dispose();
                 }
+                _gearHoverImage = GearArt.DrawGear(imageSize, PrimaryTextColor);
+            }
+        }
+
+        private Font Font18BoldMono
+        {
+            get
+            {
+                if (_font18BoldMono == null)
+                    _font18BoldMono = UiTheme.CreateMonoFont(18f * (float)ScaleFactor, FontStyle.Bold);
+                return _font18BoldMono;
             }
         }
 
@@ -322,41 +392,24 @@ namespace InspectionWidget
             get { return _font11 ?? SwapScaledFont(ref _font11, 11f, FontStyle.Regular, ScaleFactor, null); }
         }
 
-        // 设置按钮齿轮（v1.0.2）：Segoe UI Symbol 的 ⚙ 才是标准齿轮字形，
-        // 基准 16px（比正文 13px 大一号，一眼可辨），随界面缩放因子放大。
-        private Font GearFont
-        {
-            get
-            {
-                if (_fontGear == null)
-                    _fontGear = new Font("Segoe UI Symbol", 16f * (float)ScaleFactor, FontStyle.Regular, GraphicsUnit.Pixel);
-                return _fontGear;
-            }
-        }
-
         private void ApplySettingsButtonVisual()
         {
-            if (UiTheme.HasSymbolFont)
+            _settingsButton.Text = string.Empty;
+            _settingsButton.Font = Font13;
+            int imageSize = M(16);
+            if (_gearImage == null || _gearImage.Width != imageSize)
             {
-                _settingsButton.Image = null;
-                _settingsButton.Text = "⚙";
-                _settingsButton.Font = GearFont;
+                Bitmap old = _gearImage;
+                _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
+                if (old != null) old.Dispose();
             }
-            else
+            if (_gearHoverImage == null || _gearHoverImage.Width != imageSize)
             {
-                _settingsButton.Text = string.Empty;
-                _settingsButton.Font = Font13;
-                int imageSize = M(18);
-                if (_gearImage == null || _gearImage.Width != imageSize)
-                {
-                    Bitmap old = _gearImage;
-                    _gearImage = GearArt.DrawGear(imageSize, SecondaryTextColor);
-                    _settingsButton.Image = _gearImage;
-                    if (old != null) old.Dispose();
-                    return;
-                }
-                _settingsButton.Image = _gearImage;
+                Bitmap oldHover = _gearHoverImage;
+                _gearHoverImage = GearArt.DrawGear(imageSize, PrimaryTextColor);
+                if (oldHover != null) oldHover.Dispose();
             }
+            _settingsButton.Image = _settingsHovered ? _gearHoverImage : _gearImage;
         }
 
         protected override void Dispose(bool disposing)
@@ -411,14 +464,15 @@ namespace InspectionWidget
                 }
                 if (_feedbackTimer != null) _feedbackTimer.Dispose();
                 if (_dayRolloverTimer != null) _dayRolloverTimer.Dispose();
+                if (_font18BoldMono != null) _font18BoldMono.Dispose();
                 if (_font15Bold != null) _font15Bold.Dispose();
                 if (_font13 != null) _font13.Dispose();
                 if (_font13Bold != null) _font13Bold.Dispose();
                 if (_font12 != null) _font12.Dispose();
                 if (_font12Bold != null) _font12Bold.Dispose();
                 if (_font11 != null) _font11.Dispose();
-                if (_fontGear != null) _fontGear.Dispose();
                 if (_gearImage != null) _gearImage.Dispose();
+                if (_gearHoverImage != null) _gearHoverImage.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -597,7 +651,7 @@ namespace InspectionWidget
                 Font = font15Bold,
                 ForeColor = PrimaryTextColor,
                 AutoSize = true,
-                Location = new Point(SideMargin, 10)
+                Location = new Point(SideMargin, 9)
             };
             var dateLabel = _dateLabel = new Label
             {
@@ -605,49 +659,98 @@ namespace InspectionWidget
                 Font = font12,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true,
-                Location = new Point(SideMargin, 34)
+                Location = new Point(SideMargin, 31)
             };
             _titleToolTip = new ToolTip();
             _deviceToolTip = new ToolTip();
             var settingsButton = _settingsButton = new Button
             {
-                Text = "⚙",
+                Text = string.Empty,
                 Font = font13,
                 ForeColor = SecondaryTextColor,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
+                Cursor = Cursors.Hand,
                 Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
                 Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.SchemeBPanelWidth, 2, 1.0), 8)
             };
             settingsButton.FlatAppearance.BorderSize = 0;
+            settingsButton.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            settingsButton.MouseEnter += delegate
+            {
+                _settingsHovered = true;
+                if (_gearHoverImage != null)
+                    _settingsButton.Image = _gearHoverImage;
+            };
+            settingsButton.MouseLeave += delegate
+            {
+                _settingsHovered = false;
+                if (_gearImage != null)
+                    _settingsButton.Image = _gearImage;
+            };
             settingsButton.Click += OnSettingsClicked;
             settingsButton.AccessibleName = "打开设置";
             _titleToolTip.SetToolTip(settingsButton, "设置");
             var minimizeButton = _minimizeButton = new Button
             {
-                Text = "—",
+                Text = string.Empty,
                 Font = font13,
                 ForeColor = SecondaryTextColor,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
+                Cursor = Cursors.Hand,
                 Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
                 Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.SchemeBPanelWidth, 1, 1.0), 8)
             };
             minimizeButton.FlatAppearance.BorderSize = 0;
+            minimizeButton.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            minimizeButton.MouseEnter += delegate { _minimizeHovered = true; minimizeButton.Invalidate(); };
+            minimizeButton.MouseLeave += delegate { _minimizeHovered = false; minimizeButton.Invalidate(); };
+            minimizeButton.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var btn = (Button)sender;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                int half = Math.Max(4, (int)Math.Round(5 * ScaleFactor));
+                int cx = btn.Width / 2;
+                int cy = btn.Height / 2 + 1;
+                Color ink = _minimizeHovered ? PrimaryTextColor : SecondaryTextColor;
+                using (var pen = new Pen(ink, Math.Max(1.4f, (float)(1.5 * ScaleFactor))))
+                {
+                    e.Graphics.DrawLine(pen, cx - half, cy, cx + half, cy);
+                }
+            };
             minimizeButton.Click += OnMinimizeClicked;
             minimizeButton.AccessibleName = "最小化到托盘";
             _titleToolTip.SetToolTip(minimizeButton, "最小化");
             var closeButton = _closeButton = new Button
             {
-                Text = "✕",
+                Text = string.Empty,
                 Font = font13,
                 ForeColor = SecondaryTextColor,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = PanelBackColor,
+                Cursor = Cursors.Hand,
                 Size = new Size(PanelLayout.TitleBarButtonSize, PanelLayout.TitleBarButtonSize),
                 Location = new Point(PanelLayout.TitleBarButtonX(PanelLayout.SchemeBPanelWidth, 0, 1.0), 8)
             };
             closeButton.FlatAppearance.BorderSize = 0;
+            closeButton.FlatAppearance.MouseOverBackColor = UiTheme.ErrorSoftColor;
+            closeButton.MouseEnter += delegate { _closeHovered = true; closeButton.Invalidate(); };
+            closeButton.MouseLeave += delegate { _closeHovered = false; closeButton.Invalidate(); };
+            closeButton.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var btn = (Button)sender;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                int half = Math.Max(4, (int)Math.Round(4.5 * ScaleFactor));
+                int cx = btn.Width / 2;
+                int cy = btn.Height / 2;
+                Color ink = _closeHovered ? ErrorColor : SecondaryTextColor;
+                using (var pen = new Pen(ink, Math.Max(1.4f, (float)(1.5 * ScaleFactor))))
+                {
+                    e.Graphics.DrawLine(pen, cx - half, cy - half, cx + half, cy + half);
+                    e.Graphics.DrawLine(pen, cx + half, cy - half, cx - half, cy + half);
+                }
+            };
             closeButton.Click += delegate { Close(); };
             closeButton.AccessibleName = "退出巡检助手";
             _titleToolTip.SetToolTip(closeButton, "关闭");
@@ -671,7 +774,7 @@ namespace InspectionWidget
             Controls.Add(_scrollHost);
 
             // 1. 快捷链接区
-            _quickLinkHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 24) };
+            _quickLinkHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 22) };
             _quickLinkHeaderLabel = new Label
             {
                 Text = "快捷链接",
@@ -686,7 +789,7 @@ namespace InspectionWidget
                 Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
-                Location = new Point(PanelLayout.SchemeBPanelWidth - 82, 4)
+                Location = new Point(PanelLayout.SchemeBPanelWidth - 82, 3)
             };
             _quickLinkHeaderPanel.Controls.Add(_quickLinkHeaderLabel);
             _quickLinkHeaderPanel.Controls.Add(_quickLinkSubLabel);
@@ -695,24 +798,34 @@ namespace InspectionWidget
             _quickLinkZonePanel = new Panel { BackColor = PanelBackColor, Width = PanelLayout.SchemeBPanelWidth };
             _scrollHost.Controls.Add(_quickLinkZonePanel);
 
-            // 2. 今日巡检计划卡
+            // 2. 今日巡检计划卡（暖石板白底卡 + 3px 深石青左侧强调条 + 大号等宽计数 + 圆角胶囊进度条）
             _planCardPanel = new Panel
             {
-                BackColor = AccentSoftColor,
+                BackColor = CardBackColor,
                 Width = PanelLayout.SchemeBPanelWidth - SideMargin * 2
             };
             _planCardPanel.Paint += delegate(object sender, PaintEventArgs e)
             {
-                using (var pen = new Pen(AccentBorderColor, 1f))
+                int w = _planCardPanel.Width;
+                int h = _planCardPanel.Height;
+                using (var pen = new Pen(BorderColor, 1f))
                 {
-                    e.Graphics.DrawRectangle(pen, 0, 0, _planCardPanel.Width - 1, _planCardPanel.Height - 1);
+                    e.Graphics.DrawRectangle(pen, 0, 0, w - 1, h - 1);
+                }
+                bool planEnabled = _session != null && _session.PlanModeEnabled;
+                bool allDone = planEnabled && _session.Plan.TotalCount > 0 && _session.Plan.VisitedCount >= _session.Plan.TotalCount;
+                Color barColor = !planEnabled ? BorderColor : (allDone ? SuccessColor : AccentColor);
+                int barW = Math.Max(3, M(3));
+                using (var barBrush = new SolidBrush(barColor))
+                {
+                    e.Graphics.FillRectangle(barBrush, 0, 0, barW, h);
                 }
             };
             _planTitleLabel = new Label
             {
                 Text = "今日巡检计划",
-                Font = font13Bold,
-                ForeColor = AccentColor,
+                Font = font12Bold,
+                ForeColor = PrimaryTextColor,
                 AutoSize = true
             };
             _planToggleButton = new CheckBox
@@ -739,47 +852,66 @@ namespace InspectionWidget
                 Cursor = Cursors.Hand,
                 AccessibleName = "恢复或重试巡检进度"
             };
-            _planRecoveryButton.FlatAppearance.BorderColor = Color.FromArgb(0xE6, 0xC2, 0xC2);
+            _planRecoveryButton.FlatAppearance.BorderColor = UiTheme.ErrorBorderColor;
             _planRecoveryButton.FlatAppearance.BorderSize = 1;
             _planRecoveryButton.Click += OnPlanRecoveryClicked;
             _planProgressLabel = new Label
             {
-                Text = "今日进度",
+                Text = "已点过",
                 Font = font12,
                 ForeColor = SecondaryTextColor,
                 AutoSize = true
             };
             _planCountLabel = new Label
             {
-                Text = "已点过 0 / 0",
-                Font = font12Bold,
-                ForeColor = AccentColor,
+                Text = "0 / 0",
+                Font = Font18BoldMono,
+                ForeColor = PrimaryTextColor,
                 AutoSize = true
             };
             _planTrackPanel = new Panel
             {
-                BackColor = Color.FromArgb(0xD6, 0xE2, 0xEE)
+                BackColor = CardBackColor
+            };
+            _planTrackPanel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                int tw = _planTrackPanel.Width;
+                int th = _planTrackPanel.Height;
+                if (tw <= 0 || th <= 0) return;
+                UiTheme.FillRoundedPill(e.Graphics, UiTheme.TrackBackColor, new Rectangle(0, 0, tw, th));
+                int total = _session.Plan.TotalCount;
+                int visited = _session.Plan.VisitedCount;
+                if (total > 0 && visited > 0)
+                {
+                    int fillW = (int)Math.Round(tw * (Math.Min(visited, total) / (double)total));
+                    if (fillW < th) fillW = Math.Min(tw, th);
+                    Color fillColor = visited >= total ? SuccessColor : AccentColor;
+                    UiTheme.FillRoundedPill(e.Graphics, fillColor, new Rectangle(0, 0, fillW, th));
+                }
             };
             _planFillPanel = new Panel
             {
                 BackColor = AccentColor,
+                Visible = false,
                 Location = new Point(0, 0)
             };
             _planTrackPanel.Controls.Add(_planFillPanel);
 
-            _planActionPanel = new Panel { BackColor = AccentSoftColor };
+            _planActionPanel = new Panel { BackColor = CardBackColor };
             _showVisitedButton = new Button
             {
                 Text = "查看已点过",
                 Font = font11,
                 FlatStyle = FlatStyle.Flat,
-                BackColor = ButtonBackColor,
+                BackColor = PanelBackColor,
                 ForeColor = SecondaryTextColor,
                 Cursor = Cursors.Hand,
                 AccessibleName = "切换显示已点过设备"
             };
-            _showVisitedButton.FlatAppearance.BorderColor = AccentBorderColor;
+            _showVisitedButton.FlatAppearance.BorderColor = BorderColor;
             _showVisitedButton.FlatAppearance.BorderSize = 1;
+            _showVisitedButton.FlatAppearance.MouseOverBackColor = SurfaceColor;
             _showVisitedButton.Click += OnToggleShowVisitedClicked;
 
             _resetRoundButton = new Button
@@ -787,13 +919,14 @@ namespace InspectionWidget
                 Text = "重置本轮",
                 Font = font11,
                 FlatStyle = FlatStyle.Flat,
-                BackColor = ButtonBackColor,
+                BackColor = PanelBackColor,
                 ForeColor = ErrorColor,
                 Cursor = Cursors.Hand,
                 AccessibleName = "重置本轮巡检进度"
             };
-            _resetRoundButton.FlatAppearance.BorderColor = Color.FromArgb(0xE6, 0xC2, 0xC2);
+            _resetRoundButton.FlatAppearance.BorderColor = UiTheme.ErrorBorderColor;
             _resetRoundButton.FlatAppearance.BorderSize = 1;
+            _resetRoundButton.FlatAppearance.MouseOverBackColor = UiTheme.ErrorSoftColor;
             _resetRoundButton.Click += OnResetRoundClicked;
 
             _planActionPanel.Controls.Add(_showVisitedButton);
@@ -818,7 +951,7 @@ namespace InspectionWidget
             _scrollHost.Controls.Add(_planCardPanel);
 
             // 3. 凭据区（整行点击折叠，两列快捷复制）
-            _credentialHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 24) };
+            _credentialHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 22) };
             var credentialHeaderLabel = _credentialHeaderLabel = new Label
             {
                 Text = "凭据",
@@ -836,10 +969,16 @@ namespace InspectionWidget
             };
             _credentialArrowLabel = new Label
             {
-                Text = "˅",
-                Font = font13,
-                ForeColor = WeakTextColor,
-                AutoSize = true
+                Text = string.Empty,
+                AutoSize = false,
+                Size = new Size(14, 14),
+                Cursor = Cursors.Hand
+            };
+            _credentialArrowLabel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var lbl = (Label)sender;
+                PaintCollapseChevron(e.Graphics, lbl.Width, lbl.Height, WeakTextColor,
+                    _config != null && _config.IsCredentialCollapsed);
             };
             _credentialHeaderPanel.Controls.Add(credentialHeaderLabel);
             _credentialHeaderPanel.Controls.Add(_credentialSubLabel);
@@ -854,7 +993,7 @@ namespace InspectionWidget
             _scrollHost.Controls.Add(_credentialZonePanel);
 
             // 4. 截图设备区（整行点击折叠）
-            var deviceHeaderPanel = _deviceHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 24) };
+            var deviceHeaderPanel = _deviceHeaderPanel = new Panel { BackColor = PanelBackColor, Size = new Size(PanelLayout.SchemeBPanelWidth, 22) };
             _deviceHeaderLabel = new Label
             {
                 Text = "截图设备",
@@ -872,10 +1011,16 @@ namespace InspectionWidget
             };
             _deviceArrowLabel = new Label
             {
-                Text = "˅",
-                Font = font13,
-                ForeColor = WeakTextColor,
-                AutoSize = true
+                Text = string.Empty,
+                AutoSize = false,
+                Size = new Size(14, 14),
+                Cursor = Cursors.Hand
+            };
+            _deviceArrowLabel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var lbl = (Label)sender;
+                PaintCollapseChevron(e.Graphics, lbl.Width, lbl.Height, WeakTextColor,
+                    _config != null && _config.IsDeviceCollapsed);
             };
             deviceHeaderPanel.Controls.Add(_deviceHeaderLabel);
             deviceHeaderPanel.Controls.Add(_deviceSubLabel);
@@ -893,13 +1038,13 @@ namespace InspectionWidget
             // 底部固定区：反馈行 + 主操作「打开巡检文件夹」按钮 + 路径行
             var bottomPanel = _bottomPanel = new Panel
             {
-                BackColor = SurfaceColor,
+                BackColor = CardBackColor,
                 Size = new Size(PanelLayout.SchemeBPanelWidth, PanelLayout.SchemeBFooterHeight)
             };
             bottomPanel.Name = "BottomPanel";
             bottomPanel.Paint += delegate(object sender, PaintEventArgs e)
             {
-                using (var pen = new Pen(BorderSoftColor, 1f))
+                using (var pen = new Pen(BorderColor, 1f))
                 {
                     e.Graphics.DrawLine(pen, 1, 0, bottomPanel.Width - 2, 0);
                 }
@@ -908,7 +1053,7 @@ namespace InspectionWidget
             {
                 Font = font12,
                 ForeColor = SecondaryTextColor,
-                BackColor = SurfaceColor,
+                BackColor = CardBackColor,
                 AutoSize = false,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleLeft
@@ -916,16 +1061,22 @@ namespace InspectionWidget
             _feedbackLabel.Click += OnFeedbackLabelClicked;
             _openFolderButton = new Button
             {
-                Text = "打开巡检文件夹 ↗",
+                Text = "打开巡检文件夹",
                 Font = font13Bold,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = AccentColor,
                 ForeColor = Color.White,
+                Padding = new Padding(M(22), 0, M(26), 0),
                 Cursor = Cursors.Hand,
                 AccessibleName = "打开巡检文件夹"
             };
             _openFolderButton.FlatAppearance.BorderSize = 0;
             _openFolderButton.FlatAppearance.MouseOverBackColor = UiTheme.AccentHoverColor;
+            _openFolderButton.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var btn = (Button)sender;
+                PaintFolderOrExternalIcon(e.Graphics, btn.Width, btn.Height, Color.White, _configWriteProtected);
+            };
             _openFolderButton.Click += OnRootLabelClicked;
 
             _rootToolTip = new ToolTip();
@@ -933,7 +1084,7 @@ namespace InspectionWidget
             {
                 Font = font11,
                 ForeColor = WeakTextColor,
-                BackColor = SurfaceColor,
+                BackColor = CardBackColor,
                 AutoSize = false,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -968,10 +1119,10 @@ namespace InspectionWidget
 
             _titleBarPanel.Size = new Size(w, M(PanelLayout.SchemeBHeaderHeight));
             _titleLabel.Font = Font15Bold;
-            _titleLabel.Location = new Point(M(14), M(10));
+            _titleLabel.Location = new Point(margin, M(9));
             _dateLabel.Font = Font12;
             _dateLabel.Text = FormatFullDate(_clock.Now);
-            _dateLabel.Location = new Point(M(14), M(34));
+            _dateLabel.Location = new Point(margin, M(31));
             ApplySettingsButtonVisual();
             int btnSize = M(PanelLayout.TitleBarButtonSize);
             int btnTop = M(8);
@@ -986,39 +1137,51 @@ namespace InspectionWidget
 
             _quickLinkHeaderLabel.Font = Font12Bold;
             _quickLinkSubLabel.Font = Font11;
-            _planTitleLabel.Font = Font13Bold;
+            _planTitleLabel.Font = Font12Bold;
             _planRecoveryButton.Font = Font11;
             _planToggleButton.Font = Font11;
             _planProgressLabel.Font = Font12;
-            _planCountLabel.Font = Font12Bold;
+            _planCountLabel.Font = Font18BoldMono;
             _showVisitedButton.Font = Font11;
             _resetRoundButton.Font = Font11;
             _planDisabledHintLabel.Font = Font11;
 
             _credentialHeaderLabel.Font = Font12Bold;
             _credentialSubLabel.Font = Font11;
-            _credentialArrowLabel.Font = Font13;
+            _credentialArrowLabel.Size = new Size(M(14), M(14));
             _deviceHeaderLabel.Font = Font12Bold;
             _deviceSubLabel.Font = Font11;
-            _deviceArrowLabel.Font = Font13;
+            _deviceArrowLabel.Size = new Size(M(14), M(14));
 
             _bottomPanel.Size = new Size(w, M(PanelLayout.SchemeBFooterHeight));
             _feedbackLabel.Font = Font12;
-            _feedbackLabel.Size = new Size(fullContent, M(24));
-            _feedbackLabel.Location = new Point(margin, M(8));
+            _feedbackLabel.Size = new Size(fullContent, M(22));
+            _feedbackLabel.Location = new Point(margin, M(6));
             _openFolderButton.Font = Font13Bold;
-            _openFolderButton.Size = new Size(fullContent, M(36));
-            _openFolderButton.Location = new Point(margin, M(36));
+            _openFolderButton.Size = new Size(fullContent, M(34));
+            _openFolderButton.Padding = new Padding(M(22), 0, M(26), 0);
+            _openFolderButton.Location = new Point(margin, M(32));
             _rootLabel.Font = Font11;
-            _rootLabel.Size = new Size(fullContent, M(20));
-            _rootLabel.Location = new Point(margin, M(78));
+            _rootLabel.Size = new Size(fullContent, M(18));
+            _rootLabel.Location = new Point(margin, M(72));
         }
 
         private int ComputePlanCardHeight()
         {
             if (_session != null && _session.PlanModeEnabled)
-                return M(104);
-            return M(66);
+            {
+                int padY = M(8);
+                int row2Y = padY + M(22);
+                int countH = _planCountLabel != null
+                    ? (_planCountLabel.PreferredHeight > 0 ? _planCountLabel.PreferredHeight : _planCountLabel.Height)
+                    : 0;
+                int barY = row2Y + Math.Max(M(24), countH + M(2));
+                int trackH = Math.Max(4, M(6));
+                int actionY = barY + trackH + M(8);
+                int actionH = M(22);
+                return Math.Max(M(100), actionY + actionH + padY);
+            }
+            return M(58);
         }
 
         private int ComputeQuickLinksHeight()
@@ -1060,17 +1223,17 @@ namespace InspectionWidget
 
         private int ComputeScrollContentHeight()
         {
-            int headerH = M(24);
+            int headerH = M(22);
             int quickH = ComputeQuickLinksHeight();
             int planH = ComputePlanCardHeight();
             int credH = ComputeCredentialsZoneHeight();
             int devH = ComputeDevicesZoneHeight();
 
-            int y = M(10);
-            y += headerH + M(4) + quickH + M(12);
-            y += planH + M(12);
-            y += headerH + (credH > 0 ? M(4) + credH : 0) + M(12);
-            y += headerH + (devH > 0 ? M(4) + devH : 0) + M(12);
+            int y = M(8);
+            y += headerH + M(4) + quickH + M(10);
+            y += planH + M(10);
+            y += headerH + (credH > 0 ? M(4) + credH : 0) + M(10);
+            y += headerH + (devH > 0 ? M(4) + devH : 0) + M(10);
             return y;
         }
 
@@ -1097,13 +1260,13 @@ namespace InspectionWidget
             int innerWidth = Math.Max(M(180), hostWidth - margin * 2);
 
             _titleBarPanel.Location = new Point(0, 0);
-            int y = M(10);
-            int headerH = M(24);
+            int y = M(8);
+            int headerH = M(22);
 
             int quickHeaderY = y;
             _quickLinkHeaderPanel.Size = new Size(hostWidth, headerH);
-            _quickLinkHeaderLabel.Location = new Point(margin, M(3));
-            _quickLinkSubLabel.Location = new Point(Math.Max(margin, hostWidth - margin - _quickLinkSubLabel.Width), M(4));
+            _quickLinkHeaderLabel.Location = new Point(margin, M(2));
+            _quickLinkSubLabel.Location = new Point(Math.Max(margin, hostWidth - margin - _quickLinkSubLabel.Width), M(3));
             y += headerH + M(4);
 
             int quickH = ComputeQuickLinksHeight();
@@ -1111,18 +1274,18 @@ namespace InspectionWidget
             _quickLinkZonePanel.Size = new Size(hostWidth, quickH);
             LayoutTwoColumnControls(_quickLinkControls, _quickLinkZonePanel, innerWidth,
                 M(PanelLayout.SchemeBQuickLinkHeight), M(PanelLayout.SchemeBQuickLinkGap));
-            y += quickH + M(12);
+            y += quickH + M(10);
 
             int planH = ComputePlanCardHeight();
             int planCardY = y;
             _planCardPanel.Size = new Size(innerWidth, planH);
             LayoutPlanCardInner(innerWidth);
-            y += planH + M(12);
+            y += planH + M(10);
 
             int credHeaderY = y;
             _credentialHeaderPanel.Size = new Size(hostWidth, headerH);
-            _credentialHeaderLabel.Location = new Point(margin, M(3));
-            _credentialArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
+            _credentialHeaderLabel.Location = new Point(margin, M(2));
+            _credentialArrowLabel.Location = new Point(hostWidth - margin - _credentialArrowLabel.Width, M(4));
             PositionCredentialSubLabel();
             y += headerH;
 
@@ -1132,15 +1295,15 @@ namespace InspectionWidget
             _credentialZonePanel.Size = new Size(hostWidth, credH);
             LayoutTwoColumnControls(_credentialControls, _credentialZonePanel, innerWidth,
                 M(PanelLayout.SchemeBCredentialHeight), M(PanelLayout.SchemeBCredentialGap));
-            y += credH + M(12);
+            y += credH + M(10);
 
             int devHeaderY = y;
             _deviceHeaderPanel.Size = new Size(hostWidth, headerH);
-            _deviceHeaderLabel.Location = new Point(margin, M(3));
-            _deviceArrowLabel.Location = new Point(hostWidth - margin - M(14), M(2));
+            _deviceHeaderLabel.Location = new Point(margin, M(2));
+            _deviceArrowLabel.Location = new Point(hostWidth - margin - _deviceArrowLabel.Width, M(4));
             _deviceSubLabel.Location = new Point(
                 Math.Max(_deviceHeaderLabel.Right + M(8), _deviceArrowLabel.Left - _deviceSubLabel.Width - M(6)),
-                M(4));
+                M(3));
             y += headerH;
 
             int devH = ComputeDevicesZoneHeight();
@@ -1148,7 +1311,7 @@ namespace InspectionWidget
             int devZoneY = y;
             _deviceZonePanel.Size = new Size(hostWidth, devH);
             LayoutDeviceZoneInner(innerWidth);
-            y += devH + M(12);
+            y += devH + M(10);
 
             _scrollHost.SuspendLayout();
             try
@@ -1184,20 +1347,21 @@ namespace InspectionWidget
 
         private void LayoutPlanCardInner(int cardWidth)
         {
-            int padX = M(12);
-            int padY = M(10);
-            int innerW = Math.Max(M(120), cardWidth - padX * 2);
+            int leftPad = M(14);
+            int rightPad = M(12);
+            int padY = M(8);
+            int innerW = Math.Max(M(120), cardWidth - leftPad - rightPad);
 
-            _planTitleLabel.Location = new Point(padX, padY + M(2));
-            int toggleW = M(56);
-            int toggleH = M(22);
+            _planTitleLabel.Location = new Point(leftPad, padY + M(2));
+            int toggleW = M(54);
+            int toggleH = M(20);
             _planToggleButton.Size = new Size(toggleW, toggleH);
-            _planToggleButton.Location = new Point(cardWidth - padX - toggleW, padY);
+            _planToggleButton.Location = new Point(cardWidth - rightPad - toggleW, padY);
             if (_planRecoveryButton != null && _planRecoveryButton.Visible)
             {
-                int recW = M(76);
+                int recW = M(72);
                 _planRecoveryButton.Size = new Size(recW, toggleH);
-                _planRecoveryButton.Location = new Point(Math.Max(padX, _planToggleButton.Left - recW - M(6)), padY);
+                _planRecoveryButton.Location = new Point(Math.Max(leftPad, _planToggleButton.Left - recW - M(6)), padY);
             }
 
             bool enabled = _session != null && _session.PlanModeEnabled;
@@ -1209,35 +1373,40 @@ namespace InspectionWidget
 
             if (!enabled)
             {
-                _planDisabledHintLabel.Size = new Size(innerW, M(22));
-                _planDisabledHintLabel.Location = new Point(padX, padY + M(28));
+                _planDisabledHintLabel.Size = new Size(innerW, M(20));
+                _planDisabledHintLabel.Location = new Point(leftPad, padY + M(24));
                 return;
             }
 
-            int row2Y = padY + M(28);
-            _planProgressLabel.Location = new Point(padX, row2Y);
-            _planCountLabel.Location = new Point(Math.Max(padX, cardWidth - padX - _planCountLabel.Width), row2Y);
+            int row2Y = padY + M(22);
+            int countH = _planCountLabel.PreferredHeight > 0 ? _planCountLabel.PreferredHeight : _planCountLabel.Height;
+            int countW = _planCountLabel.PreferredWidth > 0 ? _planCountLabel.PreferredWidth : _planCountLabel.Width;
+            int progressH = _planProgressLabel.PreferredHeight > 0 ? _planProgressLabel.PreferredHeight : _planProgressLabel.Height;
+            _planCountLabel.Location = new Point(Math.Max(leftPad, cardWidth - rightPad - countW), row2Y);
+            _planProgressLabel.Location = new Point(leftPad, row2Y + Math.Max(0, (countH - progressH) / 2));
 
-            int barY = row2Y + M(20);
-            _planTrackPanel.Size = new Size(innerW, M(4));
-            _planTrackPanel.Location = new Point(padX, barY);
+            int barY = row2Y + Math.Max(M(24), countH + M(2));
+            int trackH = Math.Max(4, M(6));
+            _planTrackPanel.Size = new Size(innerW, trackH);
+            _planTrackPanel.Location = new Point(leftPad, barY);
+            _planTrackPanel.Invalidate();
             int total = _session.Plan.TotalCount;
             int visited = _session.Plan.VisitedCount;
             int fillW = total > 0 ? (int)Math.Round(innerW * ((double)visited / total)) : 0;
-            if (visited > 0 && fillW < M(4)) fillW = M(4);
-            _planFillPanel.Size = new Size(Math.Min(innerW, fillW), M(4));
+            if (visited > 0 && fillW < trackH) fillW = trackH;
+            _planFillPanel.Size = new Size(Math.Min(innerW, fillW), trackH);
 
-            int actionY = barY + M(10);
-            _planActionPanel.Size = new Size(innerW, M(26));
-            _planActionPanel.Location = new Point(padX, actionY);
-            int resetW = M(72);
-            int showW = M(88);
-            _resetRoundButton.Size = new Size(resetW, M(24));
+            int actionY = barY + trackH + M(8);
+            _planActionPanel.Size = new Size(innerW, M(22));
+            _planActionPanel.Location = new Point(leftPad, actionY);
+            int resetW = M(68);
+            int showW = M(82);
+            _resetRoundButton.Size = new Size(resetW, M(20));
             _resetRoundButton.Location = new Point(innerW - resetW, 0);
             _showVisitedButton.Visible = _session.HideVisitedDevices;
             if (_showVisitedButton.Visible)
             {
-                _showVisitedButton.Size = new Size(showW, M(24));
+                _showVisitedButton.Size = new Size(showW, M(20));
                 _showVisitedButton.Location = new Point(Math.Max(0, _resetRoundButton.Left - showW - M(6)), 0);
             }
         }
@@ -1302,8 +1471,8 @@ namespace InspectionWidget
 
             if (row.UnmarkButton != null && row.UnmarkButton.Visible)
             {
-                int btnW = M(62);
-                int btnH = M(24);
+                int btnW = M(56);
+                int btnH = M(20);
                 row.UnmarkButton.Size = new Size(btnW, btnH);
                 row.UnmarkButton.Location = new Point(rightEdge - btnW, (height - btnH) / 2);
                 rightEdge = row.UnmarkButton.Left - M(6);
@@ -1592,19 +1761,123 @@ namespace InspectionWidget
                 button.Paint += delegate(object sender, PaintEventArgs e)
                 {
                     var btn = (Button)sender;
-                    TextRenderer.DrawText(
-                        e.Graphics,
-                        "↗",
-                        Font11,
-                        new Rectangle(btn.Width - M(18), 0, M(14), btn.Height),
-                        WeakTextColor,
-                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    PaintExternalLinkIcon(e.Graphics, btn.Width, btn.Height, WeakTextColor);
                 };
                 button.Click += OnQuickLinkButtonClicked;
                 _quickLinkControls.Add(button);
                 _quickLinkZonePanel.Controls.Add(button);
                 if (!string.IsNullOrEmpty(entry.Url))
                     _deviceToolTip.SetToolTip(button, entry.Url);
+            }
+        }
+
+        private void PaintCollapseChevron(Graphics g, int width, int height, Color color, bool collapsed)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float stroke = Math.Max(1.3f, (float)(1.4 * ScaleFactor));
+            float cx = width / 2f;
+            float cy = height / 2f;
+            float arm = Math.Max(2.5f, (float)(3.0 * ScaleFactor));
+            using (var pen = new Pen(color, stroke))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                if (collapsed)
+                {
+                    g.DrawLines(pen, new[]
+                    {
+                        new PointF(cx - arm * 0.5f, cy - arm),
+                        new PointF(cx + arm * 0.6f, cy),
+                        new PointF(cx - arm * 0.5f, cy + arm)
+                    });
+                }
+                else
+                {
+                    g.DrawLines(pen, new[]
+                    {
+                        new PointF(cx - arm, cy - arm * 0.45f),
+                        new PointF(cx, cy + arm * 0.6f),
+                        new PointF(cx + arm, cy - arm * 0.45f)
+                    });
+                }
+            }
+        }
+
+        private void PaintExternalLinkIcon(Graphics g, int width, int height, Color color)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float box = Math.Max(8f, M(9));
+            float right = width - M(8);
+            float left = right - box;
+            float top = (height - box) / 2f;
+            float bottom = top + box;
+            float stroke = Math.Max(1.15f, (float)(1.25 * ScaleFactor));
+            using (var pen = new Pen(color, stroke))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                float midX = left + box * 0.5f;
+                float midY = top + box * 0.5f;
+                // 简洁外链方框缺口 + 右上箭头
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(midX - 0.5f, top + 1f),
+                    new PointF(left, top + 1f),
+                    new PointF(left, bottom),
+                    new PointF(right - 1f, bottom),
+                    new PointF(right - 1f, midY + 0.5f)
+                });
+                g.DrawLine(pen, midX - 0.5f, midY + 0.5f, right, top);
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(midX + 1f, top),
+                    new PointF(right, top),
+                    new PointF(right, midY - 1f)
+                });
+            }
+        }
+
+        private void PaintFolderOrExternalIcon(Graphics g, int width, int height, Color color, bool isWarning)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            int size = Math.Max(10, M(11));
+            int right = width - M(14);
+            int left = right - size;
+            int top = (height - size) / 2;
+            int bottom = top + size;
+            int midY = top + size / 2;
+            float stroke = Math.Max(1.4f, (float)(1.5 * ScaleFactor));
+            using (var pen = new Pen(color, stroke))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                if (isWarning)
+                {
+                    // 警示感叹号圈（使用 FillEllipse 画底部圆点，避免 0 长度线段在不同 GDI+ 缩放下丢失）
+                    g.DrawEllipse(pen, left, top, size, size);
+                    float cx = left + size / 2f;
+                    g.DrawLine(pen, cx, top + M(2), cx, bottom - Math.Max(3.5f, M(4)));
+                    float dotD = Math.Max(1.8f, (float)(1.8 * ScaleFactor));
+                    using (var dotBrush = new SolidBrush(color))
+                    {
+                        g.FillEllipse(dotBrush, cx - dotD / 2f, bottom - dotD - Math.Max(1f, M(1)), dotD, dotD);
+                    }
+                }
+                else
+                {
+                    // 右指箭头（表示打开外部目录）
+                    g.DrawLine(pen, left, midY, right, midY);
+                    int head = Math.Max(3, M(4));
+                    g.DrawLines(pen, new[]
+                    {
+                        new Point(right - head, midY - head),
+                        new Point(right, midY),
+                        new Point(right - head, midY + head)
+                    });
+                }
             }
         }
 
@@ -1616,17 +1889,20 @@ namespace InspectionWidget
             bool enabled = _session.PlanModeEnabled;
             _planToggleButton.Checked = enabled;
             _planToggleButton.Text = enabled ? "已开启" : "已关闭";
-            _planToggleButton.BackColor = enabled ? AccentColor : ButtonBackColor;
-            _planToggleButton.ForeColor = enabled ? Color.White : SecondaryTextColor;
-            _planToggleButton.FlatAppearance.BorderColor = enabled ? AccentColor : BorderColor;
+            _planToggleButton.BackColor = enabled ? AccentSoftColor : SurfaceColor;
+            _planToggleButton.ForeColor = enabled ? AccentColor : SecondaryTextColor;
+            _planToggleButton.FlatAppearance.BorderColor = enabled ? UiTheme.AccentBorderColor : BorderColor;
 
             int visited = _session.Plan.VisitedCount;
             int total = _session.Plan.TotalCount;
             bool complete = enabled && total > 0 && visited >= total;
 
-            _planCountLabel.Text = "已点过 " + visited + " / " + total;
+            _planProgressLabel.Text = "已点过";
+            _planCountLabel.Text = visited + " / " + total;
             _planCountLabel.ForeColor = complete ? SuccessColor : AccentColor;
             _planFillPanel.BackColor = complete ? SuccessColor : AccentColor;
+            _planTrackPanel.Invalidate();
+            _planCardPanel.Invalidate();
 
             _showVisitedButton.Text = _session.ShowVisitedOverride ? "只看未点过" : "查看已点过";
             _showVisitedButton.Visible = enabled && _session.HideVisitedDevices;
@@ -1758,14 +2034,18 @@ namespace InspectionWidget
             };
             card.Paint += delegate(object sender, PaintEventArgs e)
             {
-                using (var pen = new Pen(Color.FromArgb(0xB8, 0xDB, 0xC8), 1f))
+                using (var pen = new Pen(UiTheme.SuccessBorderColor, 1f))
                 {
                     e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+                }
+                using (var bar = new SolidBrush(SuccessColor))
+                {
+                    e.Graphics.FillRectangle(bar, 0, 0, Math.Max(3, M(3)), card.Height);
                 }
             };
             var label = new Label
             {
-                Text = "✓ 本轮已全部点过",
+                Text = "本轮已全部点过",
                 Font = Font13Bold,
                 ForeColor = SuccessColor,
                 Dock = DockStyle.Fill,
@@ -1775,15 +2055,34 @@ namespace InspectionWidget
             return card;
         }
 
+        private void UpdateDeviceRowBackColor(DeviceRowWidget widget)
+        {
+            if (widget == null || widget.Panel == null)
+                return;
+            bool waitingTarget = _stateMachine.State == PanelState.Waiting
+                && string.Equals(widget.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
+            bool capturingTarget = _stateMachine.State == PanelState.Capturing
+                && string.Equals(widget.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
+            if (waitingTarget || capturingTarget)
+            {
+                widget.Panel.BackColor = widget.BaseBackColor;
+                return;
+            }
+            widget.Panel.BackColor = widget.Hovered && widget.Panel.Enabled
+                ? UiTheme.PageBackColor
+                : widget.BaseBackColor;
+        }
+
         private DeviceRowWidget CreateDeviceRowWidget(DeviceDisplayItem item)
         {
             string device = item.Name;
-            var rowPanel = new Panel
+            var rowPanel = new DeviceRowPanel
             {
                 BackColor = ButtonBackColor,
                 Size = new Size(ContentWidthNow, M(PanelLayout.SchemeBDeviceRowHeight)),
                 Cursor = Cursors.Hand,
-                AccessibleName = "设备：" + device
+                AccessibleName = "设备：" + device,
+                ActivateAction = delegate { OnDeviceRowActivated(device); }
             };
             var nameLabel = new Label
             {
@@ -1797,7 +2096,7 @@ namespace InspectionWidget
             };
             var statusLabel = new Label
             {
-                Text = item.Visited ? "✓ 已点过" : "待截图",
+                Text = item.Visited ? "已点过" : "待截图",
                 Font = Font11,
                 ForeColor = item.Visited ? SuccessColor : WeakTextColor,
                 AutoSize = false,
@@ -1809,14 +2108,15 @@ namespace InspectionWidget
                 Text = "恢复未点",
                 Font = Font11,
                 FlatStyle = FlatStyle.Flat,
-                BackColor = SurfaceColor,
+                BackColor = PanelBackColor,
                 ForeColor = SecondaryTextColor,
                 Visible = item.Visited,
                 Cursor = Cursors.Hand,
                 AccessibleName = "恢复未点：" + device
             };
-            unmarkBtn.FlatAppearance.BorderColor = BorderColor;
+            unmarkBtn.FlatAppearance.BorderColor = BorderSoftColor;
             unmarkBtn.FlatAppearance.BorderSize = 1;
+            unmarkBtn.FlatAppearance.MouseOverBackColor = SurfaceColor;
 
             var widget = new DeviceRowWidget
             {
@@ -1828,11 +2128,37 @@ namespace InspectionWidget
                 UnmarkButton = unmarkBtn
             };
 
+            EventHandler onEnter = delegate
+            {
+                if (!widget.Hovered)
+                {
+                    widget.Hovered = true;
+                    UpdateDeviceRowBackColor(widget);
+                }
+            };
+            EventHandler onLeave = delegate
+            {
+                if (!rowPanel.ClientRectangle.Contains(rowPanel.PointToClient(Cursor.Position)))
+                {
+                    if (widget.Hovered)
+                    {
+                        widget.Hovered = false;
+                        UpdateDeviceRowBackColor(widget);
+                    }
+                }
+            };
+
             rowPanel.Tag = widget;
             rowPanel.Paint += OnDeviceRowPaint;
-            rowPanel.Click += delegate { OnDeviceRowActivated(device); };
-            nameLabel.Click += delegate { OnDeviceRowActivated(device); };
-            statusLabel.Click += delegate { OnDeviceRowActivated(device); };
+            rowPanel.MouseEnter += onEnter;
+            rowPanel.MouseLeave += onLeave;
+            nameLabel.MouseEnter += onEnter;
+            nameLabel.MouseLeave += onLeave;
+            statusLabel.MouseEnter += onEnter;
+            statusLabel.MouseLeave += onLeave;
+            rowPanel.Click += delegate { rowPanel.Focus(); OnDeviceRowActivated(device); };
+            nameLabel.Click += delegate { rowPanel.Focus(); OnDeviceRowActivated(device); };
+            statusLabel.Click += delegate { rowPanel.Focus(); OnDeviceRowActivated(device); };
             unmarkBtn.Click += delegate { OnUnmarkDeviceClicked(device); };
 
             rowPanel.Controls.Add(nameLabel);
@@ -1855,12 +2181,31 @@ namespace InspectionWidget
             bool capturingTarget = _stateMachine.State == PanelState.Capturing
                 && string.Equals(widget.Device, _stateMachine.CurrentDevice, StringComparison.OrdinalIgnoreCase);
 
-            Color border = waitingTarget
-                ? AccentColor
-                : (capturingTarget ? WarningColor : BorderColor);
-            using (var pen = new Pen(border, waitingTarget ? 1.5f : 1f))
+            if (waitingTarget || capturingTarget)
             {
-                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
+                Color activeColor = waitingTarget ? WarningColor : AccentColor;
+                using (var pen = new Pen(activeColor, 2f))
+                {
+                    e.Graphics.DrawRectangle(pen, 1, 1, panel.Width - 3, panel.Height - 3);
+                }
+                using (var bar = new SolidBrush(activeColor))
+                {
+                    e.Graphics.FillRectangle(bar, 0, 0, Math.Max(3, M(3)), panel.Height);
+                }
+            }
+            else
+            {
+                using (var pen = new Pen(BorderColor, 1f))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
+                }
+                if (panel.Focused)
+                {
+                    using (var focusPen = new Pen(UiTheme.AccentBorderColor, 1f))
+                    {
+                        e.Graphics.DrawRectangle(focusPen, 2, 2, panel.Width - 5, panel.Height - 5);
+                    }
+                }
             }
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1869,6 +2214,14 @@ namespace InspectionWidget
             int cy = (panel.Height - circleSize) / 2;
 
             if (waitingTarget)
+            {
+                using (var brush = new SolidBrush(WarningColor))
+                    e.Graphics.FillEllipse(brush, cx, cy, circleSize, circleSize);
+                int inner = Math.Max(4, M(6));
+                using (var brush = new SolidBrush(Color.White))
+                    e.Graphics.FillEllipse(brush, cx + (circleSize - inner) / 2, cy + (circleSize - inner) / 2, inner, inner);
+            }
+            else if (capturingTarget)
             {
                 using (var brush = new SolidBrush(AccentColor))
                     e.Graphics.FillEllipse(brush, cx, cy, circleSize, circleSize);
@@ -1895,7 +2248,7 @@ namespace InspectionWidget
             }
             else
             {
-                using (var pen = new Pen(Color.FromArgb(0xB8, 0xC4, 0xD0), Math.Max(1f, (float)ScaleFactor)))
+                using (var pen = new Pen(BorderColor, Math.Max(1f, (float)ScaleFactor)))
                     e.Graphics.DrawEllipse(pen, cx, cy, circleSize, circleSize);
             }
         }
@@ -1974,6 +2327,7 @@ namespace InspectionWidget
                     btn.ForeColor = ErrorColor;
                     btn.Font = Font12;
                     btn.FlatAppearance.BorderColor = BorderColor;
+                    btn.FlatAppearance.MouseOverBackColor = SurfaceColor;
                 }
                 else if (active)
                 {
@@ -1981,6 +2335,7 @@ namespace InspectionWidget
                     btn.ForeColor = AccentColor;
                     btn.Font = Font12Bold;
                     btn.FlatAppearance.BorderColor = AccentColor;
+                    btn.FlatAppearance.MouseOverBackColor = AccentSoftColor;
                 }
                 else
                 {
@@ -1988,6 +2343,7 @@ namespace InspectionWidget
                     btn.ForeColor = PrimaryTextColor;
                     btn.Font = Font12;
                     btn.FlatAppearance.BorderColor = BorderColor;
+                    btn.FlatAppearance.MouseOverBackColor = SurfaceColor;
                 }
                 if (_deviceToolTip != null)
                 {
@@ -2011,7 +2367,9 @@ namespace InspectionWidget
             int iconY = (btn.Height - M(12)) / 2;
             int backW = M(7);
             int backH = M(9);
-            using (var pen = new Pen(ink, 1f))
+            float stroke = Math.Max(1f, (float)ScaleFactor);
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using (var pen = new Pen(ink, stroke))
             {
                 e.Graphics.DrawRectangle(pen, iconX, iconY, backW, backH);
                 using (var bg = new SolidBrush(btn.BackColor))
@@ -2047,7 +2405,8 @@ namespace InspectionWidget
 
         private void UpdateCredentialHeader()
         {
-            _credentialArrowLabel.Text = _config.IsCredentialCollapsed ? "›" : "˅";
+            if (_credentialArrowLabel != null)
+                _credentialArrowLabel.Invalidate();
             if (_credentialSubLabel == null)
                 return;
             if (!string.IsNullOrEmpty(_copiedCredentialTitle))
@@ -2055,7 +2414,7 @@ namespace InspectionWidget
                 if (_config.AutoClearClipboard)
                 {
                     _credentialSubLabel.Text = _credentialCountdownSeconds > 0
-                        ? "已复制 · " + _credentialCountdownSeconds + " 秒后清空"
+                        ? "已复制，" + _credentialCountdownSeconds + " 秒后清空"
                         : "正在清空剪贴板…";
                 }
                 else
@@ -2080,12 +2439,13 @@ namespace InspectionWidget
                 return;
             _credentialSubLabel.Location = new Point(
                 Math.Max(_credentialHeaderLabel.Right + M(8), _credentialArrowLabel.Left - _credentialSubLabel.Width - M(6)),
-                M(4));
+                M(3));
         }
 
         private void UpdateDeviceHeader()
         {
-            _deviceArrowLabel.Text = _config.IsDeviceCollapsed ? "›" : "˅";
+            if (_deviceArrowLabel != null)
+                _deviceArrowLabel.Invalidate();
         }
 
         /// <summary>
@@ -2110,15 +2470,17 @@ namespace InspectionWidget
                 _openFolderButton.Text = "重试读取配置";
                 if (_rootToolTip != null)
                     _rootToolTip.SetToolTip(_rootLabel, _configLoadError ?? string.Empty);
+                _openFolderButton.Invalidate();
                 return;
             }
-            _openFolderButton.Text = "打开巡检文件夹 ↗";
+            _openFolderButton.Text = "打开巡检文件夹";
             _rootLabel.Text = string.IsNullOrEmpty(_config.RootPath)
                 ? "尚未设置保存目录"
                 : _config.RootPath;
             _rootLabel.ForeColor = WeakTextColor;
             if (_rootToolTip != null)
                 _rootToolTip.SetToolTip(_rootLabel, string.IsNullOrEmpty(_config.RootPath) ? string.Empty : _config.RootPath);
+            _openFolderButton.Invalidate();
         }
 
         // ---------- 交互 ----------
@@ -2191,7 +2553,7 @@ namespace InspectionWidget
                     RebuildPlanCard();
                     ApplyHeightAnchored();
                     RestoreOrClearAfterProgressRecovery();
-                    ShowSuccessFeedback("✓ 巡检进度已重新保存");
+                    ShowSuccessFeedback("巡检进度已重新保存");
                 }
                 else
                 {
@@ -2655,11 +3017,11 @@ namespace InspectionWidget
                 ? "请点击要截图的窗口"
                 : (capturing ? "正在截图…" : "截图设备");
             _deviceHeaderLabel.Font = waiting ? Font13Bold : Font12Bold;
-            _deviceHeaderLabel.ForeColor = waiting ? AccentColor : (capturing ? WarningColor : SecondaryTextColor);
+            _deviceHeaderLabel.ForeColor = waiting ? WarningColor : (capturing ? AccentColor : SecondaryTextColor);
             _deviceSubLabel.Text = waiting
                 ? (_stateMachine.CurrentDevice ?? "等待选窗")
                 : (capturing ? (_stateMachine.CurrentDevice ?? "截图中") : "点击设备，再选窗口");
-            _deviceSubLabel.ForeColor = waiting ? AccentColor : WeakTextColor;
+            _deviceSubLabel.ForeColor = waiting ? WarningColor : (capturing ? AccentColor : WeakTextColor);
 
             for (int i = 0; i < _deviceRows.Count; i++)
             {
@@ -2669,40 +3031,49 @@ namespace InspectionWidget
 
                 if (isWaitingTarget)
                 {
-                    row.Panel.BackColor = AccentSoftColor;
-                    row.NameLabel.ForeColor = AccentColor;
+                    row.BaseBackColor = WarningSoftColor;
+                    row.NameLabel.ForeColor = WarningColor;
                     row.NameLabel.Font = Font13Bold;
                     row.StatusLabel.Text = "等待选窗";
-                    row.StatusLabel.ForeColor = AccentColor;
+                    row.StatusLabel.ForeColor = WarningColor;
                 }
                 else if (isCapturingTarget)
                 {
-                    row.Panel.BackColor = WarningSoftColor;
-                    row.NameLabel.ForeColor = WarningColor;
+                    row.BaseBackColor = AccentSoftColor;
+                    row.NameLabel.ForeColor = AccentColor;
                     row.NameLabel.Font = Font13Bold;
                     row.StatusLabel.Text = "截图中";
-                    row.StatusLabel.ForeColor = WarningColor;
+                    row.StatusLabel.ForeColor = AccentColor;
+                }
+                else if (row.Visited)
+                {
+                    row.BaseBackColor = UiTheme.VisitedBackColor;
+                    row.NameLabel.ForeColor = ScreenshotAvailable ? PrimaryTextColor : WeakTextColor;
+                    row.NameLabel.Font = Font13;
+                    row.StatusLabel.Text = "已点过";
+                    row.StatusLabel.ForeColor = SuccessColor;
                 }
                 else if (!waiting && !capturing
                     && string.Equals(row.Device, _config.LastDevice, StringComparison.OrdinalIgnoreCase))
                 {
-                    row.Panel.BackColor = row.Visited ? Color.FromArgb(0xF6, 0xFB, 0xF8) : LastDeviceBackColor;
-                    row.NameLabel.ForeColor = PrimaryTextColor;
+                    row.BaseBackColor = UiTheme.LastDeviceBackColor;
+                    row.NameLabel.ForeColor = ScreenshotAvailable ? PrimaryTextColor : WeakTextColor;
                     row.NameLabel.Font = Font13;
-                    row.StatusLabel.Text = row.Visited ? "✓ 已点过" : "待截图";
-                    row.StatusLabel.ForeColor = row.Visited ? SuccessColor : WeakTextColor;
+                    row.StatusLabel.Text = "待截图";
+                    row.StatusLabel.ForeColor = WeakTextColor;
                 }
                 else
                 {
-                    row.Panel.BackColor = ButtonBackColor;
+                    row.BaseBackColor = ButtonBackColor;
                     row.NameLabel.ForeColor = ScreenshotAvailable ? PrimaryTextColor : WeakTextColor;
                     row.NameLabel.Font = Font13;
-                    row.StatusLabel.Text = row.Visited ? "✓ 已点过" : "待截图";
-                    row.StatusLabel.ForeColor = row.Visited ? SuccessColor : WeakTextColor;
+                    row.StatusLabel.Text = "待截图";
+                    row.StatusLabel.ForeColor = WeakTextColor;
                 }
 
                 row.UnmarkButton.Visible = row.Visited && !isWaitingTarget && !isCapturingTarget;
                 row.Panel.Enabled = ScreenshotAvailable;
+                UpdateDeviceRowBackColor(row);
                 LayoutSingleDeviceRow(row, row.Panel.Width, row.Panel.Height);
                 row.Panel.Invalidate();
             }
@@ -3058,7 +3429,7 @@ namespace InspectionWidget
 
         /// <summary>
         /// 保存结果回 UI 线程处理。成功：释放图；暂存成功按简报 D 口径——反馈行以
-        /// 错误色显示「✓ 文件名（已暂存）：完整路径」5 秒（比普通 2 秒长以引注意），
+        /// 错误色显示「文件名（已暂存）：完整路径」5 秒（比普通 2 秒长以引注意），
         /// 同时完整路径记入根目录行 tooltip，提示消失后仍可查。
         /// 失败口径（简报 D 简化版）：保留 Bitmap 在 _pendingImage、状态回 Idle，
         /// 反馈行常驻「尚未保存，点击此处重试」，点击反馈行以同一 CaptureRequest
@@ -3100,18 +3471,18 @@ namespace InspectionWidget
                 if (!string.IsNullOrEmpty(unresolvedProgressErr))
                 {
                     string prefix = result.UsedFallback
-                        ? "✓ " + fileName + "（已暂存：" + result.FullPath + "），但进度落盘失败："
-                        : "✓ " + fileName + " 已保存，但进度落盘失败：";
+                        ? fileName + "（已暂存：" + result.FullPath + "），但进度落盘失败："
+                        : fileName + " 已保存，但进度落盘失败：";
                     ShowPersistentFeedback(prefix + unresolvedProgressErr, ErrorColor);
                 }
                 else if (result.UsedFallback)
                 {
-                    ShowFeedbackInternal("✓ " + fileName + "（已暂存）：" + result.FullPath,
+                    ShowFeedbackInternal(fileName + "（已暂存）：" + result.FullPath,
                         ErrorColor, false, 5000);
                 }
                 else
                 {
-                    ShowSuccessFeedback("✓ " + fileName);
+                    ShowSuccessFeedback("已保存：" + fileName);
                 }
                 TryMaybeShowCompletionPrompt();
                 return;
@@ -3197,9 +3568,10 @@ namespace InspectionWidget
         {
             base.OnPaint(e);
             bool waiting = _stateMachine.State == PanelState.Waiting;
-            if (waiting)
+            bool capturing = _stateMachine.State == PanelState.Capturing;
+            if (waiting || capturing)
             {
-                using (var pen = new Pen(AccentColor, 2f))
+                using (var pen = new Pen(waiting ? WarningColor : AccentColor, 2f))
                 {
                     e.Graphics.DrawRectangle(pen, 1, 1, Width - 3, Height - 3);
                 }

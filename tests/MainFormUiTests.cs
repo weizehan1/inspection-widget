@@ -15,7 +15,7 @@ namespace InspectionWidget.Tests
 {
     public static class MainFormUiTests
     {
-        public const int CaseCount = 8;
+        public const int CaseCount = 9;
 
         private sealed class StepClock : IClock
         {
@@ -263,6 +263,11 @@ namespace InspectionWidget.Tests
                     Assert.Equal(2.0, appliedAfter);
                     Assert.True(env.Form.ClientSize.Width > widthAt100, "200% DPI 下主面板宽度应扩大");
                     AssertAllFontsAlive(env.Form);
+
+                    var planCard200 = (Panel)Field(env.Form, "_planCardPanel");
+                    var planAction200 = (Panel)Field(env.Form, "_planActionPanel");
+                    Assert.True(planCard200.Height >= planAction200.Bottom + 16,
+                        "200% DPI 下计划卡底部操作区不应被裁切或缺少留白：cardHeight=" + planCard200.Height + ", actionBottom=" + planAction200.Bottom);
                 }
             });
 
@@ -421,23 +426,25 @@ namespace InspectionWidget.Tests
 
                     var session = (InspectionSessionController)Field(env.Form, "_session");
                     var dateLabel = (Label)Field(env.Form, "_dateLabel");
+                    var progressLabel = (Label)Field(env.Form, "_planProgressLabel");
                     var countLabel = (Label)Field(env.Form, "_planCountLabel");
 
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
-                    Assert.Equal("已点过 1 / 3", countLabel.Text);
+                    Assert.Equal("已点过", progressLabel.Text);
+                    Assert.Equal("1 / 3", countLabel.Text);
 
                     // 午夜跨日时仍在 Waiting：更新时间显示，保留待刷新标志而不粗暴破坏当前等待上下文
                     env.Clock.Now = new DateTime(2026, 11, 15, 0, 5, 0);
                     Invoke(env.Form, "OnDayRolloverTick", null, EventArgs.Empty);
                     Assert.Equal("2026年11月15日 星期日", dateLabel.Text);
                     Assert.True((bool)Field(env.Form, "_pendingDayRolloverRefresh"));
-                    Assert.Equal("已点过 1 / 3", countLabel.Text);
+                    Assert.Equal("1 / 3", countLabel.Text);
 
                     // 再次点击当前设备取消回 Idle，自动同步重绘新日 0 / 3 列表
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
                     Assert.False((bool)Field(env.Form, "_pendingDayRolloverRefresh"));
                     Assert.Equal(new DateTime(2026, 11, 15), (DateTime)Field(env.Form, "_uiRenderedPlanDate"));
-                    Assert.Equal("已点过 0 / 3", countLabel.Text);
+                    Assert.Equal("0 / 3", countLabel.Text);
                     Assert.Equal(0, session.Plan.VisitedCount);
                 }
             });
@@ -482,11 +489,11 @@ namespace InspectionWidget.Tests
                     Assert.Equal(30, (int)Field(env.Form, "_credentialCountdownSeconds"));
                     Assert.Equal(UiTheme.AccentSoftColor, credBtn.BackColor);
                     Assert.Equal(UiTheme.AccentColor, credBtn.ForeColor);
-                    Assert.Equal("已复制 · 30 秒后清空", subLabel.Text);
+                    Assert.Equal("已复制，30 秒后清空", subLabel.Text);
 
                     Invoke(env.Form, "OnCredentialCountdownTick", null, EventArgs.Empty);
                     Assert.Equal(29, (int)Field(env.Form, "_credentialCountdownSeconds"));
-                    Assert.Equal("已复制 · 29 秒后清空", subLabel.Text);
+                    Assert.Equal("已复制，29 秒后清空", subLabel.Text);
 
                     Invoke(env.Form, "OnClipboardCleared");
                     Assert.Null((string)Field(env.Form, "_copiedCredentialTitle"));
@@ -527,6 +534,76 @@ namespace InspectionWidget.Tests
                 finally
                 {
                     UiTheme.UseFontScale(1.0);
+                }
+            });
+
+            TestRunner.Run("UI-Main：暖石色板、矢量图标无尾随符号、计划卡不裁切、Waiting 琥珀态与 SideMargin 对齐", () =>
+            {
+                AppConfig cfg = MainEnv.BuildDefaultConfig();
+                cfg.PlanModeEnabled = true;
+                cfg.HideVisitedDevices = true;
+
+                using (var env = new MainEnv(cfg))
+                {
+                    env.Form.Show();
+                    Application.DoEvents();
+
+                    Assert.Equal(UiTheme.PageBackColor, env.Form.BackColor);
+
+                    var openBtn = (Button)Field(env.Form, "_openFolderButton");
+                    Assert.Equal("打开巡检文件夹", openBtn.Text);
+                    Assert.Equal(UiTheme.AccentColor, openBtn.BackColor);
+
+                    var titleLabel = (Label)Field(env.Form, "_titleLabel");
+                    var planCard = (Panel)Field(env.Form, "_planCardPanel");
+                    var planActionPanel = (Panel)Field(env.Form, "_planActionPanel");
+                    Assert.Equal(titleLabel.Left, planCard.Left);
+                    Assert.True(planCard.Height >= planActionPanel.Bottom + 8,
+                        "计划卡底部操作区不应被裁切或缺少留白：cardHeight=" + planCard.Height + ", actionBottom=" + planActionPanel.Bottom);
+
+                    var credArrow = (Label)Field(env.Form, "_credentialArrowLabel");
+                    var devArrow = (Label)Field(env.Form, "_deviceArrowLabel");
+                    Assert.Equal(string.Empty, credArrow.Text);
+                    Assert.Equal(string.Empty, devArrow.Text);
+
+                    var rows = (IList)Field(env.Form, "_deviceRows");
+                    Assert.Equal(3, rows.Count);
+                    var initialPanel = (Panel)Field(rows[0], "Panel");
+                    Assert.True(initialPanel.TabStop);
+
+                    // 开启 HideVisitedDevices 时激活核心A进入 Waiting，会重建列表并收起核心A；
+                    // 展开「查看已点过」后重新查询活动行，验证 Waiting 琥珀色强调（不访问已释放旧控件）。
+                    Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    Application.DoEvents();
+                    var rowsWhileHidden = (IList)Field(env.Form, "_deviceRows");
+                    Assert.Equal(2, rowsWhileHidden.Count);
+
+                    Invoke(env.Form, "OnToggleShowVisitedClicked", null, EventArgs.Empty);
+                    Application.DoEvents();
+                    var waitingRows = (IList)Field(env.Form, "_deviceRows");
+                    Assert.Equal(3, waitingRows.Count);
+                    object waitingRow = waitingRows[0];
+                    var waitingPanel = (Panel)Field(waitingRow, "Panel");
+                    var waitingName = (Label)Field(waitingRow, "NameLabel");
+                    var waitingStatus = (Label)Field(waitingRow, "StatusLabel");
+                    Assert.False(waitingPanel.IsDisposed);
+                    Assert.Equal("核心A", (string)Field(waitingRow, "Device"));
+                    Assert.Equal(UiTheme.WarningSoftColor, waitingPanel.BackColor);
+                    Assert.Equal("等待选窗", waitingStatus.Text);
+                    Assert.Equal(UiTheme.WarningColor, waitingStatus.ForeColor);
+                    Assert.Equal(UiTheme.WarningColor, waitingName.ForeColor);
+
+                    // 再次点击取消选窗回到 Idle，验证去前缀“已点过”和浅绿背景
+                    Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    Application.DoEvents();
+                    var rowsAfter = (IList)Field(env.Form, "_deviceRows");
+                    object visitedRow = rowsAfter[0];
+                    var visitedPanel = (Panel)Field(visitedRow, "Panel");
+                    var visitedStatus = (Label)Field(visitedRow, "StatusLabel");
+                    Assert.False(visitedPanel.IsDisposed);
+                    Assert.Equal("已点过", visitedStatus.Text);
+                    Assert.Equal(UiTheme.SuccessColor, visitedStatus.ForeColor);
+                    Assert.Equal(UiTheme.VisitedBackColor, visitedPanel.BackColor);
                 }
             });
         }

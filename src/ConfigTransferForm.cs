@@ -60,15 +60,19 @@ namespace InspectionWidget
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
-                Padding = new Padding(18),
+                RowCount = 2,
                 BackColor = UiTheme.PageBackColor
             };
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60f));
 
-            var body = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = UiTheme.PageBackColor };
+            var body = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = UiTheme.PageBackColor,
+                Padding = new Padding(20, 16, 20, 12)
+            };
             var bodyLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -76,6 +80,7 @@ namespace InspectionWidget
                 ColumnCount = 1,
                 BackColor = UiTheme.PageBackColor
             };
+            bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             body.Controls.Add(bodyLayout);
 
             var title = new Label
@@ -84,122 +89,113 @@ namespace InspectionWidget
                 Font = UiTheme.TitleFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 8)
+                Margin = new Padding(0, 0, 0, 6)
             };
             bodyLayout.Controls.Add(title);
 
             string format = document.Kind == ConfigSourceKind.Exchange
-                ? "新交换格式 v1 · " + document.CredentialMode
-                : "旧裸 AppConfig JSON";
+                ? "标准交换格式 v1（" + document.CredentialMode + "）"
+                : "旧版 AppConfig JSON";
+            int currentCount = current.Devices == null ? 0 : current.Devices.Count;
+            int importedCount = document.Config.Devices == null ? 0 : document.Config.Devices.Count;
             var source = new Label
             {
-                Text = "来源：" + document.SourcePath + "\n格式：" + format,
+                Text = "来源文件：" + document.SourcePath
+                    + "\n文件格式：" + format
+                    + "\n设备数量：当前 " + currentCount + " 台，源文件 " + importedCount + " 台",
                 Font = UiTheme.SmallFont,
-                ForeColor = UiTheme.WeakTextColor,
+                ForeColor = UiTheme.SecondaryTextColor,
                 AutoSize = true,
-                MaximumSize = new Size(680, 0),
+                MaximumSize = new Size(580, 0),
                 Margin = new Padding(0, 0, 0, 12)
+            };
+            bodyLayout.SizeChanged += delegate
+            {
+                source.MaximumSize = new Size(Math.Max(260, bodyLayout.ClientSize.Width), 0);
             };
             bodyLayout.Controls.Add(source);
 
-            int currentCount = current.Devices == null ? 0 : current.Devices.Count;
-            int importedCount = document.Config.Devices == null ? 0 : document.Config.Devices.Count;
-            var counts = new Label
-            {
-                Text = "设备：当前 " + currentCount + " 台，源文件 " + importedCount + " 台",
-                Font = UiTheme.BodyFont,
-                ForeColor = UiTheme.PrimaryTextColor,
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 10)
-            };
-            bodyLayout.Controls.Add(counts);
-
-            var modeGroup = new GroupBox
-            {
-                Text = "导入方式",
-                Font = UiTheme.BodyFont,
-                AutoSize = true,
-                Dock = DockStyle.Top,
-                Padding = new Padding(12),
-                Margin = new Padding(0, 0, 0, 10)
-            };
-            var modeLayout = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false
-            };
+            FlowLayoutPanel modeLayout;
+            Panel modeCard = UiTheme.CreateSectionCard("导入方式", out modeLayout);
             _mergeRadio = new RadioButton
             {
                 Text = "仅合并设备名单（默认）",
                 Font = UiTheme.BodyFont,
+                ForeColor = UiTheme.PrimaryTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
-                Checked = true
+                Checked = true,
+                Margin = new Padding(0, 0, 0, 4)
             };
             _replaceRadio = new RadioButton
             {
                 Text = "替换参与导入的配置",
                 Font = UiTheme.BodyFont,
+                ForeColor = UiTheme.PrimaryTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true
             };
             modeLayout.Controls.Add(_mergeRadio);
             modeLayout.Controls.Add(_replaceRadio);
-            modeGroup.Controls.Add(modeLayout);
-            bodyLayout.Controls.Add(modeGroup);
+            bodyLayout.Controls.Add(modeCard);
 
-            var optionsGroup = new GroupBox
-            {
-                Text = "替换模式选项",
-                Font = UiTheme.BodyFont,
-                AutoSize = true,
-                Dock = DockStyle.Top,
-                Padding = new Padding(12),
-                Margin = new Padding(0, 0, 0, 10)
-            };
-            var optionsLayout = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false
-            };
+            FlowLayoutPanel optionsLayout;
+            Panel optionsCard = UiTheme.CreateSectionCard("替换模式选项", out optionsLayout);
             _importRootCheck = new CheckBox
             {
                 Text = "导入截图保存目录",
                 Font = UiTheme.BodyFont,
+                ForeColor = UiTheme.PrimaryTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
-                Enabled = document.Has("RootPath")
+                Enabled = document.Has("RootPath"),
+                Margin = new Padding(0, 0, 0, 4)
             };
             _replaceCredentialsCheck = new CheckBox
             {
                 Text = "替换凭据（整表替换；空数组表示清空）",
                 Font = UiTheme.BodyFont,
+                ForeColor = UiTheme.PrimaryTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
-                Enabled = document.CredentialsPresent
+                Enabled = document.CredentialsPresent,
+                Margin = new Padding(0, 0, 0, 4)
             };
             _restoreLocalCheck = new CheckBox
             {
                 Text = "恢复本机字段（窗口位置 / 上次设备 / 托盘提示）",
                 Font = UiTheme.BodyFont,
+                ForeColor = UiTheme.PrimaryTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
                 Enabled = document.IsFullBackup
             };
             optionsLayout.Controls.Add(_importRootCheck);
             optionsLayout.Controls.Add(_replaceCredentialsCheck);
             optionsLayout.Controls.Add(_restoreLocalCheck);
-            optionsGroup.Controls.Add(optionsLayout);
-            bodyLayout.Controls.Add(optionsGroup);
+            bodyLayout.Controls.Add(optionsCard);
+
+            var previewTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0)
+            };
+            previewTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
             _summaryLabel = new Label
             {
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
-                MaximumSize = new Size(680, 0),
-                Margin = new Padding(0, 0, 0, 10)
+                MaximumSize = new Size(560, 0),
+                Margin = new Padding(0, 0, 0, 8)
             };
-            bodyLayout.Controls.Add(_summaryLabel);
+            previewTable.Controls.Add(_summaryLabel);
 
             _deviceChangeBox = new TextBox
             {
@@ -208,14 +204,15 @@ namespace InspectionWidget
                 ScrollBars = ScrollBars.Vertical,
                 WordWrap = false,
                 Font = UiTheme.SmallFont,
-                BackColor = Color.White,
+                BackColor = UiTheme.PageBackColor,
                 ForeColor = UiTheme.PrimaryTextColor,
-                Height = 150,
-                Width = 680,
-                Margin = new Padding(0, 0, 0, 10),
+                BorderStyle = BorderStyle.FixedSingle,
+                Dock = DockStyle.Top,
+                Height = 140,
+                Margin = new Padding(0, 0, 0, 8),
                 AccessibleName = "设备变化预览"
             };
-            bodyLayout.Controls.Add(_deviceChangeBox);
+            previewTable.Controls.Add(_deviceChangeBox);
 
             var credentialNote = new Label
             {
@@ -224,38 +221,73 @@ namespace InspectionWidget
                     : "凭据：源文件未参与导入，当前凭据保持不变。",
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.WeakTextColor,
+                BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
-                MaximumSize = new Size(680, 0)
+                MaximumSize = new Size(560, 0)
             };
-            bodyLayout.Controls.Add(credentialNote);
+            previewTable.Controls.Add(credentialNote);
+            previewTable.SizeChanged += delegate
+            {
+                int avail = Math.Max(240, previewTable.ClientSize.Width);
+                _summaryLabel.MaximumSize = new Size(avail, 0);
+                credentialNote.MaximumSize = new Size(avail, 0);
+            };
+            Panel previewCard = UiTheme.CreateSectionCard("变更摘要与设备预览", previewTable);
+            bodyLayout.Controls.Add(previewCard);
             root.Controls.Add(body, 0, 0);
+
+            var bottom = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Padding = new Padding(16, 10, 16, 10),
+                BackColor = UiTheme.CardBackColor
+            };
+            bottom.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var p = (Control)sender;
+                using (var pen = new Pen(UiTheme.BorderColor, 1f))
+                {
+                    e.Graphics.DrawLine(pen, 0, 0, p.Width, 0);
+                }
+            };
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
             _errorLabel = new Label
             {
-                AutoSize = true,
-                MaximumSize = new Size(680, 0),
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                AutoEllipsis = true,
                 ForeColor = UiTheme.ErrorColor,
+                BackColor = UiTheme.CardBackColor,
                 Font = UiTheme.SmallFont,
-                Margin = new Padding(0, 4, 0, 8)
+                TextAlign = ContentAlignment.MiddleLeft
             };
-            root.Controls.Add(_errorLabel, 0, 1);
+            bottom.Controls.Add(_errorLabel, 0, 0);
 
             var buttons = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = UiTheme.CardBackColor,
+                Padding = new Padding(0, 2, 0, 0)
             };
             var importButton = UiTheme.PrimaryButton("导入到草稿");
             importButton.Width = 120;
+            importButton.Margin = new Padding(0);
             importButton.Click += delegate { Accept(); };
             var cancelButton = UiTheme.SecondaryButton("取消");
             cancelButton.Width = 88;
+            cancelButton.Margin = new Padding(0, 0, 8, 0);
             cancelButton.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             buttons.Controls.Add(importButton);
             buttons.Controls.Add(cancelButton);
-            root.Controls.Add(buttons, 0, 2);
+            bottom.Controls.Add(buttons, 1, 0);
+            root.Controls.Add(bottom, 0, 1);
             CancelButton = cancelButton;
             AcceptButton = importButton;
 

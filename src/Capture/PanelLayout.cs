@@ -31,14 +31,14 @@ namespace InspectionWidget.Capture
         // v1.1.0 方案 B（Scheme B）主面板度量常量（96 DPI 逻辑像素）。
         public const int SchemeBPanelWidth = 352;
         public const int SchemeBDefaultHeight = 660;
-        public const int SchemeBHeaderHeight = 60;
-        public const int SchemeBQuickLinkHeight = 34;
-        public const int SchemeBQuickLinkGap = 7;
-        public const int SchemeBCredentialHeight = 34;
-        public const int SchemeBCredentialGap = 7;
-        public const int SchemeBDeviceRowHeight = 44;
-        public const int SchemeBDeviceRowGap = 7;
-        public const int SchemeBFooterHeight = 104;
+        public const int SchemeBHeaderHeight = 56;
+        public const int SchemeBQuickLinkHeight = 30;
+        public const int SchemeBQuickLinkGap = 6;
+        public const int SchemeBCredentialHeight = 30;
+        public const int SchemeBCredentialGap = 6;
+        public const int SchemeBDeviceRowHeight = 40;
+        public const int SchemeBDeviceRowGap = 6;
+        public const int SchemeBFooterHeight = 96;
 
         /// <summary>v1.1.0 方案 B 缩放后的面板宽（352 * factor）。</summary>
         public static int ScaledSchemeBPanelWidth(double factor)

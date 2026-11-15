@@ -16,7 +16,7 @@ namespace InspectionWidget.Tests
     /// </summary>
     public static class SettingsUiTests
     {
-        public const int CaseCount = 13;
+        public const int CaseCount = 14;
 
         public static void RunAll()
         {
@@ -363,6 +363,58 @@ namespace InspectionWidget.Tests
                     Assert.Equal(0, ((Control)env.Field(rows[0], "Panel")).Top);
                 }
             });
+
+            TestRunner.Run("UI：设置窗与导入预览窗使用现代分组卡（无 GroupBox）且色板一致", () =>
+            {
+                Console.WriteLine("[START] 设置窗与导入预览窗无 GroupBox 与色板检查");
+                using (var env = new UiEnv())
+                {
+                    Assert.Equal(UiTheme.PageBackColor, env.Form.BackColor);
+                    AssertNoGroupBoxRecursive(env.Form);
+
+                    var editor = (DeviceEditorControl)env.Field(env.Form, "_deviceEditor");
+                    Assert.Equal(UiTheme.CardBackColor, editor.Grid.BackgroundColor);
+
+                    env.Form.Size = env.Form.MinimumSize;
+                    for (int i = 0; i < 5; i++)
+                    {
+                        env.Invoke(env.Form, "OnNavClicked", i);
+                        Application.DoEvents();
+                    }
+
+                    var importedCfg = AppConfig.CreateDefault();
+                    importedCfg.Devices = new List<string> { "核心A", "核心B", "核心C" };
+                    var doc = new ConfigImportDocument
+                    {
+                        SourcePath = "C:\\temp\\sample.json",
+                        Kind = ConfigSourceKind.Exchange,
+                        CredentialMode = "none",
+                        Config = importedCfg
+                    };
+                    using (var transfer = new ConfigTransferForm(doc, env.Config, new FakeProtector(), 1.0))
+                    {
+                        transfer.ShowInTaskbar = false;
+                        transfer.Show();
+                        Application.DoEvents();
+                        Assert.Equal(UiTheme.PageBackColor, transfer.BackColor);
+                        AssertNoGroupBoxRecursive(transfer);
+
+                        transfer.Size = transfer.MinimumSize;
+                        Application.DoEvents();
+                        var previewBox = (TextBox)env.Field(transfer, "_deviceChangeBox");
+                        Assert.True(previewBox.Right <= previewBox.Parent.ClientSize.Width,
+                            "导入预览设备框不应溢出卡片右边界");
+                    }
+                }
+            });
+        }
+
+        private static void AssertNoGroupBoxRecursive(Control root)
+        {
+            if (root == null) return;
+            Assert.False(root is GroupBox, "不应再使用传统 GroupBox：" + root.Text);
+            for (int i = 0; i < root.Controls.Count; i++)
+                AssertNoGroupBoxRecursive(root.Controls[i]);
         }
 
         private sealed class UiEnv : IDisposable

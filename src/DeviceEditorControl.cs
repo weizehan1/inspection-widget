@@ -74,7 +74,7 @@ namespace InspectionWidget
             top.Controls.Add(hint, 1, 0);
             root.Controls.Add(top, 0, 0);
 
-            _grid = new DataGridView
+            _grid = UiTheme.GridStyle(new DataGridView
             {
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
@@ -89,15 +89,9 @@ namespace InspectionWidget
                 // 重新进入编辑，使 CommitEdit 的 IsCurrentCellInEditMode 检查误判。
                 // 保留 F2/输入触发编辑，双击与 Enter 由下方显式接线。
                 EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2,
-                BackgroundColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = UiTheme.BodyFont,
-                GridColor = UiTheme.BorderColor,
-                ColumnHeadersHeight = 34,
-                RowTemplate = { Height = 34 },
                 StandardTab = true,
                 AccessibleName = "设备列表"
-            };
+            });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "DeviceName",
@@ -108,6 +102,7 @@ namespace InspectionWidget
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
             _grid.DataSource = new BindingSource { DataSource = _draft.Devices };
+            _grid.BorderStyle = BorderStyle.None;
             _grid.CellBeginEdit += OnCellBeginEdit;
             _grid.CellValidating += OnCellValidating;
             _grid.CellEndEdit += OnCellEndEdit;
@@ -116,7 +111,14 @@ namespace InspectionWidget
             _grid.KeyDown += OnGridKeyDown;
             _grid.SelectionChanged += delegate { UpdateButtons(); };
             _grid.DataError += OnDataError;
-            root.Controls.Add(_grid, 0, 1);
+            var gridFrame = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(1),
+                BackColor = UiTheme.BorderColor
+            };
+            gridFrame.Controls.Add(_grid);
+            root.Controls.Add(gridFrame, 0, 1);
 
             var buttons = new FlowLayoutPanel
             {
@@ -126,7 +128,8 @@ namespace InspectionWidget
                 BackColor = UiTheme.PageBackColor,
                 Padding = new Padding(0, 8, 0, 0)
             };
-            _addButton = UiTheme.SecondaryButton("新增设备");
+            _addButton = UiTheme.PrimaryButton("新增设备");
+            _addButton.Width = 96;
             _addButton.AccessibleName = "新增设备";
             _addButton.Click += delegate { AddDevice(); };
             _deleteButton = UiTheme.SecondaryButton("删除");

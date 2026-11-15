@@ -3,7 +3,7 @@
 # 在 windows-latest 上用 MSBuild（VS2022 工具链）构建 Release：
 # - src/InspectionWidget.csproj 已配置 <ApplicationManifest>..\app.manifest</ApplicationManifest>，
 #   MSBuild 将 requireAdministrator 与 DPI 声明内嵌进 exe，产名单文件交付。
-# - 所有分支/PR/手动触发仅使用最小只读权限完成构建、439 逻辑用例 + 19 Windows UI 用例（共 458 条）、
+# - 所有分支/PR/手动触发仅使用最小只读权限完成构建、443 逻辑用例 + 23 Windows UI 用例（共 466 条）、
 #   产物版本与清单自检，以及全量构建/测试日志留存（失败亦上传）。
 # - 仅当推送 v* 标签时触发 release 任务（独立赋予 contents: write），先校验 tag 版本一致性，
 #   再以显式 view 判存的幂等流程创建或更新 GitHub Release 并附带 exe 与 .sha256。
@@ -99,7 +99,7 @@ jobs:
             throw "预期 [PASS] 与汇总均等于 $reportedTotal，实际 [PASS]=$passCount、汇总通过=$reportedPass。"
           }
 
-      - name: 运行含 Windows 窗体全量测试（443+ 逻辑 + 21 UI）
+      - name: 运行含 Windows 窗体全量测试（443+ 逻辑 + 23 UI）
         shell: pwsh
         run: |
           try { chcp 65001 2>$null | Out-Null } catch {}
@@ -118,7 +118,7 @@ jobs:
           $passCount = ([regex]::Matches($raw, '(?m)^\[PASS\]')).Count
           Write-Host "全量测试通过数（逻辑+UI）：$passCount（汇总：$reportedPass / $reportedTotal）"
           if ($reportedFail -ne 0) { throw "全量测试汇总报告失败数为 $reportedFail。" }
-          if ($reportedTotal -lt 464) { throw "全量测试总数低于预期基线 464（443 逻辑 + 21 UI）：实际为 $reportedTotal 条。" }
+          if ($reportedTotal -lt 466) { throw "全量测试总数低于预期基线 466（443 逻辑 + 23 UI）：实际为 $reportedTotal 条。" }
           if ($passCount -ne $reportedTotal -or $reportedPass -ne $reportedTotal) {
             throw "预期 [PASS] 与汇总均等于 $reportedTotal，实际 [PASS]=$passCount、汇总通过=$reportedPass。"
           }
