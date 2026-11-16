@@ -37,22 +37,27 @@ namespace InspectionWidget
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 3,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor
             };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var top = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 2,
                 RowCount = 1,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor
             };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _countLabel = new Label
             {
                 AutoSize = true,
@@ -70,6 +75,13 @@ namespace InspectionWidget
                 ForeColor = UiTheme.WeakTextColor,
                 Text = "双击或按 Enter 编辑；行序就是主面板按钮顺序。",
                 Padding = new Padding(0, 8, 8, 8)
+            };
+            top.SizeChanged += delegate
+            {
+                int countW = Math.Max(90, _countLabel.PreferredWidth + 16);
+                int availHint = Math.Max(140, top.ClientSize.Width - countW);
+                if (hint.MaximumSize.Width != availHint)
+                    hint.MaximumSize = new Size(availHint, 0);
             };
             top.Controls.Add(hint, 1, 0);
             root.Controls.Add(top, 0, 0);
@@ -114,6 +126,7 @@ namespace InspectionWidget
             var gridFrame = new Panel
             {
                 Dock = DockStyle.Fill,
+                Margin = new Padding(0),
                 Padding = new Padding(1),
                 BackColor = UiTheme.BorderColor
             };
@@ -122,9 +135,12 @@ namespace InspectionWidget
 
             var buttons = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                WrapContents = true,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor,
                 Padding = new Padding(0, 8, 0, 0)
             };

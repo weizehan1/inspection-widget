@@ -234,5 +234,38 @@ namespace InspectionWidget.Native
 
         [DllImport("kernel32.dll")]
         public static extern uint GetCurrentThreadId();
+
+        // ---------- user32：输入框占位提示 ----------
+
+        private const int EM_SETCUEBANNER = 0x1501;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        public static void SetCueBanner(System.Windows.Forms.TextBox textBox, string placeholder)
+        {
+            if (textBox == null || string.IsNullOrEmpty(placeholder))
+                return;
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                return;
+
+            Action apply = delegate
+            {
+                if (textBox.IsDisposed || !textBox.IsHandleCreated)
+                    return;
+                try
+                {
+                    SendMessage(textBox.Handle, EM_SETCUEBANNER, (IntPtr)1, placeholder);
+                }
+                catch
+                {
+                }
+            };
+
+            if (textBox.IsHandleCreated)
+                apply();
+            else
+                textBox.HandleCreated += delegate { apply(); };
+        }
     }
 }

@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using InspectionWidget.Capture;
 using InspectionWidget.Config;
 using InspectionWidget.Credentials;
+using InspectionWidget.Native;
 
 namespace InspectionWidget
 {
@@ -33,6 +34,7 @@ namespace InspectionWidget
         private bool _stale;
         private bool _closingAfterSave;
         private bool _layoutScaleApplied;
+        private bool _updatingPageLayout;
         private int _currentGroup;
 
         public AppConfig ResultConfig { get; private set; }
@@ -42,6 +44,7 @@ namespace InspectionWidget
 
         private readonly Button[] _navButtons = new Button[5];
         private readonly Panel[] _groupPanels = new Panel[5];
+        private readonly Dictionary<Panel, PageMeta> _pageMetas = new Dictionary<Panel, PageMeta>();
         private Panel _navAccent;
         private Panel _contentHost;
         private Label _feedbackLabel;
@@ -51,11 +54,13 @@ namespace InspectionWidget
 
         private DeviceEditorControl _deviceEditor;
         private Panel _credentialRowsPanel;
+        private TableLayoutPanel _credentialHeader;
         private readonly List<CredentialRow> _credentialRows = new List<CredentialRow>();
         private Button _addCredentialButton;
         private Label _credentialCountLabel;
 
         private Panel _linkRowsPanel;
+        private TableLayoutPanel _linkHeader;
         private readonly List<LinkRow> _linkRows = new List<LinkRow>();
         private Button _addLinkButton;
         private Label _linkCountLabel;
@@ -79,6 +84,14 @@ namespace InspectionWidget
         private Label _aboutConfigPathLabel;
         private Label _aboutRootPathLabel;
         private Icon _ownedAppIcon;
+
+        private sealed class PageMeta
+        {
+            public TableLayoutPanel Layout;
+            public Label Title;
+            public Label Desc;
+            public Action<int, int> UpdateContent;
+        }
 
         private sealed class LinkRow
         {
@@ -127,15 +140,15 @@ namespace InspectionWidget
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
-            MaximizeBox = false;
+            MaximizeBox = true;
             ShowInTaskbar = false;
             BackColor = UiTheme.PageBackColor;
             Font = UiTheme.BodyFont;
             // 应用档位与系统 DPI 已合并进 _uiScaleFactor，由 UiTheme.ScaleLayout
             // 统一处理；关闭 WinForms 自动 DPI 缩放，避免再乘一次造成二次缩放。
             AutoScaleMode = AutoScaleMode.None;
-            ClientSize = new Size(760, 590);
-            MinimumSize = new Size(640, 480);
+            ClientSize = new Size(840, 680);
+            MinimumSize = new Size(620, 460);
             KeyPreview = true;
             _ownedAppIcon = AppIcon.Load();
             if (_ownedAppIcon != null) Icon = _ownedAppIcon;
@@ -147,8 +160,7 @@ namespace InspectionWidget
             SetGroup(GroupDevices);
             UiTheme.ScaleLayout(this, _uiScaleFactor);
             _layoutScaleApplied = true;
-            // 初次同步发生在根布局缩放前；这里按缩放后的可视宽度再排一次行列表，
-            // 避免首屏行宽仍使用未缩放面板宽度。
+            UpdateAllPageLayouts();
             LayoutCredentialRows();
             LayoutLinkRows();
             _dirty = false;
@@ -169,6 +181,13 @@ namespace InspectionWidget
             int height = Math.Max(minimumHeight, Math.Min(Height, availableHeight));
             Size = new Size(width, height);
             Location = PanelLayout.CenterInWorkingArea(work, Size);
+            UpdateAllPageLayouts();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            UpdatePageLayout(_groupPanels[_currentGroup]);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -200,7 +219,10 @@ namespace InspectionWidget
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             if (_feedbackToolTip != null)
+            {
                 _feedbackToolTip.Dispose();
+                _feedbackToolTip = null;
+            }
             base.OnFormClosed(e);
         }
 
@@ -243,8 +265,10 @@ namespace InspectionWidget
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 2,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor
             };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62f));
 
@@ -253,14 +277,17 @@ namespace InspectionWidget
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 1,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor
             };
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148f));
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            body.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             var navPanel = new Panel
             {
                 Dock = DockStyle.Fill,
+                Margin = new Padding(0),
                 BackColor = UiTheme.SurfaceColor,
                 Padding = new Padding(0, 0, 1, 0)
             };
@@ -298,6 +325,15 @@ namespace InspectionWidget
                 _navButtons[i] = button;
                 navPanel.Controls.Add(button);
             }
+            navPanel.SizeChanged += delegate
+            {
+                int btnWidth = Math.Max(1, navPanel.ClientSize.Width - Math.Max(1, navPanel.Padding.Right));
+                for (int i = 0; i < _navButtons.Length; i++)
+                {
+                    if (_navButtons[i] != null)
+                        _navButtons[i].Width = btnWidth;
+                }
+            };
             _navAccent = new Panel
             {
                 BackColor = UiTheme.AccentColor,
@@ -309,7 +345,12 @@ namespace InspectionWidget
             _navAccent.BringToFront();
             body.Controls.Add(navPanel, 0, 0);
 
-            _contentHost = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.PageBackColor };
+            _contentHost = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                BackColor = UiTheme.PageBackColor
+            };
             body.Controls.Add(_contentHost, 1, 0);
 
             _groupPanels[GroupDevices] = BuildDevicesPage();
@@ -327,6 +368,7 @@ namespace InspectionWidget
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 1,
+                Margin = new Padding(0),
                 Padding = new Padding(14, 10, 14, 10),
                 BackColor = UiTheme.CardBackColor
             };
@@ -340,6 +382,7 @@ namespace InspectionWidget
             };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             _feedbackLabel = new Label
             {
                 Dock = DockStyle.Fill,
@@ -356,7 +399,9 @@ namespace InspectionWidget
             var actions = new FlowLayoutPanel
             {
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Dock = DockStyle.Fill,
+                Margin = new Padding(0),
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 BackColor = UiTheme.CardBackColor,
@@ -372,6 +417,7 @@ namespace InspectionWidget
             _saveButton.Click += delegate { ApplyInternal(true); };
             var cancelButton = UiTheme.SecondaryButton("取消");
             cancelButton.Width = 84;
+            cancelButton.Margin = new Padding(0);
             cancelButton.AccessibleName = "取消设置";
             cancelButton.Click += delegate { Close(); };
             actions.Controls.Add(_applyButton);
@@ -390,7 +436,9 @@ namespace InspectionWidget
             var page = new Panel
             {
                 Dock = DockStyle.Fill,
+                Margin = new Padding(0),
                 AutoScroll = true,
+                AutoScrollMargin = new Size(0, 12),
                 BackColor = UiTheme.PageBackColor,
                 Visible = false
             };
@@ -398,7 +446,9 @@ namespace InspectionWidget
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
+                Margin = new Padding(0),
                 Padding = new Padding(22, 18, 22, 18),
                 BackColor = UiTheme.PageBackColor
             };
@@ -420,21 +470,73 @@ namespace InspectionWidget
                 MaximumSize = new Size(420, 0),
                 Margin = new Padding(0, 0, 0, 14)
             };
-            layout.SizeChanged += delegate
-            {
-                int avail = Math.Max(220, layout.ClientSize.Width);
-                desc.MaximumSize = new Size(avail, 0);
-            };
             layout.Controls.Add(title);
             layout.Controls.Add(desc);
             page.Controls.Add(layout);
             page.Tag = layout;
+            var meta = new PageMeta
+            {
+                Layout = layout,
+                Title = title,
+                Desc = desc
+            };
+            _pageMetas[page] = meta;
+            page.SizeChanged += delegate
+            {
+                if (_layoutScaleApplied && page.Visible)
+                    UpdatePageLayout(page);
+            };
             return page;
         }
 
         private static TableLayoutPanel PageLayout(Panel page)
         {
             return (TableLayoutPanel)page.Tag;
+        }
+
+        private void UpdateAllPageLayouts()
+        {
+            for (int i = 0; i < _groupPanels.Length; i++)
+                UpdatePageLayout(_groupPanels[i]);
+        }
+
+        private void UpdatePageLayout(Panel page)
+        {
+            if (page == null || _updatingPageLayout || !_layoutScaleApplied)
+                return;
+            PageMeta meta;
+            if (!_pageMetas.TryGetValue(page, out meta) || meta.Layout == null)
+                return;
+            if (page.ClientSize.Width <= 0)
+                return;
+
+            _updatingPageLayout = true;
+            try
+            {
+                int scrollReserve = page.VerticalScroll.Visible ? 0 : SystemInformation.VerticalScrollBarWidth;
+                int layoutMaxWidth = Math.Max(L(220), page.ClientSize.Width - scrollReserve);
+                if (meta.Layout.MaximumSize.Width != layoutMaxWidth)
+                    meta.Layout.MaximumSize = new Size(layoutMaxWidth, 0);
+
+                int contentWidth = Math.Max(L(180), layoutMaxWidth - meta.Layout.Padding.Horizontal);
+                if (meta.Title != null && meta.Title.MaximumSize.Width != contentWidth)
+                    meta.Title.MaximumSize = new Size(contentWidth, 0);
+                if (meta.Desc != null && meta.Desc.MaximumSize.Width != contentWidth)
+                    meta.Desc.MaximumSize = new Size(contentWidth, 0);
+
+                if (meta.UpdateContent != null)
+                {
+                    int headerUsed = meta.Layout.Padding.Vertical
+                        + (meta.Title != null ? meta.Title.Height + meta.Title.Margin.Vertical : 0)
+                        + (meta.Desc != null ? meta.Desc.Height + meta.Desc.Margin.Vertical : 0);
+                    int remainingHeight = Math.Max(L(220), page.ClientSize.Height - headerUsed);
+                    meta.UpdateContent(contentWidth, remainingHeight);
+                }
+            }
+            finally
+            {
+                _updatingPageLayout = false;
+            }
         }
 
         private Panel BuildDevicesPage()
@@ -451,6 +553,12 @@ namespace InspectionWidget
                 ShowError(GroupDevices, error, _deviceEditor.Grid);
             };
             PageLayout(page).Controls.Add(_deviceEditor);
+            _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
+            {
+                int targetHeight = Math.Max(L(300), remainingHeight - L(4));
+                if (_deviceEditor.Height != targetHeight)
+                    _deviceEditor.Height = targetHeight;
+            };
             return page;
         }
 
@@ -462,9 +570,10 @@ namespace InspectionWidget
             var top = new FlowLayoutPanel
             {
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                WrapContents = true,
                 Margin = new Padding(0, 0, 0, 8)
             };
             _addCredentialButton = UiTheme.PrimaryButton("添加凭据");
@@ -481,33 +590,47 @@ namespace InspectionWidget
             top.Controls.Add(_credentialCountLabel);
             layout.Controls.Add(top);
 
-            var header = new TableLayoutPanel
+            _credentialHeader = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 26,
+                Height = 30,
                 ColumnCount = 8,
-                Margin = new Padding(0, 0, 0, 4)
+                RowCount = 1,
+                Padding = new Padding(8, 0, 8, 0),
+                Margin = new Padding(0, 0, 0, 4),
+                BackColor = UiTheme.SurfaceColor
+            };
+            _credentialHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            _credentialHeader.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var p = (Control)sender;
+                if (p.Width <= 1 || p.Height <= 1) return;
+                using (var pen = new Pen(UiTheme.BorderColor, 1f))
+                {
+                    e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+                }
             };
             string[] headers = { "名称", "内容", "状态", "清除", "撤销", "删除", "上移", "下移" };
-            int[] widths = { 115, 105, 100, 46, 46, 46, 28, 28 };
+            int[] widths = { 120, 115, 100, 48, 48, 48, 32, 32 };
             for (int i = 0; i < 8; i++)
             {
-                if (i == 2) header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-                else header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, widths[i]));
-                header.Controls.Add(new Label
+                if (i == 2) _credentialHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                else _credentialHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, widths[i]));
+                _credentialHeader.Controls.Add(new Label
                 {
                     Text = headers[i],
-                    Font = UiTheme.SmallFont,
-                    ForeColor = UiTheme.WeakTextColor,
+                    Font = UiTheme.SmallBoldFont,
+                    ForeColor = UiTheme.SecondaryTextColor,
+                    BackColor = UiTheme.SurfaceColor,
                     Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleLeft
+                    TextAlign = i >= 3 ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft
                 }, i, 0);
             }
-            layout.Controls.Add(header);
+            layout.Controls.Add(_credentialHeader);
 
             _credentialRowsPanel = new Panel
             {
-                Height = 325,
+                Height = 340,
                 Dock = DockStyle.Top,
                 AutoScroll = true,
                 BackColor = UiTheme.PageBackColor
@@ -518,6 +641,15 @@ namespace InspectionWidget
                     LayoutCredentialRows();
             };
             layout.Controls.Add(_credentialRowsPanel);
+            _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
+            {
+                top.MaximumSize = new Size(contentWidth, 0);
+                int used = top.Height + top.Margin.Vertical + _credentialHeader.Height + _credentialHeader.Margin.Vertical;
+                int targetHeight = Math.Max(L(220), Math.Min(L(400), remainingHeight - used));
+                if (_credentialRowsPanel.Height != targetHeight)
+                    _credentialRowsPanel.Height = targetHeight;
+                LayoutCredentialRows();
+            };
             return page;
         }
 
@@ -529,9 +661,10 @@ namespace InspectionWidget
             var top = new FlowLayoutPanel
             {
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                WrapContents = true,
                 Margin = new Padding(0, 0, 0, 8)
             };
             _addLinkButton = UiTheme.PrimaryButton("添加链接");
@@ -549,33 +682,47 @@ namespace InspectionWidget
             top.Controls.Add(_linkCountLabel);
             layout.Controls.Add(top);
 
-            var header = new TableLayoutPanel
+            _linkHeader = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 26,
+                Height = 30,
                 ColumnCount = 6,
-                Margin = new Padding(0, 0, 0, 4)
+                RowCount = 1,
+                Padding = new Padding(8, 0, 8, 0),
+                Margin = new Padding(0, 0, 0, 4),
+                BackColor = UiTheme.SurfaceColor
+            };
+            _linkHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            _linkHeader.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                var p = (Control)sender;
+                if (p.Width <= 1 || p.Height <= 1) return;
+                using (var pen = new Pen(UiTheme.BorderColor, 1f))
+                {
+                    e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+                }
             };
             string[] headers = { "启用", "名称", "网址（http:// 或 https://）", "上移", "下移", "删除" };
-            int[] widths = { 42, 130, 200, 30, 30, 50 };
+            int[] widths = { 46, 136, 180, 34, 34, 54 };
             for (int i = 0; i < 6; i++)
             {
-                if (i == 2) header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-                else header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, widths[i]));
-                header.Controls.Add(new Label
+                if (i == 2) _linkHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                else _linkHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, widths[i]));
+                _linkHeader.Controls.Add(new Label
                 {
                     Text = headers[i],
-                    Font = UiTheme.SmallFont,
-                    ForeColor = UiTheme.WeakTextColor,
+                    Font = UiTheme.SmallBoldFont,
+                    ForeColor = UiTheme.SecondaryTextColor,
+                    BackColor = UiTheme.SurfaceColor,
                     Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleLeft
+                    TextAlign = (i == 0 || i >= 3) ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft
                 }, i, 0);
             }
-            layout.Controls.Add(header);
+            layout.Controls.Add(_linkHeader);
 
             _linkRowsPanel = new Panel
             {
-                Height = 325,
+                Height = 340,
                 Dock = DockStyle.Top,
                 AutoScroll = true,
                 BackColor = UiTheme.PageBackColor
@@ -587,14 +734,26 @@ namespace InspectionWidget
             };
             _linkEmptyLabel = new Label
             {
-                Text = "尚未配置快捷链接；点击上方“添加链接”可新增常用网址。",
+                Text = "尚未配置快捷链接；点击上方“添加链接”可新增常用网址（例如监控大盘、工单系统）。",
                 AutoSize = true,
-                Font = UiTheme.SmallFont,
+                Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.WeakTextColor,
-                Location = new Point(0, 8),
+                Padding = new Padding(8, 12, 8, 12),
+                Location = new Point(0, 4),
                 Visible = false
             };
             layout.Controls.Add(_linkRowsPanel);
+            _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
+            {
+                top.MaximumSize = new Size(contentWidth, 0);
+                int used = top.Height + top.Margin.Vertical + _linkHeader.Height + _linkHeader.Margin.Vertical;
+                int targetHeight = Math.Max(L(220), Math.Min(L(400), remainingHeight - used));
+                if (_linkRowsPanel.Height != targetHeight)
+                    _linkRowsPanel.Height = targetHeight;
+                if (_linkEmptyLabel != null)
+                    _linkEmptyLabel.MaximumSize = new Size(Math.Max(L(180), contentWidth - L(16)), 0);
+                LayoutLinkRows();
+            };
             return page;
         }
 
@@ -605,8 +764,10 @@ namespace InspectionWidget
             var settings = new TableLayoutPanel
             {
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
+                Margin = new Padding(0),
                 BackColor = UiTheme.CardBackColor
             };
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 122f));
@@ -615,26 +776,32 @@ namespace InspectionWidget
             _rootPathTextBox = new TextBox
             {
                 ReadOnly = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
                 Font = UiTheme.BodyFont,
-                Width = 286,
                 BackColor = UiTheme.PageBackColor,
+                Margin = new Padding(0, 0, 8, 0),
                 AccessibleName = "截图根目录"
             };
-            var rootFlow = new FlowLayoutPanel
+            var rootRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 AutoSize = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
                 BackColor = UiTheme.CardBackColor
             };
-            rootFlow.Controls.Add(_rootPathTextBox);
+            rootRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            rootRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            rootRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rootRow.Controls.Add(_rootPathTextBox, 0, 0);
             var changeButton = UiTheme.SecondaryButton("更改…");
             changeButton.Width = 80;
-            changeButton.Margin = new Padding(8, 0, 0, 0);
+            changeButton.Margin = new Padding(0);
             changeButton.Click += delegate { ChangeRootPath(); };
-            rootFlow.Controls.Add(changeButton);
-            AddSettingRow(settings, "截图根目录", rootFlow);
+            rootRow.Controls.Add(changeButton, 1, 0);
+            AddSettingRow(settings, "截图根目录", rootRow);
 
             _rootStatusLabel = new Label
             {
@@ -672,12 +839,6 @@ namespace InspectionWidget
                 BackColor = UiTheme.CardBackColor
             };
             AddSettingFullRow(settings, patternHelp);
-            settings.SizeChanged += delegate
-            {
-                int fullW = Math.Max(220, settings.ClientSize.Width);
-                _rootStatusLabel.MaximumSize = new Size(fullW, 0);
-                patternHelp.MaximumSize = new Size(fullW, 0);
-            };
 
             _folderPreviewTextBox = new TextBox
             {
@@ -693,6 +854,7 @@ namespace InspectionWidget
             {
                 Text = "复制凭据后 30 秒自动清空剪贴板",
                 AutoSize = true,
+                MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
@@ -709,7 +871,8 @@ namespace InspectionWidget
             _uiScaleComboBox = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 130,
+                Width = 150,
+                MinimumSize = new Size(140, 0),
                 Font = UiTheme.BodyFont,
                 AccessibleName = "界面缩放"
             };
@@ -732,6 +895,7 @@ namespace InspectionWidget
             {
                 Text = "开启今日巡检计划（记录已点过设备并统计今日进度）",
                 AutoSize = true,
+                MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
@@ -747,6 +911,7 @@ namespace InspectionWidget
             {
                 Text = "已点过设备的显示方式",
                 AutoSize = true,
+                MaximumSize = new Size(360, 0),
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
                 BackColor = UiTheme.CardBackColor,
@@ -756,6 +921,7 @@ namespace InspectionWidget
             {
                 Text = "隐藏已点过（适合多设备，列表只留未点项目）",
                 AutoSize = true,
+                MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
@@ -766,6 +932,7 @@ namespace InspectionWidget
             {
                 Text = "保留并显示已点状态（适合少设备对照查看）",
                 AutoSize = true,
+                MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
@@ -793,8 +960,10 @@ namespace InspectionWidget
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true,
+                Margin = new Padding(0),
                 BackColor = UiTheme.CardBackColor
             };
             _modeAutoRadio = new RadioButton
@@ -832,6 +1001,30 @@ namespace InspectionWidget
             Panel modeCard = UiTheme.CreateSectionCard("截图模式", modes);
             outer.Controls.Add(modeCard);
 
+            _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
+            {
+                storageCard.MaximumSize = new Size(contentWidth, 0);
+                int storageInner = Math.Max(L(160), contentWidth - storageCard.Padding.Horizontal);
+                settings.MaximumSize = new Size(storageInner, 0);
+                _rootStatusLabel.MaximumSize = new Size(storageInner, 0);
+                patternHelp.MaximumSize = new Size(storageInner, 0);
+                _autoClearCheckBox.MaximumSize = new Size(storageInner, 0);
+
+                planCard.MaximumSize = new Size(contentWidth, 0);
+                int planInner = Math.Max(L(160), contentWidth - planCard.Padding.Horizontal);
+                planStack.MaximumSize = new Size(planInner, 0);
+                _planModeCheckBox.MaximumSize = new Size(planInner, 0);
+                hideTitle.MaximumSize = new Size(planInner, 0);
+                _hideVisitedTrueRadio.MaximumSize = new Size(planInner, 0);
+                _hideVisitedFalseRadio.MaximumSize = new Size(planInner, 0);
+
+                modeCard.MaximumSize = new Size(contentWidth, 0);
+                int modeInner = Math.Max(L(160), contentWidth - modeCard.Padding.Horizontal);
+                modes.MaximumSize = new Size(modeInner, 0);
+                _modeAutoRadio.MaximumSize = new Size(modeInner, 0);
+                _modePrintWindowRadio.MaximumSize = new Size(modeInner, 0);
+                _modeBitBltRadio.MaximumSize = new Size(modeInner, 0);
+            };
             return page;
         }
 
@@ -906,14 +1099,6 @@ namespace InspectionWidget
                 BackColor = UiTheme.CardBackColor
             };
             transferStack.Controls.Add(notes);
-            transferStack.SizeChanged += delegate
-            {
-                int avail = Math.Max(220, transferStack.ClientSize.Width);
-                buttons.MaximumSize = new Size(avail, 0);
-                _exportSourceLabel.MaximumSize = new Size(avail, 0);
-                _importDetailLabel.MaximumSize = new Size(avail, 0);
-                notes.MaximumSize = new Size(avail, 0);
-            };
             layout.Controls.Add(transferCard);
 
             var aboutCard = new Panel
@@ -923,7 +1108,7 @@ namespace InspectionWidget
                 Dock = DockStyle.Top,
                 BackColor = UiTheme.CardBackColor,
                 Padding = new Padding(17, 12, 14, 12),
-                Margin = new Padding(0)
+                Margin = new Padding(0, 0, 0, 12)
             };
             aboutCard.Paint += delegate(object sender, PaintEventArgs e)
             {
@@ -946,6 +1131,7 @@ namespace InspectionWidget
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
+                Margin = new Padding(0),
                 BackColor = UiTheme.CardBackColor
             };
             var aboutTitle = new Label
@@ -958,7 +1144,7 @@ namespace InspectionWidget
             };
             var aboutVersion = new Label
             {
-                Text = "巡检助手 v1.1.2 （Windows 桌面端）",
+                Text = "巡检助手 v1.1.3 （Windows 桌面端）",
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
                 AutoSize = true,
@@ -988,12 +1174,6 @@ namespace InspectionWidget
                 ForeColor = UiTheme.SecondaryTextColor,
                 Margin = new Padding(0, 0, 0, 6)
             };
-            aboutFlow.SizeChanged += delegate
-            {
-                int avail = Math.Max(220, aboutFlow.ClientSize.Width);
-                _aboutConfigPathLabel.MaximumSize = new Size(avail, 0);
-                _aboutRootPathLabel.MaximumSize = new Size(avail, 0);
-            };
             var repo = new LinkLabel
             {
                 Text = "https://github.com/weizehan1/inspection-widget",
@@ -1017,6 +1197,27 @@ namespace InspectionWidget
             aboutFlow.Controls.Add(repo);
             aboutCard.Controls.Add(aboutFlow);
             layout.Controls.Add(aboutCard);
+
+            _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
+            {
+                transferCard.MaximumSize = new Size(contentWidth, 0);
+                int transferInner = Math.Max(L(160), contentWidth - transferCard.Padding.Horizontal);
+                transferStack.MaximumSize = new Size(transferInner, 0);
+                buttons.MaximumSize = new Size(transferInner, 0);
+                _exportSourceLabel.MaximumSize = new Size(transferInner, 0);
+                _importDetailLabel.MaximumSize = new Size(transferInner, 0);
+                notes.MaximumSize = new Size(transferInner, 0);
+
+                aboutCard.MaximumSize = new Size(contentWidth, 0);
+                int aboutInner = Math.Max(L(160), contentWidth - aboutCard.Padding.Horizontal);
+                aboutFlow.MaximumSize = new Size(aboutInner, 0);
+                aboutTitle.MaximumSize = new Size(aboutInner, 0);
+                aboutVersion.MaximumSize = new Size(aboutInner, 0);
+                aboutRuntime.MaximumSize = new Size(aboutInner, 0);
+                _aboutConfigPathLabel.MaximumSize = new Size(aboutInner, 0);
+                _aboutRootPathLabel.MaximumSize = new Size(aboutInner, 0);
+                repo.MaximumSize = new Size(aboutInner, 0);
+            };
             return page;
         }
 
@@ -1070,6 +1271,7 @@ namespace InspectionWidget
             _navAccent.BringToFront();
             if (index == GroupTransfer)
                 RefreshAboutLabels();
+            UpdatePageLayout(_groupPanels[index]);
         }
 
         private bool CommitDeviceOperation()
@@ -1107,6 +1309,8 @@ namespace InspectionWidget
         {
             if (_rootPathTextBox == null) return;
             _rootPathTextBox.Text = _draft.RootPath ?? string.Empty;
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(_rootPathTextBox, _rootPathTextBox.Text);
             _folderPatternTextBox.Text = FolderNamePattern.Normalize(_draft.FolderPattern);
             _autoClearCheckBox.Checked = _draft.AutoClearClipboard;
             _uiScaleComboBox.SelectedIndex = UiScale.IndexForPercent(_draft.UiScalePercent);
@@ -1140,6 +1344,8 @@ namespace InspectionWidget
                 _rootStatusLabel.Text = "已应用；启动时不再询问。";
                 _rootStatusLabel.ForeColor = UiTheme.SecondaryTextColor;
             }
+            if (_feedbackToolTip != null && _rootPathTextBox != null)
+                _feedbackToolTip.SetToolTip(_rootPathTextBox, _rootPathTextBox.Text);
         }
 
         private void RefreshFolderPreview()
@@ -1149,6 +1355,8 @@ namespace InspectionWidget
             _folderPreviewTextBox.Text = string.IsNullOrEmpty(_draft.RootPath)
                 ? folder + "（尚未设置截图根目录）"
                 : Path.Combine(_draft.RootPath, folder);
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(_folderPreviewTextBox, _folderPreviewTextBox.Text);
         }
 
         private void ChangeRootPath()
@@ -1166,6 +1374,7 @@ namespace InspectionWidget
                     MarkDirty();
                     RefreshRootStatus();
                     RefreshFolderPreview();
+                    UpdatePageLayout(_groupPanels[_currentGroup]);
                     ClearFeedback();
                 }
             }
@@ -1201,13 +1410,14 @@ namespace InspectionWidget
             row.ToolTip = new ToolTip();
             row.Panel = new TableLayoutPanel
             {
-                Height = 42,
+                Height = 48,
                 ColumnCount = 8,
                 RowCount = 1,
-                Margin = new Padding(0, 0, 0, 4),
-                Padding = new Padding(6, 2, 6, 2),
+                Margin = new Padding(0, 0, 0, 6),
+                Padding = new Padding(8, 4, 8, 4),
                 BackColor = UiTheme.CardBackColor
             };
+            row.Panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             row.Panel.Paint += delegate(object sender, PaintEventArgs e)
             {
                 var p = (Control)sender;
@@ -1219,7 +1429,7 @@ namespace InspectionWidget
             };
             for (int i = 0; i < 8; i++)
             {
-                int width = i == 0 ? 115 : (i == 1 ? 105 : (i == 2 ? 100 : (i == 6 || i == 7 ? 28 : 46)));
+                int width = i == 0 ? 120 : (i == 1 ? 115 : (i == 2 ? 100 : (i == 6 || i == 7 ? 32 : 48)));
                 row.Panel.ColumnStyles.Add(i == 2
                     ? new ColumnStyle(SizeType.Percent, 100f)
                     : new ColumnStyle(SizeType.Absolute, width));
@@ -1229,10 +1439,11 @@ namespace InspectionWidget
             {
                 Text = draft.Title ?? string.Empty,
                 Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Margin = new Padding(4, 0, 4, 0),
+                Margin = new Padding(0, 0, 6, 0),
                 Font = UiTheme.BodyFont,
                 AccessibleName = "凭据名称"
             };
+            NativeMethods.SetCueBanner(row.NameBox, "例如：运维账号");
             row.NameBox.TextChanged += delegate
             {
                 draft.Title = row.NameBox.Text;
@@ -1242,12 +1453,13 @@ namespace InspectionWidget
             row.SecretBox = new TextBox
             {
                 Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Margin = new Padding(4, 0, 4, 0),
+                Margin = new Padding(0, 0, 6, 0),
                 Font = UiTheme.BodyFont,
                 PasswordChar = '●',
                 Enabled = !draft.Cleared,
                 AccessibleName = "凭据新内容（不回显）"
             };
+            NativeMethods.SetCueBanner(row.SecretBox, draft.IsNew ? "输入密码或密钥" : "留空不修改");
             row.SecretBox.TextChanged += delegate
             {
                 if (!_loading) MarkDirty();
@@ -1259,37 +1471,44 @@ namespace InspectionWidget
                 Font = UiTheme.SmallFont,
                 AutoSize = false,
                 AutoEllipsis = true,
+                Padding = new Padding(0, 0, 4, 0),
                 TextAlign = ContentAlignment.MiddleLeft
             };
             row.ClearButton = UiTheme.SecondaryButton("清除");
-            row.ClearButton.Width = 42;
+            row.ClearButton.Width = 44;
             row.ClearButton.Height = 30;
+            row.ClearButton.Anchor = AnchorStyles.None;
             row.ClearButton.AccessibleName = "清除当前凭据内容";
-            row.ClearButton.Margin = new Padding(0, 4, 2, 4);
+            row.ClearButton.Margin = new Padding(2, 0, 2, 0);
             row.ClearButton.Click += delegate { ClearCredential(row); };
             row.UndoButton = UiTheme.SecondaryButton("撤销");
-            row.UndoButton.Width = 42;
+            row.UndoButton.Width = 44;
             row.UndoButton.Height = 30;
+            row.UndoButton.Anchor = AnchorStyles.None;
             row.UndoButton.AccessibleName = "撤销清除凭据内容";
-            row.UndoButton.Margin = new Padding(0, 4, 2, 4);
+            row.UndoButton.Margin = new Padding(2, 0, 2, 0);
             row.UndoButton.Click += delegate { UndoClearCredential(row); };
             row.DeleteButton = UiTheme.SecondaryButton("删除");
-            row.DeleteButton.Width = 42;
+            row.DeleteButton.Width = 44;
             row.DeleteButton.Height = 30;
+            row.DeleteButton.ForeColor = UiTheme.ErrorColor;
+            row.DeleteButton.Anchor = AnchorStyles.None;
             row.DeleteButton.AccessibleName = "删除当前凭据";
-            row.DeleteButton.Margin = new Padding(0, 4, 2, 4);
+            row.DeleteButton.Margin = new Padding(2, 0, 2, 0);
             row.DeleteButton.Click += delegate { DeleteCredential(row); };
             row.UpButton = UiTheme.SecondaryButton("↑");
-            row.UpButton.Width = 26;
+            row.UpButton.Width = 28;
             row.UpButton.Height = 30;
-            row.UpButton.Margin = new Padding(0, 4, 2, 4);
+            row.UpButton.Anchor = AnchorStyles.None;
+            row.UpButton.Margin = new Padding(2, 0, 2, 0);
             row.UpButton.TabStop = true;
             row.UpButton.AccessibleName = "凭据上移";
             row.UpButton.Click += delegate { MoveCredential(row, -1); };
             row.DownButton = UiTheme.SecondaryButton("↓");
-            row.DownButton.Width = 26;
+            row.DownButton.Width = 28;
             row.DownButton.Height = 30;
-            row.DownButton.Margin = new Padding(0, 4, 0, 4);
+            row.DownButton.Anchor = AnchorStyles.None;
+            row.DownButton.Margin = new Padding(2, 0, 0, 0);
             row.DownButton.TabStop = true;
             row.DownButton.AccessibleName = "凭据下移";
             row.DownButton.Click += delegate { MoveCredential(row, 1); };
@@ -1337,9 +1556,9 @@ namespace InspectionWidget
 
         private void LayoutCredentialRows()
         {
-            int step = L(48);
+            int step = L(56);
             int totalHeight = _credentialRows.Count * step;
-            int minimumWidth = L(520);
+            int minimumWidth = L(420);
             int width;
             int offsetX;
             int offsetY;
@@ -1348,7 +1567,15 @@ namespace InspectionWidget
             {
                 PrepareAutoScrollPanel(_credentialRowsPanel, totalHeight, minimumWidth, out width, out offsetX, out offsetY);
                 if (_credentialRowsPanel != null)
-                    width = Math.Max(minimumWidth, _credentialRowsPanel.ClientSize.Width - L(12));
+                {
+                    int rightGap = L(2);
+                    width = Math.Max(minimumWidth, _credentialRowsPanel.ClientSize.Width - rightGap);
+                    if (_credentialHeader != null)
+                    {
+                        int scrollPad = _credentialRowsPanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+                        _credentialHeader.Padding = new Padding(L(8), 0, L(8) + rightGap + scrollPad, 0);
+                    }
+                }
                 for (int i = 0; i < _credentialRows.Count; i++)
                 {
                     CredentialRow row = _credentialRows[i];
@@ -1394,13 +1621,14 @@ namespace InspectionWidget
             var row = new LinkRow { Draft = entry };
             row.Panel = new TableLayoutPanel
             {
-                Height = 38,
+                Height = 48,
                 ColumnCount = 6,
                 RowCount = 1,
-                Margin = new Padding(0, 0, 0, 4),
-                Padding = new Padding(6, 2, 6, 2),
+                Margin = new Padding(0, 0, 0, 6),
+                Padding = new Padding(8, 4, 8, 4),
                 BackColor = UiTheme.CardBackColor
             };
+            row.Panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             row.Panel.Paint += delegate(object sender, PaintEventArgs e)
             {
                 var p = (Control)sender;
@@ -1410,7 +1638,7 @@ namespace InspectionWidget
                     e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
                 }
             };
-            int[] widths = { 42, 130, 200, 30, 30, 50 };
+            int[] widths = { 46, 136, 180, 34, 34, 54 };
             for (int i = 0; i < 6; i++)
             {
                 row.Panel.ColumnStyles.Add(i == 2
@@ -1425,20 +1653,16 @@ namespace InspectionWidget
                 CheckAlign = ContentAlignment.MiddleCenter,
                 AccessibleName = "启用快捷链接"
             };
-            row.EnabledBox.CheckedChanged += delegate
-            {
-                entry.Enabled = row.EnabledBox.Checked;
-                if (!_loading) MarkDirty();
-            };
-
             row.TitleBox = new TextBox
             {
                 Text = entry.Title ?? string.Empty,
                 Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Margin = new Padding(4, 0, 4, 0),
+                Margin = new Padding(0, 0, 6, 0),
                 Font = UiTheme.BodyFont,
+                ForeColor = entry.Enabled ? UiTheme.PrimaryTextColor : UiTheme.SecondaryTextColor,
                 AccessibleName = "快捷链接名称"
             };
+            NativeMethods.SetCueBanner(row.TitleBox, "例如：监控大盘");
             row.TitleBox.TextChanged += delegate
             {
                 entry.Title = row.TitleBox.Text;
@@ -1449,36 +1673,61 @@ namespace InspectionWidget
             {
                 Text = entry.Url ?? string.Empty,
                 Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Margin = new Padding(4, 0, 4, 0),
+                Margin = new Padding(0, 0, 6, 0),
                 Font = UiTheme.BodyFont,
+                ForeColor = entry.Enabled ? UiTheme.PrimaryTextColor : UiTheme.SecondaryTextColor,
                 AccessibleName = "快捷链接网址"
             };
+            NativeMethods.SetCueBanner(row.UrlBox, "https://...");
             row.UrlBox.TextChanged += delegate
             {
                 entry.Url = row.UrlBox.Text;
+                if (_feedbackToolTip != null)
+                    _feedbackToolTip.SetToolTip(row.UrlBox, row.UrlBox.Text);
+                if (!_loading) MarkDirty();
+            };
+            row.EnabledBox.CheckedChanged += delegate
+            {
+                entry.Enabled = row.EnabledBox.Checked;
+                Color textColor = entry.Enabled ? UiTheme.PrimaryTextColor : UiTheme.SecondaryTextColor;
+                row.TitleBox.ForeColor = textColor;
+                row.UrlBox.ForeColor = textColor;
                 if (!_loading) MarkDirty();
             };
 
             row.UpButton = UiTheme.SecondaryButton("↑");
-            row.UpButton.Width = 26;
-            row.UpButton.Height = 28;
-            row.UpButton.Margin = new Padding(0, 3, 2, 3);
+            row.UpButton.Width = 30;
+            row.UpButton.Height = 30;
+            row.UpButton.Anchor = AnchorStyles.None;
+            row.UpButton.Margin = new Padding(2, 0, 2, 0);
             row.UpButton.AccessibleName = "快捷链接上移";
             row.UpButton.Click += delegate { MoveLink(row, -1); };
 
             row.DownButton = UiTheme.SecondaryButton("↓");
-            row.DownButton.Width = 26;
-            row.DownButton.Height = 28;
-            row.DownButton.Margin = new Padding(0, 3, 2, 3);
+            row.DownButton.Width = 30;
+            row.DownButton.Height = 30;
+            row.DownButton.Anchor = AnchorStyles.None;
+            row.DownButton.Margin = new Padding(2, 0, 2, 0);
             row.DownButton.AccessibleName = "快捷链接下移";
             row.DownButton.Click += delegate { MoveLink(row, 1); };
 
             row.DeleteButton = UiTheme.SecondaryButton("删除");
-            row.DeleteButton.Width = 46;
-            row.DeleteButton.Height = 28;
-            row.DeleteButton.Margin = new Padding(0, 3, 0, 3);
+            row.DeleteButton.Width = 48;
+            row.DeleteButton.Height = 30;
+            row.DeleteButton.ForeColor = UiTheme.ErrorColor;
+            row.DeleteButton.Anchor = AnchorStyles.None;
+            row.DeleteButton.Margin = new Padding(4, 0, 0, 0);
             row.DeleteButton.AccessibleName = "删除快捷链接";
             row.DeleteButton.Click += delegate { DeleteLink(row); };
+
+            if (_feedbackToolTip != null)
+            {
+                _feedbackToolTip.SetToolTip(row.EnabledBox, "勾选后在主面板顶部显示");
+                _feedbackToolTip.SetToolTip(row.UrlBox, row.UrlBox.Text);
+                _feedbackToolTip.SetToolTip(row.UpButton, "上移");
+                _feedbackToolTip.SetToolTip(row.DownButton, "下移");
+                _feedbackToolTip.SetToolTip(row.DeleteButton, "删除该快捷链接");
+            }
 
             row.Panel.Controls.Add(row.EnabledBox, 0, 0);
             row.Panel.Controls.Add(row.TitleBox, 1, 0);
@@ -1495,9 +1744,9 @@ namespace InspectionWidget
         {
             if (_linkRowsPanel == null)
                 return;
-            int step = L(44);
+            int step = L(56);
             int totalHeight = _linkRows.Count * step;
-            int minimumWidth = L(500);
+            int minimumWidth = L(400);
             int width;
             int offsetX;
             int offsetY;
@@ -1505,7 +1754,13 @@ namespace InspectionWidget
             try
             {
                 PrepareAutoScrollPanel(_linkRowsPanel, totalHeight, minimumWidth, out width, out offsetX, out offsetY);
-                width = Math.Max(minimumWidth, _linkRowsPanel.ClientSize.Width - L(12));
+                int rightGap = L(2);
+                width = Math.Max(minimumWidth, _linkRowsPanel.ClientSize.Width - rightGap);
+                if (_linkHeader != null)
+                {
+                    int scrollPad = _linkRowsPanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+                    _linkHeader.Padding = new Padding(L(8), 0, L(8) + rightGap + scrollPad, 0);
+                }
                 for (int i = 0; i < _linkRows.Count; i++)
                 {
                     LinkRow row = _linkRows[i];
@@ -1518,7 +1773,7 @@ namespace InspectionWidget
                 {
                     _linkEmptyLabel.Visible = _linkRows.Count == 0;
                     if (_linkEmptyLabel.Visible)
-                        _linkEmptyLabel.Location = new Point(offsetX, L(8) + offsetY);
+                        _linkEmptyLabel.Location = new Point(offsetX, L(4) + offsetY);
                 }
             }
             finally
@@ -1858,6 +2113,7 @@ namespace InspectionWidget
             _stale = false;
             UpdateTitle();
             RefreshRootStatus();
+            UpdatePageLayout(_groupPanels[_currentGroup]);
             ShowSuccess("已应用。主面板已即时刷新。");
 
             EventHandler handler = Saved;
@@ -1934,6 +2190,7 @@ namespace InspectionWidget
                     UpdateTitle();
                     _importDetailLabel.Text = "已导入到草稿：" + Path.GetFileName(document.SourcePath)
                         + "。尚未写盘；点“应用”或“保存并关闭”后才会提交。";
+                    UpdatePageLayout(_groupPanels[_currentGroup]);
                     ShowInfo("导入预览已写入窗口草稿，尚未保存；可继续检查或取消。");
                 }
             }
@@ -2025,6 +2282,7 @@ namespace InspectionWidget
                 _exportSourceLabel.Text = "最近一次导出：" + dialog.FileName
                     + "（来源：最近一次成功应用的配置；"
                     + (fullBackup ? "含本机 DPAPI 密文" : "不含凭据") + "）";
+                UpdatePageLayout(_groupPanels[_currentGroup]);
                 ShowSuccess("导出完成：" + Path.GetFileName(dialog.FileName));
             }
         }

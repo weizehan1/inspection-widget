@@ -48,11 +48,11 @@ namespace InspectionWidget
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
-            MaximizeBox = false;
+            MaximizeBox = true;
             // 与设置窗一致：只使用应用档位的手动缩放，不让系统 DPI 再乘一次。
             AutoScaleMode = AutoScaleMode.None;
-            ClientSize = new Size(760, 620);
-            MinimumSize = new Size(680, 540);
+            ClientSize = new Size(780, 640);
+            MinimumSize = new Size(640, 500);
             _ownedAppIcon = AppIcon.Load();
             if (_ownedAppIcon != null) Icon = _ownedAppIcon;
 
@@ -61,8 +61,10 @@ namespace InspectionWidget
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 2,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor
             };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60f));
 
@@ -70,6 +72,7 @@ namespace InspectionWidget
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor,
                 Padding = new Padding(20, 16, 20, 12)
             };
@@ -77,7 +80,9 @@ namespace InspectionWidget
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
+                Margin = new Padding(0),
                 BackColor = UiTheme.PageBackColor
             };
             bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -108,10 +113,6 @@ namespace InspectionWidget
                 AutoSize = true,
                 MaximumSize = new Size(580, 0),
                 Margin = new Padding(0, 0, 0, 12)
-            };
-            bodyLayout.SizeChanged += delegate
-            {
-                source.MaximumSize = new Size(Math.Max(260, bodyLayout.ClientSize.Width), 0);
             };
             bodyLayout.Controls.Add(source);
 
@@ -226,14 +227,24 @@ namespace InspectionWidget
                 MaximumSize = new Size(560, 0)
             };
             previewTable.Controls.Add(credentialNote);
-            previewTable.SizeChanged += delegate
-            {
-                int avail = Math.Max(240, previewTable.ClientSize.Width);
-                _summaryLabel.MaximumSize = new Size(avail, 0);
-                credentialNote.MaximumSize = new Size(avail, 0);
-            };
             Panel previewCard = UiTheme.CreateSectionCard("变更摘要与设备预览", previewTable);
             bodyLayout.Controls.Add(previewCard);
+            body.SizeChanged += delegate
+            {
+                int scrollReserve = body.VerticalScroll.Visible ? 0 : SystemInformation.VerticalScrollBarWidth;
+                int bodyMaxW = Math.Max(260, body.ClientSize.Width - body.Padding.Horizontal - scrollReserve);
+                if (bodyLayout.MaximumSize.Width != bodyMaxW)
+                    bodyLayout.MaximumSize = new Size(bodyMaxW, 0);
+                int cardInner = Math.Max(220, bodyMaxW - previewCard.Padding.Horizontal);
+                source.MaximumSize = new Size(bodyMaxW, 0);
+                _mergeRadio.MaximumSize = new Size(cardInner, 0);
+                _replaceRadio.MaximumSize = new Size(cardInner, 0);
+                _importRootCheck.MaximumSize = new Size(cardInner, 0);
+                _replaceCredentialsCheck.MaximumSize = new Size(cardInner, 0);
+                _restoreLocalCheck.MaximumSize = new Size(cardInner, 0);
+                _summaryLabel.MaximumSize = new Size(cardInner, 0);
+                credentialNote.MaximumSize = new Size(cardInner, 0);
+            };
             root.Controls.Add(body, 0, 0);
 
             var bottom = new TableLayoutPanel
@@ -241,6 +252,7 @@ namespace InspectionWidget
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 1,
+                Margin = new Padding(0),
                 Padding = new Padding(16, 10, 16, 10),
                 BackColor = UiTheme.CardBackColor
             };
@@ -254,6 +266,7 @@ namespace InspectionWidget
             };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             _errorLabel = new Label
             {
@@ -273,6 +286,8 @@ namespace InspectionWidget
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0),
                 BackColor = UiTheme.CardBackColor,
                 Padding = new Padding(0, 2, 0, 0)
             };

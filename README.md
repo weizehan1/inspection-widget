@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.2` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.3` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -83,7 +83,7 @@
 | 凭据 | 凭据增删、改名、改内容、清除单条、上下排序；内容掩码不回显，留空保存表示不改，清除可在当前草稿撤销，解不开的条目标「需重新设置」 |
 | 快捷链接 | 增删改、排序、启用/停用最多 12 条 `http://` / `https://` 网址，校验不合法时定位到具体行与字段 |
 | 存储与显示 | 截图根目录、日期文件夹名与实时预览、配置路径、剪贴板自动清空开关、截图模式、界面缩放、今日巡检计划开关与「隐藏已点过设备 / 全部显示」策略 |
-| 配置备份 | 普通导出、本机完整备份、导入预览与草稿合并/替换；以及产品版本（v1.1.2）、路径信息等关于卡片 |
+| 配置备份 | 普通导出、本机完整备份、导入预览与草稿合并/替换；以及产品版本（v1.1.3）、路径信息等关于卡片 |
 
 配置文件位置：默认存 `%LocalAppData%\InspectionWidget\config.json`；若 exe 同目录已有 `config.json`，优先用 exe 旁边的这一份（便携用法）。
 
@@ -95,7 +95,7 @@
 
 ### 构建
 
-**自动构建（GitHub Actions）**：推送源码到 `main` 后由 `.github/workflows/build.yml` 在 `windows-latest` 上用 MSBuild 构建 Release、运行 **443 条纯逻辑与集成测试 + 23 条 Windows 窗体用例（共 466 条）**，校验 `requireAdministrator` / `PerMonitorV2` 清单内嵌与 SHA-256，并留存全部构建与测试日志；推送 `v*` 标签且上述门禁通过后，校验标签版本一致性并幂等发布 GitHub Release（附单文件 exe 与 `.sha256`）——见 [build.yml](.github/workflows/build.yml)。
+**自动构建（GitHub Actions）**：推送源码到 `main` 后由 `.github/workflows/build.yml` 在 `windows-latest` 上用 MSBuild 构建 Release、运行 **443 条纯逻辑与集成测试 + 27 条 Windows 窗体用例（共 470 条）**，校验 `requireAdministrator` / `PerMonitorV2` 清单内嵌与 SHA-256，并留存全部构建与测试日志；推送 `v*` 标签且上述门禁通过后，校验标签版本一致性并幂等发布 GitHub Release（附单文件 exe 与 `.sha256`）——见 [build.yml](.github/workflows/build.yml)。
 
 **本地构建（Windows，正式版）**：Visual Studio 2022 勾选「.NET 桌面开发」工作负载与 .NET Framework 4.8 目标包，打开 `InspectionWidget.sln`，Release 配置生成。零第三方包，无需还原 NuGet。
 
@@ -109,7 +109,7 @@ bash build.sh
 
 ### 验证状态
 
-截至本次提交前，已在 macOS Mono 环境通过 **443 条纯逻辑与方案 B 集成测试**（覆盖设备草稿、快捷链接、今日巡检计划与隐藏过滤、损坏进度只读保护与备份恢复、导入导出、原子写与锁）。显式加 `--windows-ui` 时，非 Windows 环境会报告 **23 条** Windows 窗体用例未执行并返回退出码 2（不计为通过）。MSBuild 单文件打包、**23 条** WinForms 控件用例（共 466 条）、多显示器 DPI/工作区缩放、DPAPI、真实剪贴板、托盘、默认浏览器打开与管理员窗口截图需在推送后的 GitHub Actions Windows CI 与 Windows 实机环境验收。
+截至本次提交前，已在 macOS Mono 环境通过 **443 条纯逻辑与方案 B 集成测试**（覆盖设备草稿、快捷链接、今日巡检计划与隐藏过滤、损坏进度只读保护与备份恢复、导入导出、原子写与锁）。显式加 `--windows-ui` 时，非 Windows 环境会报告 **27 条** Windows 窗体用例未执行并返回退出码 2（不计为通过）。MSBuild 单文件打包、**27 条** WinForms 控件用例（共 470 条）、多显示器 DPI/工作区缩放、DPAPI、真实剪贴板、托盘、默认浏览器打开与管理员窗口截图需在推送后的 GitHub Actions Windows CI 与 Windows 实机环境验收。
 
 ### 目录结构
 
@@ -132,6 +132,7 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1.3 | 2026-11-16 | 修复 Windows 实机设置界面布局与 DPI 适配问题：补齐 `TableLayoutPanel` 行列约束与递归挂起缩放以解决右下角「应用 / 保存并关闭 / 取消」按钮不可见及界面缩放下拉框塌陷；重构「快捷链接」「凭据」表头与动态缩放行高并新增原生输入框占位提示、停用态置灰及网址 Tooltip；由页面客户区宽度向下约束卡片、按钮与文本自动换行并修复上下滚动；新增 4 条 Windows UI 回归测试（共 443 逻辑 + 27 UI = 470 条）。 |
 | v1.1.2 | 2026-11-15 | 前端视觉与交互细节全面改版：全套界面（主面板、五页设置窗口、设备编辑器、配置导入导出、内置弹窗）统一采用 Warm Slate 暖灰纸底与 Deep Sea Teal 深海青点缀色调，以琥珀色标注待选窗状态；今日巡检计划卡片重塑为粗体等宽计数器（`X / X`）、圆角胶囊进度条与左侧强调色条；去除各窗口多余 `GroupBox` 边框并统一复用 `UiTheme.GridStyle`；清理主面板按钮与提示中的冗余符号及机械拼接文案，并同步更新 `DESIGN.md`、`design-contract.md` 与 `443` 条逻辑 + `23` 条 Windows UI（共 `466` 条）自动化测试断言。 |
 | v1.1.1 | 2026-11-14 | 维护与稳健性更新：补齐凭据复制按钮高亮与 30 秒倒计时反馈（含清空/跳过后复位）、后台线程打开巡检目录、失联目录回退至配置目录、顶层 JSON 键精确校验、字体与 GDI 资源安全释放、内置弹窗 100%–200% DPI 缩放对齐、`HookManager` 卸载并发加固，并拆分弹窗与设置辅助模块；测试规模扩展至 443 条纯逻辑/集成 + 21 条 Windows UI（共 464 条），优化 macOS `build.sh` 与 CI 动态测试门禁。 |
 | v1.1.0 | 2026-11-14 | 方案 B 界面与流程改版正式版：352px 浮动面板新增顶栏日期、2 列快捷链接、今日巡检计划进度卡片（「已点过 X / Y」、开启/关闭切换、查看已点过、单行恢复未点、二次确认重置、全部点完后按可见态触发一次完成提示）、2 列凭据高亮与已复制标记、「打开巡检文件夹 ↗」主按钮与多目录选择；新增 `HideVisitedDevices`（默认开启点完即隐藏）、改名与部分导入保留进度、跨日延迟刷新、独立 `progress.json` 损坏写保护与备份恢复、新生成并验证的取景框应用图标，以及五页设置窗口。 |
@@ -152,7 +153,7 @@ bash build.sh
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.2` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.3` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 
@@ -225,7 +226,7 @@ A small always-on-top panel that lives in the bottom-right corner of your Window
 | Credentials | Add, remove, rename, change content, clear a single entry and reorder credentials. Contents are masked and never echoed; leaving an existing field blank means "unchanged"; a clear can be undone within the current draft, and undecryptable entries are marked "Needs re-entry" |
 | Quick Links | Add, edit, toggle enable/disable, and reorder up to 12 `http://` / `https://` links with per-row/field validation |
 | Storage & Display | Screenshot root folder; date folder pattern with live preview; config path; 30-second clipboard auto-clear; capture mode; UI scaling; Today's inspection plan toggle; hide-visited vs. show-all device display policy |
-| Config & Backup | Ordinary export, full local backup, import preview, merge/replace into the draft, plus the About card (`v1.1.2`, repo & active paths) |
+| Config & Backup | Ordinary export, full local backup, import preview, merge/replace into the draft, plus the About card (`v1.1.3`, repo & active paths) |
 
 Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; if a `config.json` already sits next to the exe, that one takes precedence (portable usage).
 
@@ -237,7 +238,7 @@ Config file location: `%LocalAppData%\InspectionWidget\config.json` by default; 
 
 ### Build
 
-**Automatic builds (GitHub Actions)**: pushing source to `main` triggers `.github/workflows/build.yml`, which builds Release with MSBuild on `windows-latest`, runs **443 logic/integration tests + 23 Windows Forms UI tests (466 total)**, verifies the embedded `requireAdministrator` / `PerMonitorV2` manifest and SHA-256, and retains full build/test logs even on failure. Pushing a `v*` tag after checks pass verifies tag/binary version consistency and publishes a GitHub Release with the single-file exe and `.sha256` — see [build.yml](.github/workflows/build.yml).
+**Automatic builds (GitHub Actions)**: pushing source to `main` triggers `.github/workflows/build.yml`, which builds Release with MSBuild on `windows-latest`, runs **443 logic/integration tests + 27 Windows Forms UI tests (470 total)**, verifies the embedded `requireAdministrator` / `PerMonitorV2` manifest and SHA-256, and retains full build/test logs even on failure. Pushing a `v*` tag after checks pass verifies tag/binary version consistency and publishes a GitHub Release with the single-file exe and `.sha256` — see [build.yml](.github/workflows/build.yml).
 
 **Local build (Windows, official)**: Visual Studio 2022 with the ".NET desktop development" workload and the .NET Framework 4.8 targeting pack; open `InspectionWidget.sln` and build the Release configuration. Zero third-party packages, no NuGet restore needed.
 
@@ -251,7 +252,7 @@ The script restores `assets/app.ico` from `assets/app.ico.base64.txt` when neede
 
 ### Verification status
 
-Before release tagging, **443 pure-logic and Scheme B integration tests** pass under macOS Mono (covering settings draft, quick links, today's inspection plan & hide-visited filtering, corrupt `progress.json` write protection & backup recovery, import/export, atomic writes and locking). On non-Windows systems, `--windows-ui` reports the **23** UI cases as unexecuted and exits with code 2 (not counted as passed). The MSBuild single-file build, **23** WinForms UI control tests (466 total), multi-monitor DPI/work-area scaling, cross-user DPAPI, real clipboard/tray behavior, browser launch and elevated-window capture require GitHub Actions `windows-latest` CI and Windows runtime verification.
+Before release tagging, **443 pure-logic and Scheme B integration tests** pass under macOS Mono (covering settings draft, quick links, today's inspection plan & hide-visited filtering, corrupt `progress.json` write protection & backup recovery, import/export, atomic writes and locking). On non-Windows systems, `--windows-ui` reports the **27** UI cases as unexecuted and exits with code 2 (not counted as passed). The MSBuild single-file build, **27** WinForms UI control tests (470 total), multi-monitor DPI/work-area scaling, cross-user DPAPI, real clipboard/tray behavior, browser launch and elevated-window capture require GitHub Actions `windows-latest` CI and Windows runtime verification.
 
 ### Project layout
 
@@ -274,6 +275,7 @@ Before release tagging, **443 pure-logic and Scheme B integration tests** pass u
 
 | Version | Date | Notes |
 | --- | --- | --- |
+| v1.1.3 | 2026-11-16 | Fixed real-device Windows Settings UI layout & DPI scaling issues: fixed `TableLayoutPanel` row/column styles and added recursive `SuspendLayout` during `ScaleLayout` so bottom action buttons remain visible and the UI scale `ComboBox` no longer collapses; rebuilt Quick Links & Credentials headers and scaled dynamic row heights with Win32 cue banners, dimmed disabled entries, destructive delete styling, and full URL tooltips; constrained page card/control widths from client width to fix vertical scrolling and automatic word wrapping; added 4 Windows UI regression tests (443 logic + 27 UI = 470 total). |
 | v1.1.2 | 2026-11-15 | Full UI visual and interaction redesign: unified `MainForm`, `SettingsForm`, `DeviceEditorControl`, `ConfigTransferForm`, and `MainDialogs` under the Warm Slate + Deep Sea Teal terminal HUD theme with Warm Amber window-picking state, monospace bold `X / X` plan counter + rounded pill progress bar + left accent stripe, flat GroupBox-free settings cards with shared `UiTheme.GridStyle`, refined non-templated copywriting, and updated design contracts plus 443 logic + 23 Windows UI automated tests (466 total). |
 | v1.1.1 | 2026-11-14 | Maintenance & reliability release: added active copied credential highlight with 30s countdown and automatic reset on clear/skip, background-thread inspection folder opening, missing-folder fallback to configured root, exact top-level JSON key validation, font/GDI resource cleanup, 100%–200% DPI scaling on built-in modal dialogs, `HookManager` teardown concurrency hardening, and split `MainDialogs.cs` / `SettingsSupport.cs`; expanded automated coverage to 443 logic/integration + 21 Windows UI tests (464 total) with macOS `build.sh` and dynamic CI gate improvements. |
 | v1.1.0 | 2026-11-14 | Scheme B redesign release: 352px floating panel with Chinese date header, 2-column Quick Links, Today's Inspection Plan progress card (`Visited X / Y`, live toggle, Show Visited, per-row Unmark, confirmation-guarded Reset, visibility-guarded single completion prompt), 2-column Credentials with active copied check highlight, primary "Open inspection folder ↗" action with multi-folder chooser; added `HideVisitedDevices` (default true), rename and partial-import progress preservation, deferred midnight rollover, `progress.json` corruption write protection & backup recovery, redesigned viewfinder icon, and five Settings pages. |

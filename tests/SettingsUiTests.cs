@@ -16,7 +16,7 @@ namespace InspectionWidget.Tests
     /// </summary>
     public static class SettingsUiTests
     {
-        public const int CaseCount = 14;
+        public const int CaseCount = 18;
 
         public static void RunAll()
         {
@@ -407,6 +407,155 @@ namespace InspectionWidget.Tests
                     }
                 }
             });
+
+            TestRunner.Run("UI：设置窗底栏应用、保存并关闭、取消按钮在不同缩放与最小尺寸下完整可见", () =>
+            {
+                Console.WriteLine("[START] 设置窗底栏按钮可见性与边界检查");
+                int[] scales = { 100, 150, 200 };
+                for (int i = 0; i < scales.Length; i++)
+                {
+                    using (var env = new UiEnv(scales[i]))
+                    {
+                        AssertBottomButtonsVisible(env);
+                        env.Form.Size = env.Form.MinimumSize;
+                        Application.DoEvents();
+                        AssertBottomButtonsVisible(env);
+                    }
+                }
+            });
+
+            TestRunner.Run("UI：快捷链接与凭据表头可见且动态新增行高按缩放生效、子控件不裁切", () =>
+            {
+                Console.WriteLine("[START] 快捷链接与凭据动态行缩放布局检查");
+                using (var env = new UiEnv(150))
+                {
+                    env.Invoke(env.Form, "OnNavClicked", 2);
+                    Application.DoEvents();
+                    var linkHeader = (Control)env.Field(env.Form, "_linkHeader");
+                    Assert.True(linkHeader.Visible && linkHeader.Height > 0, "快捷链接表头应可见");
+
+                    env.Invoke(env.Form, "AddLink");
+                    Application.DoEvents();
+                    var linkRows = (IList)env.Field(env.Form, "_linkRows");
+                    Assert.Equal(1, linkRows.Count);
+                    object lRow = linkRows[0];
+                    var lPanel = (Control)env.Field(lRow, "Panel");
+                    Assert.True(lPanel.Height >= 66, "150% 缩放下快捷链接行高应同步放大：" + lPanel.Height);
+                    AssertChildInside(lPanel, (Control)env.Field(lRow, "EnabledBox"), "Link.EnabledBox");
+                    AssertChildInside(lPanel, (Control)env.Field(lRow, "TitleBox"), "Link.TitleBox");
+                    AssertChildInside(lPanel, (Control)env.Field(lRow, "UrlBox"), "Link.UrlBox");
+                    AssertChildInside(lPanel, (Control)env.Field(lRow, "UpButton"), "Link.UpButton");
+                    AssertChildInside(lPanel, (Control)env.Field(lRow, "DownButton"), "Link.DownButton");
+                    AssertChildInside(lPanel, (Control)env.Field(lRow, "DeleteButton"), "Link.DeleteButton");
+
+                    env.Invoke(env.Form, "OnNavClicked", 1);
+                    Application.DoEvents();
+                    var credHeader = (Control)env.Field(env.Form, "_credentialHeader");
+                    Assert.True(credHeader.Visible && credHeader.Height > 0, "凭据表头应可见");
+
+                    env.Invoke(env.Form, "AddCredential");
+                    Application.DoEvents();
+                    var credRows = (IList)env.Field(env.Form, "_credentialRows");
+                    object cRow = credRows[credRows.Count - 1];
+                    var cPanel = (Control)env.Field(cRow, "Panel");
+                    Assert.True(cPanel.Height >= 66, "150% 缩放下凭据行高应同步放大：" + cPanel.Height);
+                    AssertChildInside(cPanel, (Control)env.Field(cRow, "NameBox"), "Credential.NameBox");
+                    AssertChildInside(cPanel, (Control)env.Field(cRow, "SecretBox"), "Credential.SecretBox");
+                    AssertChildInside(cPanel, (Control)env.Field(cRow, "DeleteButton"), "Credential.DeleteButton");
+                }
+            });
+
+            TestRunner.Run("UI：存储与显示页面缩小时无横向溢出、缩放下拉框保持正常宽度且可垂直滚动", () =>
+            {
+                Console.WriteLine("[START] 存储与显示垂直滚动与缩放下拉框宽度检查");
+                using (var env = new UiEnv(150))
+                {
+                    env.Invoke(env.Form, "OnNavClicked", 3);
+                    Application.DoEvents();
+                    var scaleCombo = (ComboBox)env.Field(env.Form, "_uiScaleComboBox");
+                    Assert.True(scaleCombo.Width >= 140, "界面缩放下拉框不应被压扁：" + scaleCombo.Width);
+
+                    var pages = (Panel[])env.Field(env.Form, "_groupPanels");
+                    Panel storagePage = pages[3];
+                    var layout = (Control)storagePage.Tag;
+                    Assert.True(layout.Width <= storagePage.ClientSize.Width,
+                        "存储页内容宽不应超出页面客户区宽：" + layout.Width + " > " + storagePage.ClientSize.Width);
+
+                    env.Form.Size = env.Form.MinimumSize;
+                    Application.DoEvents();
+                    Assert.True(storagePage.AutoScroll, "存储页应开启 AutoScroll");
+                    Assert.True(layout.Width <= storagePage.ClientSize.Width,
+                        "缩小时存储页不应横向溢出：" + layout.Width + " > " + storagePage.ClientSize.Width);
+                    Assert.True(storagePage.VerticalScroll.Visible || layout.Height > storagePage.ClientSize.Height,
+                        "缩小时存储页应能触发垂直滚动");
+                }
+            });
+
+            TestRunner.Run("UI：配置备份与存储长文本及长路径自动换行且不溢出右边界", () =>
+            {
+                Console.WriteLine("[START] 长文本自动换行与右边界检查");
+                using (var env = new UiEnv())
+                {
+                    var draft = (SettingsDraft)env.Field(env.Form, "_draft");
+                    draft.RootPath = "C:\\工作\\02 运维\\03 巡检与审计\\2026\\2026.11\\超长目录名_用于验证自动换行不会横向溢出卡片右边界";
+                    env.Form.Size = env.Form.MinimumSize;
+
+                    env.Invoke(env.Form, "OnNavClicked", 3);
+                    Application.DoEvents();
+                    var planCheck = (Control)env.Field(env.Form, "_planModeCheckBox");
+                    var hideTrue = (Control)env.Field(env.Form, "_hideVisitedTrueRadio");
+                    var autoClear = (Control)env.Field(env.Form, "_autoClearCheckBox");
+                    Assert.True(planCheck.Right <= planCheck.Parent.ClientSize.Width, "计划复选框不应溢出");
+                    Assert.True(hideTrue.Right <= hideTrue.Parent.ClientSize.Width, "隐藏已点过单选框不应溢出");
+                    Assert.True(autoClear.Right <= autoClear.Parent.ClientSize.Width, "清空剪贴板复选框不应溢出");
+
+                    env.Invoke(env.Form, "OnNavClicked", 4);
+                    Application.DoEvents();
+                    var exportSource = (Label)env.Field(env.Form, "_exportSourceLabel");
+                    var importDetail = (Label)env.Field(env.Form, "_importDetailLabel");
+                    var aboutRoot = (Label)env.Field(env.Form, "_aboutRootPathLabel");
+                    Assert.True(exportSource.Right <= exportSource.Parent.ClientSize.Width, "导出说明应换行不溢出");
+                    Assert.True(importDetail.Right <= importDetail.Parent.ClientSize.Width, "导入说明应换行不溢出");
+                    Assert.True(aboutRoot.Right <= aboutRoot.Parent.ClientSize.Width, "关于根目录应换行不溢出");
+                    Assert.True(exportSource.Height > exportSource.Font.Height * 1.4f,
+                        "导出说明在最小宽度下应自动换行：" + exportSource.Height);
+                }
+            });
+        }
+
+        private static void AssertBottomButtonsVisible(UiEnv env)
+        {
+            var apply = (Button)env.Field(env.Form, "_applyButton");
+            var save = (Button)env.Field(env.Form, "_saveButton");
+            var cancel = (Control)env.Form.CancelButton;
+            Rectangle client = env.Form.ClientRectangle;
+            Rectangle applyRect = GetBoundsInForm(env.Form, apply);
+            Rectangle saveRect = GetBoundsInForm(env.Form, save);
+            Rectangle cancelRect = GetBoundsInForm(env.Form, cancel);
+
+            Assert.True(apply.Visible && save.Visible && cancel.Visible, "底栏按钮应全部可见");
+            Assert.True(client.Contains(applyRect), "应用按钮超出窗体边界：" + applyRect + " vs " + client);
+            Assert.True(client.Contains(saveRect), "保存并关闭按钮超出窗体边界：" + saveRect + " vs " + client);
+            Assert.True(client.Contains(cancelRect), "取消按钮超出窗体边界：" + cancelRect + " vs " + client);
+            Assert.True(applyRect.Right <= saveRect.Left && saveRect.Right <= cancelRect.Left,
+                "底栏按钮不应重叠：" + applyRect + ", " + saveRect + ", " + cancelRect);
+        }
+
+        private static Rectangle GetBoundsInForm(Form form, Control ctrl)
+        {
+            Rectangle screenRect = ctrl.Parent.RectangleToScreen(ctrl.Bounds);
+            return form.RectangleToClient(screenRect);
+        }
+
+        private static void AssertChildInside(Control parent, Control child, string name)
+        {
+            Assert.True(child.Visible, name + " 应可见");
+            Assert.True(child.Width > 0 && child.Height > 0, name + " 尺寸应大于 0：" + child.Size);
+            Assert.True(child.Left >= 0 && child.Top >= 0, name + " 位置不应为负：" + child.Bounds);
+            Assert.True(child.Right <= parent.ClientSize.Width,
+                name + " 右边界溢出：" + child.Right + " > " + parent.ClientSize.Width);
+            Assert.True(child.Bottom <= parent.ClientSize.Height,
+                name + " 下边界溢出：" + child.Bottom + " > " + parent.ClientSize.Height);
         }
 
         private static void AssertNoGroupBoxRecursive(Control root)

@@ -156,27 +156,60 @@ namespace InspectionWidget
         {
             if (root == null || factor <= 0 || Math.Abs(factor - 1.0) < 0.0001)
                 return;
-            root.SuspendLayout();
+            SuspendLayoutRecursive(root);
             try
             {
                 ScaleLayoutCore(root, factor, true);
             }
             finally
             {
-                root.ResumeLayout(true);
+                ResumeLayoutRecursive(root, true);
             }
+        }
+
+        private static void SuspendLayoutRecursive(Control control)
+        {
+            if (control == null)
+                return;
+            control.SuspendLayout();
+            for (int i = 0; i < control.Controls.Count; i++)
+                SuspendLayoutRecursive(control.Controls[i]);
+        }
+
+        private static void ResumeLayoutRecursive(Control control, bool performLayout)
+        {
+            if (control == null)
+                return;
+            for (int i = 0; i < control.Controls.Count; i++)
+                ResumeLayoutRecursive(control.Controls[i], performLayout);
+            control.ResumeLayout(performLayout);
         }
 
         private static void ScaleLayoutCore(Control control, double factor, bool isRoot)
         {
-            if (isRoot && control is Form)
+            if (isRoot)
             {
-                var form = (Form)control;
-                form.ClientSize = ScaleSize(form.ClientSize, factor);
+                if (control is Form)
+                {
+                    var form = (Form)control;
+                    form.ClientSize = ScaleSize(form.ClientSize, factor);
+                }
+                else
+                {
+                    control.Size = ScaleSize(control.Size, factor);
+                }
             }
-            else if (!isRoot)
+            else if (control.Dock == DockStyle.None)
             {
                 control.Bounds = ScaleRectangle(control.Bounds, factor);
+            }
+            else if (control.Dock == DockStyle.Top || control.Dock == DockStyle.Bottom)
+            {
+                control.Height = Scale(control.Height, factor);
+            }
+            else if (control.Dock == DockStyle.Left || control.Dock == DockStyle.Right)
+            {
+                control.Width = Scale(control.Width, factor);
             }
 
             control.Padding = ScalePadding(control.Padding, factor);
