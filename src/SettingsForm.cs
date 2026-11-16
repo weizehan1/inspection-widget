@@ -511,6 +511,7 @@ namespace InspectionWidget
                 return;
 
             _updatingPageLayout = true;
+            meta.Layout.SuspendLayout();
             try
             {
                 int scrollReserve = page.VerticalScroll.Visible ? 0 : SystemInformation.VerticalScrollBarWidth;
@@ -519,10 +520,8 @@ namespace InspectionWidget
                     meta.Layout.MaximumSize = new Size(layoutMaxWidth, 0);
 
                 int contentWidth = Math.Max(L(180), layoutMaxWidth - meta.Layout.Padding.Horizontal);
-                if (meta.Title != null && meta.Title.MaximumSize.Width != contentWidth)
-                    meta.Title.MaximumSize = new Size(contentWidth, 0);
-                if (meta.Desc != null && meta.Desc.MaximumSize.Width != contentWidth)
-                    meta.Desc.MaximumSize = new Size(contentWidth, 0);
+                SetWrappedWidth(meta.Title, contentWidth);
+                SetWrappedWidth(meta.Desc, contentWidth);
 
                 if (meta.UpdateContent != null)
                 {
@@ -535,8 +534,18 @@ namespace InspectionWidget
             }
             finally
             {
+                meta.Layout.ResumeLayout(true);
                 _updatingPageLayout = false;
             }
+        }
+
+        private void SetWrappedWidth(Control control, int containerInnerWidth)
+        {
+            if (control == null)
+                return;
+            int maxWidth = Math.Max(L(80), containerInnerWidth - control.Margin.Horizontal);
+            if (control.MaximumSize.Width != maxWidth)
+                control.MaximumSize = new Size(maxWidth, 0);
         }
 
         private Panel BuildDevicesPage()
@@ -899,6 +908,7 @@ namespace InspectionWidget
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0, 0, 0, 2),
                 AccessibleName = "开启今日巡检计划"
             };
             _planModeCheckBox.CheckedChanged += delegate
@@ -936,6 +946,7 @@ namespace InspectionWidget
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0),
                 AccessibleName = "保留已点过设备并显示对勾"
             };
             _hideVisitedTrueRadio.CheckedChanged += delegate
@@ -990,7 +1001,8 @@ namespace InspectionWidget
                 AutoSize = true,
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
-                BackColor = UiTheme.CardBackColor
+                BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0)
             };
             _modeAutoRadio.CheckedChanged += delegate { if (!_loading && _modeAutoRadio.Checked) SetCaptureMode(CaptureMode.Auto); };
             _modePrintWindowRadio.CheckedChanged += delegate { if (!_loading && _modePrintWindowRadio.Checked) SetCaptureMode(CaptureMode.PrintWindowOnly); };
@@ -1003,27 +1015,27 @@ namespace InspectionWidget
 
             _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
             {
-                storageCard.MaximumSize = new Size(contentWidth, 0);
+                SetWrappedWidth(storageCard, contentWidth);
                 int storageInner = Math.Max(L(160), contentWidth - storageCard.Padding.Horizontal);
-                settings.MaximumSize = new Size(storageInner, 0);
-                _rootStatusLabel.MaximumSize = new Size(storageInner, 0);
-                patternHelp.MaximumSize = new Size(storageInner, 0);
-                _autoClearCheckBox.MaximumSize = new Size(storageInner, 0);
+                SetWrappedWidth(settings, storageInner);
+                SetWrappedWidth(_rootStatusLabel, storageInner);
+                SetWrappedWidth(patternHelp, storageInner);
+                SetWrappedWidth(_autoClearCheckBox, storageInner);
 
-                planCard.MaximumSize = new Size(contentWidth, 0);
+                SetWrappedWidth(planCard, contentWidth);
                 int planInner = Math.Max(L(160), contentWidth - planCard.Padding.Horizontal);
-                planStack.MaximumSize = new Size(planInner, 0);
-                _planModeCheckBox.MaximumSize = new Size(planInner, 0);
-                hideTitle.MaximumSize = new Size(planInner, 0);
-                _hideVisitedTrueRadio.MaximumSize = new Size(planInner, 0);
-                _hideVisitedFalseRadio.MaximumSize = new Size(planInner, 0);
+                SetWrappedWidth(planStack, planInner);
+                SetWrappedWidth(_planModeCheckBox, planInner);
+                SetWrappedWidth(hideTitle, planInner);
+                SetWrappedWidth(_hideVisitedTrueRadio, planInner);
+                SetWrappedWidth(_hideVisitedFalseRadio, planInner);
 
-                modeCard.MaximumSize = new Size(contentWidth, 0);
+                SetWrappedWidth(modeCard, contentWidth);
                 int modeInner = Math.Max(L(160), contentWidth - modeCard.Padding.Horizontal);
-                modes.MaximumSize = new Size(modeInner, 0);
-                _modeAutoRadio.MaximumSize = new Size(modeInner, 0);
-                _modePrintWindowRadio.MaximumSize = new Size(modeInner, 0);
-                _modeBitBltRadio.MaximumSize = new Size(modeInner, 0);
+                SetWrappedWidth(modes, modeInner);
+                SetWrappedWidth(_modeAutoRadio, modeInner);
+                SetWrappedWidth(_modePrintWindowRadio, modeInner);
+                SetWrappedWidth(_modeBitBltRadio, modeInner);
             };
             return page;
         }
@@ -1181,6 +1193,7 @@ namespace InspectionWidget
                 LinkColor = UiTheme.AccentColor,
                 ActiveLinkColor = UiTheme.AccentHoverColor,
                 VisitedLinkColor = UiTheme.AccentColor,
+                Margin = new Padding(0),
                 AutoSize = true
             };
             repo.LinkClicked += delegate
@@ -1200,23 +1213,23 @@ namespace InspectionWidget
 
             _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
             {
-                transferCard.MaximumSize = new Size(contentWidth, 0);
+                SetWrappedWidth(transferCard, contentWidth);
                 int transferInner = Math.Max(L(160), contentWidth - transferCard.Padding.Horizontal);
-                transferStack.MaximumSize = new Size(transferInner, 0);
-                buttons.MaximumSize = new Size(transferInner, 0);
-                _exportSourceLabel.MaximumSize = new Size(transferInner, 0);
-                _importDetailLabel.MaximumSize = new Size(transferInner, 0);
-                notes.MaximumSize = new Size(transferInner, 0);
+                SetWrappedWidth(transferStack, transferInner);
+                SetWrappedWidth(buttons, transferInner);
+                SetWrappedWidth(_exportSourceLabel, transferInner);
+                SetWrappedWidth(_importDetailLabel, transferInner);
+                SetWrappedWidth(notes, transferInner);
 
-                aboutCard.MaximumSize = new Size(contentWidth, 0);
+                SetWrappedWidth(aboutCard, contentWidth);
                 int aboutInner = Math.Max(L(160), contentWidth - aboutCard.Padding.Horizontal);
-                aboutFlow.MaximumSize = new Size(aboutInner, 0);
-                aboutTitle.MaximumSize = new Size(aboutInner, 0);
-                aboutVersion.MaximumSize = new Size(aboutInner, 0);
-                aboutRuntime.MaximumSize = new Size(aboutInner, 0);
-                _aboutConfigPathLabel.MaximumSize = new Size(aboutInner, 0);
-                _aboutRootPathLabel.MaximumSize = new Size(aboutInner, 0);
-                repo.MaximumSize = new Size(aboutInner, 0);
+                SetWrappedWidth(aboutFlow, aboutInner);
+                SetWrappedWidth(aboutTitle, aboutInner);
+                SetWrappedWidth(aboutVersion, aboutInner);
+                SetWrappedWidth(aboutRuntime, aboutInner);
+                SetWrappedWidth(_aboutConfigPathLabel, aboutInner);
+                SetWrappedWidth(_aboutRootPathLabel, aboutInner);
+                SetWrappedWidth(repo, aboutInner);
             };
             return page;
         }

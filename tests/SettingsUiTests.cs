@@ -505,18 +505,24 @@ namespace InspectionWidget.Tests
                     var planCheck = (Control)env.Field(env.Form, "_planModeCheckBox");
                     var hideTrue = (Control)env.Field(env.Form, "_hideVisitedTrueRadio");
                     var autoClear = (Control)env.Field(env.Form, "_autoClearCheckBox");
-                    Assert.True(planCheck.Right <= planCheck.Parent.ClientSize.Width, "计划复选框不应溢出");
-                    Assert.True(hideTrue.Right <= hideTrue.Parent.ClientSize.Width, "隐藏已点过单选框不应溢出");
-                    Assert.True(autoClear.Right <= autoClear.Parent.ClientSize.Width, "清空剪贴板复选框不应溢出");
+                    Assert.True(planCheck.Right <= planCheck.Parent.ClientSize.Width,
+                        "计划复选框不应溢出：" + planCheck.Bounds + " vs " + planCheck.Parent.ClientSize);
+                    Assert.True(hideTrue.Right <= hideTrue.Parent.ClientSize.Width,
+                        "隐藏已点过单选框不应溢出：" + hideTrue.Bounds + " vs " + hideTrue.Parent.ClientSize);
+                    Assert.True(autoClear.Right <= autoClear.Parent.ClientSize.Width,
+                        "清空剪贴板复选框不应溢出：" + autoClear.Bounds + " vs " + autoClear.Parent.ClientSize);
 
                     env.Invoke(env.Form, "OnNavClicked", 4);
                     Application.DoEvents();
                     var exportSource = (Label)env.Field(env.Form, "_exportSourceLabel");
                     var importDetail = (Label)env.Field(env.Form, "_importDetailLabel");
                     var aboutRoot = (Label)env.Field(env.Form, "_aboutRootPathLabel");
-                    Assert.True(exportSource.Right <= exportSource.Parent.ClientSize.Width, "导出说明应换行不溢出");
-                    Assert.True(importDetail.Right <= importDetail.Parent.ClientSize.Width, "导入说明应换行不溢出");
-                    Assert.True(aboutRoot.Right <= aboutRoot.Parent.ClientSize.Width, "关于根目录应换行不溢出");
+                    Assert.True(exportSource.Right <= exportSource.Parent.ClientSize.Width,
+                        "导出说明应换行不溢出：" + exportSource.Bounds + " vs " + exportSource.Parent.ClientSize);
+                    Assert.True(importDetail.Right <= importDetail.Parent.ClientSize.Width,
+                        "导入说明应换行不溢出：" + importDetail.Bounds + " vs " + importDetail.Parent.ClientSize);
+                    Assert.True(aboutRoot.Right <= aboutRoot.Parent.ClientSize.Width,
+                        "关于根目录应换行不溢出：" + aboutRoot.Bounds + " vs " + aboutRoot.Parent.ClientSize);
                     Assert.True(exportSource.Height > exportSource.Font.Height * 1.4f,
                         "导出说明在最小宽度下应自动换行：" + exportSource.Height);
                 }

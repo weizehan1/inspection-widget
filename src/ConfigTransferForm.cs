@@ -134,6 +134,7 @@ namespace InspectionWidget
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0),
                 AutoSize = true
             };
             modeLayout.Controls.Add(_mergeRadio);
@@ -168,6 +169,7 @@ namespace InspectionWidget
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0),
                 AutoSize = true,
                 Enabled = document.IsFullBackup
             };
@@ -236,14 +238,14 @@ namespace InspectionWidget
                 if (bodyLayout.MaximumSize.Width != bodyMaxW)
                     bodyLayout.MaximumSize = new Size(bodyMaxW, 0);
                 int cardInner = Math.Max(220, bodyMaxW - previewCard.Padding.Horizontal);
-                source.MaximumSize = new Size(bodyMaxW, 0);
-                _mergeRadio.MaximumSize = new Size(cardInner, 0);
-                _replaceRadio.MaximumSize = new Size(cardInner, 0);
-                _importRootCheck.MaximumSize = new Size(cardInner, 0);
-                _replaceCredentialsCheck.MaximumSize = new Size(cardInner, 0);
-                _restoreLocalCheck.MaximumSize = new Size(cardInner, 0);
-                _summaryLabel.MaximumSize = new Size(cardInner, 0);
-                credentialNote.MaximumSize = new Size(cardInner, 0);
+                source.MaximumSize = new Size(Math.Max(120, bodyMaxW - source.Margin.Horizontal), 0);
+                _mergeRadio.MaximumSize = new Size(Math.Max(120, cardInner - _mergeRadio.Margin.Horizontal), 0);
+                _replaceRadio.MaximumSize = new Size(Math.Max(120, cardInner - _replaceRadio.Margin.Horizontal), 0);
+                _importRootCheck.MaximumSize = new Size(Math.Max(120, cardInner - _importRootCheck.Margin.Horizontal), 0);
+                _replaceCredentialsCheck.MaximumSize = new Size(Math.Max(120, cardInner - _replaceCredentialsCheck.Margin.Horizontal), 0);
+                _restoreLocalCheck.MaximumSize = new Size(Math.Max(120, cardInner - _restoreLocalCheck.Margin.Horizontal), 0);
+                _summaryLabel.MaximumSize = new Size(Math.Max(120, cardInner - _summaryLabel.Margin.Horizontal), 0);
+                credentialNote.MaximumSize = new Size(Math.Max(120, cardInner - credentialNote.Margin.Horizontal), 0);
             };
             root.Controls.Add(body, 0, 0);
 
