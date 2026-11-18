@@ -631,8 +631,11 @@ namespace InspectionWidget
                     int remainingHeight = Math.Max(L(220), h - headerUsed);
                     meta.UpdateContent(contentWidth, remainingHeight);
                 }
-                meta.LastWidth = w;
-                meta.LastHeight = h;
+                if (page.Visible)
+                {
+                    meta.LastWidth = w;
+                    meta.LastHeight = h;
+                }
             }
             finally
             {
@@ -1383,30 +1386,20 @@ namespace InspectionWidget
         private void SetGroup(int index)
         {
             _currentGroup = index;
-            if (_contentHost != null)
-                _contentHost.SuspendLayout();
-            try
+            for (int i = 0; i < _groupPanels.Length; i++)
             {
-                for (int i = 0; i < _groupPanels.Length; i++)
-                {
-                    bool active = i == index;
-                    if (_groupPanels[i].Visible != active)
-                        _groupPanels[i].Visible = active;
-                    _navButtons[i].Font = active ? UiTheme.BodyBoldFont : UiTheme.BodyFont;
-                    _navButtons[i].ForeColor = active ? UiTheme.AccentColor : UiTheme.PrimaryTextColor;
-                    _navButtons[i].BackColor = active ? UiTheme.SelectedNavBackColor : UiTheme.SurfaceColor;
-                }
-                _navAccent.Location = new Point(0, _navButtons[index].Top);
-                _navAccent.BringToFront();
-                if (index == GroupTransfer)
-                    RefreshAboutLabels();
-                UpdatePageLayout(_groupPanels[index]);
+                bool active = i == index;
+                if (_groupPanels[i].Visible != active)
+                    _groupPanels[i].Visible = active;
+                _navButtons[i].Font = active ? UiTheme.BodyBoldFont : UiTheme.BodyFont;
+                _navButtons[i].ForeColor = active ? UiTheme.AccentColor : UiTheme.PrimaryTextColor;
+                _navButtons[i].BackColor = active ? UiTheme.SelectedNavBackColor : UiTheme.SurfaceColor;
             }
-            finally
-            {
-                if (_contentHost != null)
-                    _contentHost.ResumeLayout(false);
-            }
+            _navAccent.Location = new Point(0, _navButtons[index].Top);
+            _navAccent.BringToFront();
+            if (index == GroupTransfer)
+                RefreshAboutLabels();
+            UpdatePageLayout(_groupPanels[index]);
         }
 
         private bool CommitDeviceOperation()
