@@ -18,6 +18,7 @@ namespace InspectionWidget
             var copy = new AppConfig
             {
                 RootPath = source.RootPath,
+                UsbSyncRootPath = source.UsbSyncRootPath,
                 Devices = source.Devices != null ? new List<string>(source.Devices) : new List<string>(),
                 Credentials = new List<CredentialEntry>(),
                 IsCredentialCollapsed = source.IsCredentialCollapsed,
@@ -43,6 +44,7 @@ namespace InspectionWidget
                     {
                         Title = entry.Title,
                         EncryptedSecret = entry.EncryptedSecret,
+                        Hotkey = entry.Hotkey,
                         NeedsReset = entry.NeedsReset
                     });
                 }
@@ -63,6 +65,7 @@ namespace InspectionWidget
         {
             public string Title;
             public string OriginalSecret;
+            public string Hotkey;
             public bool OriginalNeedsReset;
             public bool IsNew;
             public bool Cleared;
@@ -135,6 +138,7 @@ namespace InspectionWidget
             public int ErrorGroup;
             public int CredentialErrorIndex;
             public bool CredentialErrorOnTitle;
+            public bool CredentialErrorOnHotkey;
             public int LinkErrorIndex;
             public bool LinkErrorOnTitle;
             public AppConfig Result;
@@ -189,6 +193,7 @@ namespace InspectionWidget
                 working != null ? working.QuickLinks : null,
                 false,
                 rootPath,
+                working != null ? working.UsbSyncRootPath : null,
                 folderPattern,
                 autoClearClipboard,
                 uiScalePercent,
@@ -214,6 +219,37 @@ namespace InspectionWidget
             bool hideVisitedDevices,
             ICredentialProtector protector)
         {
+            return Build(
+                working,
+                devices,
+                credentialInputs,
+                quickLinks,
+                rootPath,
+                working != null ? working.UsbSyncRootPath : null,
+                folderPattern,
+                autoClearClipboard,
+                uiScalePercent,
+                captureMode,
+                planModeEnabled,
+                hideVisitedDevices,
+                protector);
+        }
+
+        public static Outcome Build(
+            AppConfig working,
+            List<string> devices,
+            List<CredentialRowCollector.RowInput> credentialInputs,
+            IList<QuickLinkEntry> quickLinks,
+            string rootPath,
+            string usbSyncRootPath,
+            string folderPattern,
+            bool autoClearClipboard,
+            int uiScalePercent,
+            CaptureMode captureMode,
+            bool planModeEnabled,
+            bool hideVisitedDevices,
+            ICredentialProtector protector)
+        {
             return BuildCore(
                 working,
                 devices,
@@ -221,6 +257,7 @@ namespace InspectionWidget
                 quickLinks,
                 true,
                 rootPath,
+                usbSyncRootPath,
                 folderPattern,
                 autoClearClipboard,
                 uiScalePercent,
@@ -239,6 +276,7 @@ namespace InspectionWidget
             IList<QuickLinkEntry> quickLinks,
             bool validateQuickLinks,
             string rootPath,
+            string usbSyncRootPath,
             string folderPattern,
             bool autoClearClipboard,
             int uiScalePercent,
@@ -256,6 +294,13 @@ namespace InspectionWidget
             string rootError = ConfigValidator.ValidateRootPath(rootPath);
             if (rootError != null)
                 return Fail("存储与显示：" + rootError, storageGroup);
+
+            string normalizedUsbRoot = string.IsNullOrWhiteSpace(usbSyncRootPath)
+                ? null
+                : usbSyncRootPath.Trim();
+            string usbError = ConfigValidator.ValidateRootPath(normalizedUsbRoot);
+            if (usbError != null)
+                return Fail("存储与显示：U盘目录——" + usbError, storageGroup);
 
             string patternError = FolderNamePattern.Validate(folderPattern);
             if (patternError != null)
@@ -276,6 +321,7 @@ namespace InspectionWidget
                 return Fail("凭据管理：凭据最多 " + CredentialRowCollector.MaxCredentials + " 条。", 1);
 
             var credentials = new List<CredentialEntry>();
+            var hotkeys = new List<string>();
             for (int i = 0; i < credentialInputs.Count; i++)
             {
                 CredentialRowCollector.RowInput input = credentialInputs[i];
@@ -293,15 +339,47 @@ namespace InspectionWidget
                         LinkErrorIndex = -1
                     };
                 }
+                string hotkeyErr = HotkeySpec.Validate(input.Hotkey);
+                if (hotkeyErr != null)
+                {
+                    return new Outcome
+                    {
+                        Saved = false,
+                        Error = "凭据管理：第 " + (i + 1) + " 条凭据——" + hotkeyErr,
+                        ErrorGroup = 1,
+                        CredentialErrorIndex = i,
+                        CredentialErrorOnHotkey = true,
+                        LinkErrorIndex = -1
+                    };
+                }
+                string normalizedHotkey = HotkeySpec.Normalize(input.Hotkey);
+                hotkeys.Add(normalizedHotkey);
+
                 bool newSecretEntered = !string.IsNullOrEmpty(input.NewPlainText);
                 credentials.Add(new CredentialEntry
                 {
                     Title = input.Title,
                     EncryptedSecret = secret,
+                    Hotkey = normalizedHotkey,
                     NeedsReset = input.Cleared
                         || (!newSecretEntered
                             && (input.OriginalNeedsReset || string.IsNullOrEmpty(secret)))
                 });
+            }
+
+            int dupHotkeyIndex;
+            string dupHotkeyErr = HotkeySpec.ValidateUnique(hotkeys, out dupHotkeyIndex);
+            if (dupHotkeyErr != null)
+            {
+                return new Outcome
+                {
+                    Saved = false,
+                    Error = "凭据管理：" + dupHotkeyErr,
+                    ErrorGroup = 1,
+                    CredentialErrorIndex = dupHotkeyIndex,
+                    CredentialErrorOnHotkey = true,
+                    LinkErrorIndex = -1
+                };
             }
 
             List<QuickLinkEntry> normalizedLinks = QuickLinkCloner.CloneList(quickLinks);
@@ -340,6 +418,7 @@ namespace InspectionWidget
             result.Credentials = credentials;
             result.QuickLinks = normalizedLinks;
             result.RootPath = rootPath;
+            result.UsbSyncRootPath = normalizedUsbRoot;
             result.FolderNamePattern = folderPattern;
             result.AutoClearClipboard = autoClearClipboard;
             result.UiScalePercent = uiScalePercent;

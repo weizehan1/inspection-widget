@@ -136,7 +136,7 @@ namespace InspectionWidget
 
             var content = DialogCardHelper.CreateBodyHost(
                 UiTheme.ErrorColor,
-                "确定清空今日所有设备的“已点过”记录并重新开始本轮吗？\n\n已保存的截图文件不会被删除。");
+                "确定清空今日“已点过”记录并重新开始本轮吗？（不会删除截图文件）");
             var buttons = DialogCardHelper.CreateButtonDock();
 
             var confirm = UiTheme.DangerButton("确定重置");

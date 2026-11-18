@@ -40,6 +40,8 @@ namespace InspectionWidget.Tests
             InspectionFolderNavigatorTests.RunAll();
             HideVisitedDevicesTests.RunAll();
             SchemeBIntegrationTests.RunAll();
+            InspectionFileTransferServiceTests.RunAll();
+            HotkeySpecTests.RunAll();
 
             bool windowsUiSkipped = false;
             if (windowsUiRequested)

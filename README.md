@@ -8,7 +8,7 @@
 
 常驻 Windows 桌面右下角的置顶小面板：点设备名 → 点目标窗口 → 只截那个窗口，截图自动按日期归档；常用账号密码一键复制，用完自动清剪贴板。专为日常巡检设计。
 
-`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.1.3` · `单文件 exe，零第三方依赖`
+`平台 Windows 10/11` · `运行时 .NET Framework 4.8（Win10 1903+ 系统自带）` · `版本 v1.2.0` · `单文件 exe，零第三方依赖`
 
 ### 它解决什么问题
 
@@ -132,6 +132,7 @@ bash build.sh
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.2.0 | 2026-11-18 | 性能优化、界面精简与三项高频效率功能：修复设置页「存储与显示」切页卡顿（双缓冲 + 页面布局尺寸缓存 + 切页挂起）；精简主面板与设置窗口冗余说明与防御性文案；新增主面板「贴入文件」（读取剪贴板文件/文件夹递归存入今日目录，重名自动顺延）；新增凭据自定义全局快捷键一键复制并模拟 `Ctrl+V` 粘贴；新增内外网联动「U盘同步」（配置 U盘根目录并从当日日期文件夹增量同步到外网截图目录）；测试扩展至 452 条逻辑/集成 + 27 条 Windows UI（共 479 条）。 |
 | v1.1.3 | 2026-11-16 | 修复 Windows 实机设置界面布局与 DPI 适配问题：补齐 `TableLayoutPanel` 行列约束与递归挂起缩放以解决右下角「应用 / 保存并关闭 / 取消」按钮不可见及界面缩放下拉框塌陷；重构「快捷链接」「凭据」表头与动态缩放行高并新增原生输入框占位提示、停用态置灰及网址 Tooltip；由页面客户区宽度向下约束卡片、按钮与文本自动换行并修复上下滚动；新增 4 条 Windows UI 回归测试（共 443 逻辑 + 27 UI = 470 条）。 |
 | v1.1.2 | 2026-11-15 | 前端视觉与交互细节全面改版：全套界面（主面板、五页设置窗口、设备编辑器、配置导入导出、内置弹窗）统一采用 Warm Slate 暖灰纸底与 Deep Sea Teal 深海青点缀色调，以琥珀色标注待选窗状态；今日巡检计划卡片重塑为粗体等宽计数器（`X / X`）、圆角胶囊进度条与左侧强调色条；去除各窗口多余 `GroupBox` 边框并统一复用 `UiTheme.GridStyle`；清理主面板按钮与提示中的冗余符号及机械拼接文案，并同步更新 `DESIGN.md`、`design-contract.md` 与 `443` 条逻辑 + `23` 条 Windows UI（共 `466` 条）自动化测试断言。 |
 | v1.1.1 | 2026-11-14 | 维护与稳健性更新：补齐凭据复制按钮高亮与 30 秒倒计时反馈（含清空/跳过后复位）、后台线程打开巡检目录、失联目录回退至配置目录、顶层 JSON 键精确校验、字体与 GDI 资源安全释放、内置弹窗 100%–200% DPI 缩放对齐、`HookManager` 卸载并发加固，并拆分弹窗与设置辅助模块；测试规模扩展至 443 条纯逻辑/集成 + 21 条 Windows UI（共 464 条），优化 macOS `build.sh` 与 CI 动态测试门禁。 |
@@ -153,7 +154,7 @@ bash build.sh
 
 A small always-on-top panel that lives in the bottom-right corner of your Windows desktop: click a device name, click the target window, and only that window is captured and filed away by date automatically. Frequently used credentials are one click to copy, and the clipboard is wiped automatically afterwards. Built for day-to-day inspection rounds.
 
-`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.1.3` · `Single-file exe, zero third-party dependencies`
+`Platform Windows 10/11` · `Runtime .NET Framework 4.8 (built into Windows 10 1903+)` · `Version v1.2.0` · `Single-file exe, zero third-party dependencies`
 
 ### Problems it solves
 

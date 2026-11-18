@@ -9,12 +9,17 @@ using InspectionWidget.Capture;
 using InspectionWidget.Config;
 using InspectionWidget.Credentials;
 using InspectionWidget.Links;
+using InspectionWidget.Native;
 using InspectionWidget.Planning;
 using IClock = InspectionWidget.Storage.IClock;
 using InspectionFolderNavigator = InspectionWidget.Storage.InspectionFolderNavigator;
 using ScreenshotSaver = InspectionWidget.Storage.ScreenshotSaver;
 using StorageSaveResult = InspectionWidget.Storage.SaveResult;
 using SystemClock = InspectionWidget.Storage.SystemClock;
+using ClipboardCopyResult = InspectionWidget.Storage.ClipboardCopyResult;
+using InspectionFileTransferService = InspectionWidget.Storage.InspectionFileTransferService;
+using UsbSyncResult = InspectionWidget.Storage.UsbSyncResult;
+using UsbSyncStatus = InspectionWidget.Storage.UsbSyncStatus;
 
 namespace InspectionWidget
 {
@@ -106,6 +111,10 @@ namespace InspectionWidget
         private readonly IClipboardGateway _clipboardGateway = new WindowsClipboardGateway();
         private ClipboardGuard _clipboardGuard;
         private CredentialService _credentialService;
+        private readonly GlobalHotkeyManager _hotkeyManager = new GlobalHotkeyManager();
+        private IPasteSimulator _pasteSimulator = new WindowsPasteSimulator();
+        private readonly InspectionFileTransferService _fileTransferService = new InspectionFileTransferService();
+        private string _hotkeyWarning;
 
         // ---------- 保存链路（Task 5） ----------
 
@@ -206,6 +215,9 @@ namespace InspectionWidget
         private Panel _credentialZonePanel;
         private Panel _deviceZonePanel;
         private Panel _bottomPanel;
+        private Button _pasteFileButton;
+        private Button _usbSyncButton;
+        private ContextMenuStrip _usbSyncMenu;
         private Button _openFolderButton;
         private Label _feedbackLabel;
         private Label _rootLabel;
@@ -570,6 +582,21 @@ namespace InspectionWidget
                 ApplyScaleAndRebuild(true, true);
             else
                 LayoutSections();
+            RebindCredentialHotkeys();
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == NativeMethods.WM_HOTKEY && _hotkeyManager != null)
+            {
+                int credIndex;
+                if (_hotkeyManager.TryResolveHotkey(m.WParam.ToInt32(), out credIndex))
+                {
+                    OnCredentialHotkeyTriggered(credIndex);
+                    return;
+                }
+            }
+            base.WndProc(ref m);
         }
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -785,10 +812,11 @@ namespace InspectionWidget
             };
             _quickLinkSubLabel = new Label
             {
-                Text = "在浏览器打开",
+                Text = string.Empty,
                 Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true,
+                Visible = false,
                 Location = new Point(PanelLayout.SchemeBPanelWidth - 82, 3)
             };
             _quickLinkHeaderPanel.Controls.Add(_quickLinkHeaderLabel);
@@ -934,10 +962,11 @@ namespace InspectionWidget
 
             _planDisabledHintLabel = new Label
             {
-                Text = "开启后记录今日已点项目，不改变截图方式。",
+                Text = string.Empty,
                 Font = font11,
                 ForeColor = SecondaryTextColor,
-                AutoSize = false
+                AutoSize = false,
+                Visible = false
             };
 
             _planCardPanel.Controls.Add(_planTitleLabel);
@@ -962,7 +991,7 @@ namespace InspectionWidget
             };
             _credentialSubLabel = new Label
             {
-                Text = "点按复制，30 秒后清空",
+                Text = string.Empty,
                 Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true
@@ -1004,7 +1033,7 @@ namespace InspectionWidget
             };
             _deviceSubLabel = new Label
             {
-                Text = "点击设备，再选窗口",
+                Text = string.Empty,
                 Font = font11,
                 ForeColor = WeakTextColor,
                 AutoSize = true
@@ -1059,6 +1088,45 @@ namespace InspectionWidget
                 TextAlign = ContentAlignment.MiddleLeft
             };
             _feedbackLabel.Click += OnFeedbackLabelClicked;
+
+            _pasteFileButton = new Button
+            {
+                Text = "贴入文件",
+                Font = font12,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = SurfaceColor,
+                ForeColor = PrimaryTextColor,
+                Cursor = Cursors.Hand,
+                AccessibleName = "从剪贴板贴入文件或文件夹"
+            };
+            _pasteFileButton.FlatAppearance.BorderColor = BorderColor;
+            _pasteFileButton.FlatAppearance.BorderSize = 1;
+            _pasteFileButton.FlatAppearance.MouseOverBackColor = UiTheme.NavHoverBackColor;
+            _pasteFileButton.Click += OnPasteClipboardFilesClicked;
+
+            _usbSyncButton = new Button
+            {
+                Text = "U盘同步",
+                Font = font12,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = SurfaceColor,
+                ForeColor = PrimaryTextColor,
+                Cursor = Cursors.Hand,
+                AccessibleName = "从U盘目录同步今日巡检文件"
+            };
+            _usbSyncButton.FlatAppearance.BorderColor = BorderColor;
+            _usbSyncButton.FlatAppearance.BorderSize = 1;
+            _usbSyncButton.FlatAppearance.MouseOverBackColor = UiTheme.NavHoverBackColor;
+            _usbSyncButton.Click += OnUsbSyncClicked;
+            _usbSyncMenu = new ContextMenuStrip();
+            var setUsbItem = new ToolStripMenuItem("设置 U盘目录…");
+            setUsbItem.Click += delegate { PromptAndSaveUsbRootPath(false); };
+            var clearUsbItem = new ToolStripMenuItem("清除 U盘目录");
+            clearUsbItem.Click += delegate { ClearUsbRootPathFromMain(); };
+            _usbSyncMenu.Items.Add(setUsbItem);
+            _usbSyncMenu.Items.Add(clearUsbItem);
+            _usbSyncButton.ContextMenuStrip = _usbSyncMenu;
+
             _openFolderButton = new Button
             {
                 Text = "打开巡检文件夹",
@@ -1080,6 +1148,7 @@ namespace InspectionWidget
             _openFolderButton.Click += OnRootLabelClicked;
 
             _rootToolTip = new ToolTip();
+            _rootToolTip.SetToolTip(_pasteFileButton, "将剪贴板中的文件或文件夹存入今日巡检目录");
             _rootLabel = new Label
             {
                 Font = font11,
@@ -1092,6 +1161,8 @@ namespace InspectionWidget
             };
             _rootLabel.Click += OnRootLabelClicked;
             bottomPanel.Controls.Add(_feedbackLabel);
+            bottomPanel.Controls.Add(_pasteFileButton);
+            bottomPanel.Controls.Add(_usbSyncButton);
             bottomPanel.Controls.Add(_openFolderButton);
             bottomPanel.Controls.Add(_rootLabel);
             Controls.Add(bottomPanel);
@@ -1157,13 +1228,26 @@ namespace InspectionWidget
             _feedbackLabel.Font = Font12;
             _feedbackLabel.Size = new Size(fullContent, M(22));
             _feedbackLabel.Location = new Point(margin, M(6));
+
+            int actionGap = M(8);
+            int halfW = Math.Max(M(60), (fullContent - actionGap) / 2);
+            int rightHalfW = Math.Max(M(60), fullContent - actionGap - halfW);
+            int actionRowY = M(32);
+            int actionRowH = M(28);
+            _pasteFileButton.Font = Font12;
+            _pasteFileButton.Size = new Size(halfW, actionRowH);
+            _pasteFileButton.Location = new Point(margin, actionRowY);
+            _usbSyncButton.Font = Font12;
+            _usbSyncButton.Size = new Size(rightHalfW, actionRowH);
+            _usbSyncButton.Location = new Point(margin + halfW + actionGap, actionRowY);
+
             _openFolderButton.Font = Font13Bold;
             _openFolderButton.Size = new Size(fullContent, M(34));
             _openFolderButton.Padding = new Padding(M(22), 0, M(26), 0);
-            _openFolderButton.Location = new Point(margin, M(32));
+            _openFolderButton.Location = new Point(margin, M(66));
             _rootLabel.Font = Font11;
             _rootLabel.Size = new Size(fullContent, M(18));
-            _rootLabel.Location = new Point(margin, M(72));
+            _rootLabel.Location = new Point(margin, M(104));
         }
 
         private int ComputePlanCardHeight()
@@ -1181,7 +1265,7 @@ namespace InspectionWidget
                 int actionH = M(22);
                 return Math.Max(M(100), actionY + actionH + padY);
             }
-            return M(58);
+            return M(36);
         }
 
         private int ComputeQuickLinksHeight()
@@ -1369,14 +1453,10 @@ namespace InspectionWidget
             _planCountLabel.Visible = enabled;
             _planTrackPanel.Visible = enabled;
             _planActionPanel.Visible = enabled;
-            _planDisabledHintLabel.Visible = !enabled;
+            _planDisabledHintLabel.Visible = false;
 
             if (!enabled)
-            {
-                _planDisabledHintLabel.Size = new Size(innerW, M(20));
-                _planDisabledHintLabel.Location = new Point(leftPad, padY + M(24));
                 return;
-            }
 
             int row2Y = padY + M(22);
             int countH = _planCountLabel.PreferredHeight > 0 ? _planCountLabel.PreferredHeight : _planCountLabel.Height;
@@ -1667,6 +1747,7 @@ namespace InspectionWidget
             UpdateDeviceHeader();
             UpdateRootLabel();
             RefreshStateVisuals();
+            RebindCredentialHotkeys();
 
             if (_configWriteProtected)
             {
@@ -1679,6 +1760,10 @@ namespace InspectionWidget
             else if (_session != null && _session.HasProgressError)
             {
                 ShowProgressErrorFeedback();
+            }
+            else if (!string.IsNullOrEmpty(_hotkeyWarning))
+            {
+                ShowFeedback(_hotkeyWarning, true);
             }
             else if (_feedbackPersistent)
             {
@@ -2347,9 +2432,10 @@ namespace InspectionWidget
                 }
                 if (_deviceToolTip != null)
                 {
+                    string hkSuffix = !string.IsNullOrEmpty(entry.Hotkey) ? " [" + entry.Hotkey + "]" : string.Empty;
                     string tip = active && _config.AutoClearClipboard && _credentialCountdownSeconds > 0
-                        ? "已复制「" + entry.Title + "」，" + _credentialCountdownSeconds + " 秒后自动清空"
-                        : (active ? "已复制「" + entry.Title + "」" : "复制凭据：" + entry.Title);
+                        ? "已复制「" + entry.Title + "」，" + _credentialCountdownSeconds + " 秒后自动清空" + hkSuffix
+                        : (active ? "已复制「" + entry.Title + "」" + hkSuffix : "复制凭据：" + entry.Title + hkSuffix);
                     _deviceToolTip.SetToolTip(btn, tip);
                 }
                 btn.Invalidate();
@@ -2425,9 +2511,7 @@ namespace InspectionWidget
             }
             else
             {
-                _credentialSubLabel.Text = _config.AutoClearClipboard
-                    ? "点按复制，30 秒后清空"
-                    : "点按复制";
+                _credentialSubLabel.Text = string.Empty;
                 _credentialSubLabel.ForeColor = WeakTextColor;
             }
             PositionCredentialSubLabel();
@@ -2479,8 +2563,21 @@ namespace InspectionWidget
                 : _config.RootPath;
             _rootLabel.ForeColor = WeakTextColor;
             if (_rootToolTip != null)
+            {
                 _rootToolTip.SetToolTip(_rootLabel, string.IsNullOrEmpty(_config.RootPath) ? string.Empty : _config.RootPath);
+                UpdateUsbSyncToolTip();
+            }
             _openFolderButton.Invalidate();
+        }
+
+        private void UpdateUsbSyncToolTip()
+        {
+            if (_rootToolTip == null || _usbSyncButton == null || _config == null)
+                return;
+            string tip = string.IsNullOrEmpty(_config.UsbSyncRootPath)
+                ? "设置 U盘目录并同步今日巡检文件"
+                : "从U盘同步今日文件（" + _config.UsbSyncRootPath + "），右键可重设";
+            _rootToolTip.SetToolTip(_usbSyncButton, tip);
         }
 
         // ---------- 交互 ----------
@@ -2707,10 +2804,31 @@ namespace InspectionWidget
             var button = sender as Button;
             if (button == null) return;
             var entry = button.Tag as CredentialEntry;
-            if (entry == null) return;
-            if (_credentialService == null) return;
+            CopyCredentialEntry(entry, false);
+        }
 
-            // 全链路走 CredentialService：解密→写剪贴板+令牌→30 秒自动清空（Guard）
+        private void RebindCredentialHotkeys()
+        {
+            if (!IsHandleCreated || IsDisposed || _config == null || _hotkeyManager == null)
+                return;
+            List<HotkeyBindingFailure> failures = _hotkeyManager.Bind(Handle, _config.Credentials);
+            _hotkeyWarning = failures.Count > 0 ? failures[0].Error : null;
+        }
+
+        private void OnCredentialHotkeyTriggered(int credentialIndex)
+        {
+            if (_formClosing || IsDisposed || _config == null || _config.Credentials == null)
+                return;
+            if (credentialIndex < 0 || credentialIndex >= _config.Credentials.Count)
+                return;
+            CopyCredentialEntry(_config.Credentials[credentialIndex], true);
+        }
+
+        private void CopyCredentialEntry(CredentialEntry entry, bool alsoPaste)
+        {
+            if (entry == null || _credentialService == null)
+                return;
+
             CopyResult result = _credentialService.Copy(entry);
             switch (result)
             {
@@ -2724,20 +2842,59 @@ namespace InspectionWidget
                             _credentialCountdownTimer.Stop();
                             _credentialCountdownTimer.Start();
                         }
-                        ShowSuccessFeedback("已复制「" + entry.Title + "」（" + _credentialCountdownSeconds + " 秒后清空）");
+                        if (!alsoPaste)
+                            ShowSuccessFeedback("已复制「" + entry.Title + "」（" + _credentialCountdownSeconds + " 秒后清空）");
                     }
                     else
                     {
                         _credentialCountdownSeconds = 0;
                         if (_credentialCountdownTimer != null)
                             _credentialCountdownTimer.Stop();
-                        ShowSuccessFeedback("已复制「" + entry.Title + "」");
+                        if (!alsoPaste)
+                            ShowSuccessFeedback("已复制「" + entry.Title + "」");
                     }
                     RefreshCredentialButtonVisuals();
                     UpdateCredentialHeader();
+
+                    if (alsoPaste)
+                    {
+                        string title = entry.Title;
+                        int clearSec = _config.AutoClearClipboard ? _credentialCountdownSeconds : 0;
+                        IPasteSimulator simulator = _pasteSimulator;
+                        var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
+                        {
+                            string pasteErr = null;
+                            bool pasted = simulator != null && simulator.TryPaste(out pasteErr);
+                            if (IsDisposed || _formClosing)
+                                return;
+                            try
+                            {
+                                BeginInvoke(new Action(delegate
+                                {
+                                    if (IsDisposed || _formClosing)
+                                        return;
+                                    if (pasted)
+                                    {
+                                        string msg = clearSec > 0
+                                            ? "已复制并粘贴「" + title + "」（" + clearSec + " 秒后清空）"
+                                            : "已复制并粘贴「" + title + "」";
+                                        ShowSuccessFeedback(msg);
+                                    }
+                                    else
+                                    {
+                                        ShowFeedback("已复制「" + title + "」，自动粘贴失败：" + (pasteErr ?? "未知错误"), true);
+                                    }
+                                }));
+                            }
+                            catch
+                            {
+                            }
+                        }));
+                        worker.IsBackground = true;
+                        worker.Start();
+                    }
                     break;
                 case CopyResult.NeedsReset:
-                    // 运行时标记并刷新按钮显示（内存标记，不落盘）
                     if (string.Equals(_copiedCredentialTitle, entry.Title, StringComparison.OrdinalIgnoreCase))
                     {
                         _copiedCredentialTitle = null;
@@ -2751,7 +2908,7 @@ namespace InspectionWidget
                     ApplyHeightAnchored();
                     ShowFeedback("该凭据需重新设置，请到设置中重新填写", true);
                     break;
-                default: // Failed
+                default:
                     ShowFeedback("复制失败，请重试", true);
                     break;
             }
@@ -2884,6 +3041,192 @@ namespace InspectionWidget
         private void OnRootLabelClicked(object sender, EventArgs e)
         {
             OpenInspectionFolders();
+        }
+
+        private void OnPasteClipboardFilesClicked(object sender, EventArgs e)
+        {
+            if (_configWriteProtected)
+            {
+                if (RetryConfigLoad())
+                    ShowSuccessFeedback("配置读取已恢复，保存已解除保护");
+                return;
+            }
+            if (string.IsNullOrEmpty(_config.RootPath))
+            {
+                ShowFeedback("尚未设置保存目录，请先在设置中选择", true);
+                return;
+            }
+
+            string[] paths = ReadClipboardFileDropPaths();
+            if (paths == null || paths.Length == 0)
+            {
+                ShowFeedback("剪贴板中没有文件或文件夹", true);
+                return;
+            }
+
+            string rootPath = _config.RootPath;
+            string pattern = _config.FolderNamePattern;
+            DateTime now = _clock.Now;
+            if (_pasteFileButton != null)
+                _pasteFileButton.Enabled = false;
+
+            var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
+            {
+                ClipboardCopyResult copyResult = _fileTransferService.CopyClipboardItems(
+                    paths, rootPath, pattern, now);
+                if (IsDisposed || _formClosing)
+                    return;
+                try
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        if (_pasteFileButton != null && !_pasteFileButton.IsDisposed)
+                            _pasteFileButton.Enabled = true;
+                        if (IsDisposed || _formClosing)
+                            return;
+                        if (copyResult.Success)
+                        {
+                            int total = copyResult.CopiedFileCount + copyResult.CopiedDirectoryCount;
+                            ShowSuccessFeedback("已存入今日目录：" + total + " 项");
+                        }
+                        else
+                        {
+                            ShowFeedback(copyResult.Error ?? "存入剪贴板文件失败", true);
+                        }
+                    }));
+                }
+                catch
+                {
+                }
+            }));
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        private static string[] ReadClipboardFileDropPaths()
+        {
+            try
+            {
+                if (!Clipboard.ContainsFileDropList())
+                    return null;
+                System.Collections.Specialized.StringCollection list = Clipboard.GetFileDropList();
+                if (list == null || list.Count == 0)
+                    return null;
+                var paths = new string[list.Count];
+                list.CopyTo(paths, 0);
+                return paths;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void OnUsbSyncClicked(object sender, EventArgs e)
+        {
+            if (_configWriteProtected)
+            {
+                if (RetryConfigLoad())
+                    ShowSuccessFeedback("配置读取已恢复，保存已解除保护");
+                return;
+            }
+            if (string.IsNullOrEmpty(_config.RootPath))
+            {
+                ShowFeedback("尚未设置保存目录，请先在设置中选择", true);
+                return;
+            }
+            if (string.IsNullOrEmpty(_config.UsbSyncRootPath))
+            {
+                PromptAndSaveUsbRootPath(true);
+                return;
+            }
+            RunUsbSync();
+        }
+
+        private void PromptAndSaveUsbRootPath(bool syncAfterSelect)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "选择 U盘巡检根目录（例如 D:\\巡检）";
+                dialog.ShowNewFolderButton = false;
+                if (!string.IsNullOrEmpty(_config.UsbSyncRootPath))
+                    dialog.SelectedPath = _config.UsbSyncRootPath;
+                if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrEmpty(dialog.SelectedPath))
+                    return;
+
+                _config.UsbSyncRootPath = dialog.SelectedPath;
+                SaveBestEffort();
+                UpdateUsbSyncToolTip();
+                if (syncAfterSelect)
+                    RunUsbSync();
+                else
+                    ShowSuccessFeedback("已设置 U盘目录：" + dialog.SelectedPath);
+            }
+        }
+
+        private void ClearUsbRootPathFromMain()
+        {
+            if (string.IsNullOrEmpty(_config.UsbSyncRootPath))
+                return;
+            _config.UsbSyncRootPath = null;
+            SaveBestEffort();
+            UpdateUsbSyncToolTip();
+            ShowSuccessFeedback("已清除 U盘目录");
+        }
+
+        private void RunUsbSync()
+        {
+            string usbRoot = _config.UsbSyncRootPath;
+            string targetRoot = _config.RootPath;
+            string pattern = _config.FolderNamePattern;
+            DateTime now = _clock.Now;
+            if (_usbSyncButton != null)
+                _usbSyncButton.Enabled = false;
+
+            var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
+            {
+                UsbSyncResult syncResult = _fileTransferService.SyncFromUsb(
+                    usbRoot, targetRoot, pattern, now);
+                if (IsDisposed || _formClosing)
+                    return;
+                try
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        if (_usbSyncButton != null && !_usbSyncButton.IsDisposed)
+                            _usbSyncButton.Enabled = true;
+                        if (IsDisposed || _formClosing)
+                            return;
+                        if (syncResult.Status == UsbSyncStatus.Success)
+                        {
+                            if (syncResult.CopiedFileCount == 0 && syncResult.SkippedFileCount == 0)
+                            {
+                                ShowFeedback("U盘今日巡检目录为空", false);
+                            }
+                            else if (syncResult.CopiedFileCount == 0)
+                            {
+                                ShowSuccessFeedback("U盘文件已全部存在（跳过 " + syncResult.SkippedFileCount + " 个）");
+                            }
+                            else
+                            {
+                                string msg = "已从U盘同步 " + syncResult.CopiedFileCount + " 个文件";
+                                if (syncResult.SkippedFileCount > 0)
+                                    msg += "（跳过 " + syncResult.SkippedFileCount + " 个）";
+                                ShowSuccessFeedback(msg);
+                            }
+                        }
+                        else
+                        {
+                            ShowFeedback(syncResult.Error ?? "U盘同步失败", true);
+                        }
+                    }));
+                }
+                catch
+                {
+                }
+            }));
+            worker.IsBackground = true;
+            worker.Start();
         }
 
         private void OpenInspectionFolders()
@@ -3020,7 +3363,7 @@ namespace InspectionWidget
             _deviceHeaderLabel.ForeColor = waiting ? WarningColor : (capturing ? AccentColor : SecondaryTextColor);
             _deviceSubLabel.Text = waiting
                 ? (_stateMachine.CurrentDevice ?? "等待选窗")
-                : (capturing ? (_stateMachine.CurrentDevice ?? "截图中") : "点击设备，再选窗口");
+                : (capturing ? (_stateMachine.CurrentDevice ?? "截图中") : string.Empty);
             _deviceSubLabel.ForeColor = waiting ? WarningColor : (capturing ? AccentColor : WeakTextColor);
 
             for (int i = 0; i < _deviceRows.Count; i++)
@@ -3874,6 +4217,13 @@ namespace InspectionWidget
                 _clipboardGuard.ClearSkipped -= OnClipboardClearSkipped;
                 _clipboardGuard.Dispose();
             }
+            if (_usbSyncMenu != null)
+            {
+                _usbSyncMenu.Dispose();
+                _usbSyncMenu = null;
+            }
+            if (_hotkeyManager != null)
+                _hotkeyManager.Dispose();
             _hooks.Stop();
             if (!_hooksDisposed)
             {

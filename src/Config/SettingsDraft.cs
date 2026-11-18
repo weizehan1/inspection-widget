@@ -24,6 +24,7 @@ namespace InspectionWidget.Config
     {
         public string Title;
         public string OriginalSecret;
+        public string Hotkey;
         public bool IsNew;
         public bool Cleared;
         public bool OriginalNeedsReset;
@@ -34,6 +35,7 @@ namespace InspectionWidget.Config
             {
                 Title = Title,
                 OriginalSecret = OriginalSecret,
+                Hotkey = Hotkey,
                 IsNew = IsNew,
                 Cleared = Cleared,
                 OriginalNeedsReset = OriginalNeedsReset
@@ -62,6 +64,7 @@ namespace InspectionWidget.Config
         public bool PendingImportDeviceReplace;
 
         public string RootPath;
+        public string UsbSyncRootPath;
         public string FolderPattern;
         public bool AutoClearClipboard;
         public int UiScalePercent;
@@ -117,6 +120,7 @@ namespace InspectionWidget.Config
                     {
                         Title = entry.Title,
                         OriginalSecret = entry.EncryptedSecret,
+                        Hotkey = entry.Hotkey,
                         IsNew = false,
                         Cleared = false,
                         OriginalNeedsReset = entry.NeedsReset
@@ -126,6 +130,7 @@ namespace InspectionWidget.Config
             }
 
             RootPath = config.RootPath;
+            UsbSyncRootPath = config.UsbSyncRootPath;
             FolderPattern = FolderNamePattern.Normalize(config.FolderNamePattern);
             AutoClearClipboard = config.AutoClearClipboard;
             UiScalePercent = UiScale.Normalize(config.UiScalePercent);
@@ -239,6 +244,7 @@ namespace InspectionWidget.Config
             if (!mergeOnly)
             {
                 RootPath = plan.Result.RootPath;
+                UsbSyncRootPath = plan.Result.UsbSyncRootPath;
                 FolderPattern = FolderNamePattern.Normalize(plan.Result.FolderNamePattern);
                 AutoClearClipboard = plan.Result.AutoClearClipboard;
                 UiScalePercent = UiScale.Normalize(plan.Result.UiScalePercent);
@@ -272,6 +278,7 @@ namespace InspectionWidget.Config
                         {
                             Title = entry.Title,
                             OriginalSecret = entry.EncryptedSecret,
+                            Hotkey = entry.Hotkey,
                             IsNew = false,
                             Cleared = false,
                             OriginalNeedsReset = entry.NeedsReset
@@ -297,6 +304,7 @@ namespace InspectionWidget.Config
             var config = new AppConfig
             {
                 RootPath = RootPath,
+                UsbSyncRootPath = UsbSyncRootPath,
                 Devices = DeviceNames(),
                 Credentials = new List<CredentialEntry>(),
                 IsCredentialCollapsed = IsCredentialCollapsed,
@@ -320,6 +328,7 @@ namespace InspectionWidget.Config
                 {
                     Title = row.Title,
                     EncryptedSecret = row.Cleared ? string.Empty : row.OriginalSecret,
+                    Hotkey = row.Hotkey,
                     NeedsReset = row.Cleared || row.OriginalNeedsReset
                 });
             }

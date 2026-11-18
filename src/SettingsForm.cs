@@ -68,6 +68,7 @@ namespace InspectionWidget
 
         private TextBox _rootPathTextBox;
         private Label _rootStatusLabel;
+        private TextBox _usbRootPathTextBox;
         private TextBox _folderPatternTextBox;
         private TextBox _folderPreviewTextBox;
         private CheckBox _autoClearCheckBox;
@@ -85,12 +86,85 @@ namespace InspectionWidget
         private Label _aboutRootPathLabel;
         private Icon _ownedAppIcon;
 
+        private sealed class BufferedPanel : Panel
+        {
+            public BufferedPanel()
+            {
+                DoubleBuffered = true;
+            }
+        }
+
+        private sealed class BufferedTableLayoutPanel : TableLayoutPanel
+        {
+            public BufferedTableLayoutPanel()
+            {
+                DoubleBuffered = true;
+            }
+        }
+
+        private sealed class HotkeyTextBox : TextBox
+        {
+            public event Action<string> HotkeyCaptured;
+            public event Action<string> HotkeyRejected;
+
+            public HotkeyTextBox()
+            {
+                ReadOnly = true;
+                Cursor = Cursors.Hand;
+                BackColor = UiTheme.CardBackColor;
+            }
+
+            protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+            {
+                Keys keyCode = keyData & Keys.KeyCode;
+                Keys mods = keyData & Keys.Modifiers;
+
+                if (mods == Keys.None && (keyCode == Keys.Tab || keyCode == Keys.Escape))
+                    return base.ProcessCmdKey(ref msg, keyData);
+
+                if (mods == Keys.None && (keyCode == Keys.Back || keyCode == Keys.Delete))
+                {
+                    if (!string.IsNullOrEmpty(Text))
+                    {
+                        Text = string.Empty;
+                        if (HotkeyCaptured != null)
+                            HotkeyCaptured(string.Empty);
+                    }
+                    return true;
+                }
+
+                if (keyCode == Keys.ControlKey || keyCode == Keys.LControlKey || keyCode == Keys.RControlKey
+                    || keyCode == Keys.Menu || keyCode == Keys.LMenu || keyCode == Keys.RMenu
+                    || keyCode == Keys.ShiftKey || keyCode == Keys.LShiftKey || keyCode == Keys.RShiftKey
+                    || keyCode == Keys.LWin || keyCode == Keys.RWin)
+                {
+                    return true;
+                }
+
+                string canonical;
+                string error;
+                if (HotkeySpec.TryFromKeyEvent(keyData, out canonical, out error))
+                {
+                    Text = canonical;
+                    if (HotkeyCaptured != null)
+                        HotkeyCaptured(canonical);
+                }
+                else if (HotkeyRejected != null && !string.IsNullOrEmpty(error))
+                {
+                    HotkeyRejected(error);
+                }
+                return true;
+            }
+        }
+
         private sealed class PageMeta
         {
             public TableLayoutPanel Layout;
             public Label Title;
             public Label Desc;
             public Action<int, int> UpdateContent;
+            public int LastWidth = -1;
+            public int LastHeight = -1;
         }
 
         private sealed class LinkRow
@@ -111,6 +185,7 @@ namespace InspectionWidget
             public TableLayoutPanel Panel;
             public TextBox NameBox;
             public TextBox SecretBox;
+            public HotkeyTextBox HotkeyBox;
             public Label StatusLabel;
             public Button ClearButton;
             public Button UndoButton;
@@ -345,7 +420,7 @@ namespace InspectionWidget
             _navAccent.BringToFront();
             body.Controls.Add(navPanel, 0, 0);
 
-            _contentHost = new Panel
+            _contentHost = new BufferedPanel
             {
                 Dock = DockStyle.Fill,
                 Margin = new Padding(0),
@@ -433,7 +508,7 @@ namespace InspectionWidget
 
         private Panel NewPage(string titleText, string description)
         {
-            var page = new Panel
+            var page = new BufferedPanel
             {
                 Dock = DockStyle.Fill,
                 Margin = new Padding(0),
@@ -442,7 +517,7 @@ namespace InspectionWidget
                 BackColor = UiTheme.PageBackColor,
                 Visible = false
             };
-            var layout = new TableLayoutPanel
+            var layout = new BufferedTableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
@@ -453,25 +528,30 @@ namespace InspectionWidget
                 BackColor = UiTheme.PageBackColor
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            bool hasDesc = !string.IsNullOrWhiteSpace(description);
             var title = new Label
             {
                 Text = titleText,
                 Font = UiTheme.TitleFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 4)
-            };
-            var desc = new Label
-            {
-                Text = description,
-                Font = UiTheme.SmallFont,
-                ForeColor = UiTheme.WeakTextColor,
-                AutoSize = true,
-                MaximumSize = new Size(420, 0),
-                Margin = new Padding(0, 0, 0, 14)
+                Margin = new Padding(0, 0, 0, hasDesc ? 4 : 12)
             };
             layout.Controls.Add(title);
-            layout.Controls.Add(desc);
+            Label desc = null;
+            if (hasDesc)
+            {
+                desc = new Label
+                {
+                    Text = description,
+                    Font = UiTheme.SmallFont,
+                    ForeColor = UiTheme.WeakTextColor,
+                    AutoSize = true,
+                    MaximumSize = new Size(420, 0),
+                    Margin = new Padding(0, 0, 0, 14)
+                };
+                layout.Controls.Add(desc);
+            }
             page.Controls.Add(layout);
             page.Tag = layout;
             var meta = new PageMeta
@@ -497,17 +577,36 @@ namespace InspectionWidget
         private void UpdateAllPageLayouts()
         {
             for (int i = 0; i < _groupPanels.Length; i++)
-                UpdatePageLayout(_groupPanels[i]);
+                UpdatePageLayout(_groupPanels[i], true);
+        }
+
+        private void InvalidatePageLayout(Panel page)
+        {
+            PageMeta meta;
+            if (page != null && _pageMetas.TryGetValue(page, out meta))
+            {
+                meta.LastWidth = -1;
+                meta.LastHeight = -1;
+            }
         }
 
         private void UpdatePageLayout(Panel page)
+        {
+            UpdatePageLayout(page, false);
+        }
+
+        private void UpdatePageLayout(Panel page, bool force)
         {
             if (page == null || _updatingPageLayout || !_layoutScaleApplied)
                 return;
             PageMeta meta;
             if (!_pageMetas.TryGetValue(page, out meta) || meta.Layout == null)
                 return;
-            if (page.ClientSize.Width <= 0)
+            int w = page.ClientSize.Width;
+            int h = page.ClientSize.Height;
+            if (w <= 0)
+                return;
+            if (!force && meta.LastWidth == w && meta.LastHeight == h)
                 return;
 
             _updatingPageLayout = true;
@@ -515,22 +614,25 @@ namespace InspectionWidget
             try
             {
                 int scrollReserve = page.VerticalScroll.Visible ? 0 : SystemInformation.VerticalScrollBarWidth;
-                int layoutMaxWidth = Math.Max(L(220), page.ClientSize.Width - scrollReserve);
+                int layoutMaxWidth = Math.Max(L(220), w - scrollReserve);
                 if (meta.Layout.MaximumSize.Width != layoutMaxWidth)
                     meta.Layout.MaximumSize = new Size(layoutMaxWidth, 0);
 
                 int contentWidth = Math.Max(L(180), layoutMaxWidth - meta.Layout.Padding.Horizontal);
                 SetWrappedWidth(meta.Title, contentWidth);
-                SetWrappedWidth(meta.Desc, contentWidth);
+                if (meta.Desc != null)
+                    SetWrappedWidth(meta.Desc, contentWidth);
 
                 if (meta.UpdateContent != null)
                 {
                     int headerUsed = meta.Layout.Padding.Vertical
                         + (meta.Title != null ? meta.Title.Height + meta.Title.Margin.Vertical : 0)
                         + (meta.Desc != null ? meta.Desc.Height + meta.Desc.Margin.Vertical : 0);
-                    int remainingHeight = Math.Max(L(220), page.ClientSize.Height - headerUsed);
+                    int remainingHeight = Math.Max(L(220), h - headerUsed);
                     meta.UpdateContent(contentWidth, remainingHeight);
                 }
+                meta.LastWidth = w;
+                meta.LastHeight = h;
             }
             finally
             {
@@ -550,7 +652,7 @@ namespace InspectionWidget
 
         private Panel BuildDevicesPage()
         {
-            Panel page = NewPage("设备", "设备名称会作为截图文件名。行序即主面板按钮顺序；空行可先保留，应用前补齐或删除。");
+            Panel page = NewPage("设备", null);
             _deviceEditor = new DeviceEditorControl(_draft)
             {
                 Height = 365,
@@ -573,7 +675,7 @@ namespace InspectionWidget
 
         private Panel BuildCredentialsPage()
         {
-            Panel page = NewPage("凭据", "内容框始终留空不回显。留空表示保留原密文；输入新内容才覆盖，清除后可在当前草稿内撤销。");
+            Panel page = NewPage("凭据", null);
             var layout = PageLayout(page);
 
             var top = new FlowLayoutPanel
@@ -603,7 +705,7 @@ namespace InspectionWidget
             {
                 Dock = DockStyle.Top,
                 Height = 30,
-                ColumnCount = 8,
+                ColumnCount = 9,
                 RowCount = 1,
                 Padding = new Padding(8, 0, 8, 0),
                 Margin = new Padding(0, 0, 0, 4),
@@ -619,11 +721,11 @@ namespace InspectionWidget
                     e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
                 }
             };
-            string[] headers = { "名称", "内容", "状态", "清除", "撤销", "删除", "上移", "下移" };
-            int[] widths = { 120, 115, 100, 48, 48, 48, 32, 32 };
-            for (int i = 0; i < 8; i++)
+            string[] headers = { "名称", "内容", "快捷键", "状态", "清除", "撤销", "删除", "上移", "下移" };
+            int[] widths = { 104, 100, 104, 72, 44, 44, 44, 30, 30 };
+            for (int i = 0; i < 9; i++)
             {
-                if (i == 2) _credentialHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                if (i == 3) _credentialHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
                 else _credentialHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, widths[i]));
                 _credentialHeader.Controls.Add(new Label
                 {
@@ -632,12 +734,12 @@ namespace InspectionWidget
                     ForeColor = UiTheme.SecondaryTextColor,
                     BackColor = UiTheme.SurfaceColor,
                     Dock = DockStyle.Fill,
-                    TextAlign = i >= 3 ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft
+                    TextAlign = i >= 4 ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft
                 }, i, 0);
             }
             layout.Controls.Add(_credentialHeader);
 
-            _credentialRowsPanel = new Panel
+            _credentialRowsPanel = new BufferedPanel
             {
                 Height = 340,
                 Dock = DockStyle.Top,
@@ -664,7 +766,7 @@ namespace InspectionWidget
 
         private Panel BuildLinksPage()
         {
-            Panel page = NewPage("快捷链接", "配置常用巡检网址（仅 http:// 或 https://），勾选启用后会在主面板顶部显示。");
+            Panel page = NewPage("快捷链接", null);
             var layout = PageLayout(page);
 
             var top = new FlowLayoutPanel
@@ -711,7 +813,7 @@ namespace InspectionWidget
                     e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
                 }
             };
-            string[] headers = { "启用", "名称", "网址（http:// 或 https://）", "上移", "下移", "删除" };
+            string[] headers = { "启用", "名称", "网址", "上移", "下移", "删除" };
             int[] widths = { 46, 136, 180, 34, 34, 54 };
             for (int i = 0; i < 6; i++)
             {
@@ -729,7 +831,7 @@ namespace InspectionWidget
             }
             layout.Controls.Add(_linkHeader);
 
-            _linkRowsPanel = new Panel
+            _linkRowsPanel = new BufferedPanel
             {
                 Height = 340,
                 Dock = DockStyle.Top,
@@ -743,7 +845,7 @@ namespace InspectionWidget
             };
             _linkEmptyLabel = new Label
             {
-                Text = "尚未配置快捷链接；点击上方“添加链接”可新增常用网址（例如监控大盘、工单系统）。",
+                Text = "暂无快捷链接，点击「添加链接」新增。",
                 AutoSize = true,
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.WeakTextColor,
@@ -768,9 +870,9 @@ namespace InspectionWidget
 
         private Panel BuildStoragePage()
         {
-            Panel page = NewPage("存储与显示", "保存目录、日期文件夹格式、界面缩放，以及主面板巡检计划的展示习惯。");
+            Panel page = NewPage("存储与显示", null);
             var outer = PageLayout(page);
-            var settings = new TableLayoutPanel
+            var settings = new BufferedTableLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -779,7 +881,7 @@ namespace InspectionWidget
                 Margin = new Padding(0),
                 BackColor = UiTheme.CardBackColor
             };
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 122f));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112f));
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
 
             _rootPathTextBox = new TextBox
@@ -806,7 +908,7 @@ namespace InspectionWidget
             rootRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             rootRow.Controls.Add(_rootPathTextBox, 0, 0);
             var changeButton = UiTheme.SecondaryButton("更改…");
-            changeButton.Width = 80;
+            changeButton.Width = 76;
             changeButton.Margin = new Padding(0);
             changeButton.Click += delegate { ChangeRootPath(); };
             rootRow.Controls.Add(changeButton, 1, 0);
@@ -818,9 +920,47 @@ namespace InspectionWidget
                 MaximumSize = new Size(360, 0),
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.WeakTextColor,
-                BackColor = UiTheme.CardBackColor
+                BackColor = UiTheme.CardBackColor,
+                Visible = false
             };
             AddSettingFullRow(settings, _rootStatusLabel);
+
+            _usbRootPathTextBox = new TextBox
+            {
+                ReadOnly = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Font = UiTheme.BodyFont,
+                BackColor = UiTheme.PageBackColor,
+                Margin = new Padding(0, 0, 8, 0),
+                AccessibleName = "U盘联动目录"
+            };
+            NativeMethods.SetCueBanner(_usbRootPathTextBox, "未设置（如 D:\\巡检）");
+            var usbRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 1,
+                Margin = new Padding(0),
+                BackColor = UiTheme.CardBackColor
+            };
+            usbRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            usbRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            usbRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            usbRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            usbRow.Controls.Add(_usbRootPathTextBox, 0, 0);
+            var usbSelectBtn = UiTheme.SecondaryButton("选择…");
+            usbSelectBtn.Width = 76;
+            usbSelectBtn.Margin = new Padding(0, 0, 6, 0);
+            usbSelectBtn.Click += delegate { ChangeUsbRootPath(); };
+            var usbClearBtn = UiTheme.SecondaryButton("清除");
+            usbClearBtn.Width = 60;
+            usbClearBtn.Margin = new Padding(0);
+            usbClearBtn.Click += delegate { ClearUsbRootPath(); };
+            usbRow.Controls.Add(usbSelectBtn, 1, 0);
+            usbRow.Controls.Add(usbClearBtn, 2, 0);
+            AddSettingRow(settings, "U盘目录", usbRow);
 
             _folderPatternTextBox = new TextBox
             {
@@ -840,7 +980,7 @@ namespace InspectionWidget
 
             var patternHelp = new Label
             {
-                Text = "示例：巡检-yyyy-MM-dd。不能包含 / : * ? \" < > |。",
+                Text = "示例：巡检-yyyy-MM-dd",
                 AutoSize = true,
                 MaximumSize = new Size(360, 0),
                 Font = UiTheme.SmallFont,
@@ -899,10 +1039,10 @@ namespace InspectionWidget
             outer.Controls.Add(storageCard);
 
             FlowLayoutPanel planStack;
-            Panel planCard = UiTheme.CreateSectionCard("巡检计划与显示", out planStack);
+            Panel planCard = UiTheme.CreateSectionCard("巡检计划", out planStack);
             _planModeCheckBox = new CheckBox
             {
-                Text = "开启今日巡检计划（记录已点过设备并统计今日进度）",
+                Text = "开启今日巡检计划",
                 AutoSize = true,
                 MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
@@ -919,7 +1059,7 @@ namespace InspectionWidget
             };
             var hideTitle = new Label
             {
-                Text = "已点过设备的显示方式",
+                Text = "已点过设备",
                 AutoSize = true,
                 MaximumSize = new Size(360, 0),
                 Font = UiTheme.SmallFont,
@@ -929,7 +1069,7 @@ namespace InspectionWidget
             };
             _hideVisitedTrueRadio = new RadioButton
             {
-                Text = "隐藏已点过（适合多设备，列表只留未点项目）",
+                Text = "隐藏已点过",
                 AutoSize = true,
                 MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
@@ -940,7 +1080,7 @@ namespace InspectionWidget
             };
             _hideVisitedFalseRadio = new RadioButton
             {
-                Text = "保留并显示已点状态（适合少设备对照查看）",
+                Text = "保留并显示已点过",
                 AutoSize = true,
                 MaximumSize = new Size(360, 0),
                 Font = UiTheme.BodyFont,
@@ -997,7 +1137,7 @@ namespace InspectionWidget
             };
             _modeBitBltRadio = new RadioButton
             {
-                Text = "仅屏幕拷贝（置前抓屏）",
+                Text = "仅屏幕拷贝",
                 AutoSize = true,
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
@@ -1026,23 +1166,19 @@ namespace InspectionWidget
                 int planInner = Math.Max(L(160), contentWidth - planCard.Padding.Horizontal);
                 SetWrappedWidth(planStack, planInner);
                 SetWrappedWidth(_planModeCheckBox, planInner);
-                SetWrappedWidth(hideTitle, planInner);
                 SetWrappedWidth(_hideVisitedTrueRadio, planInner);
                 SetWrappedWidth(_hideVisitedFalseRadio, planInner);
 
                 SetWrappedWidth(modeCard, contentWidth);
                 int modeInner = Math.Max(L(160), contentWidth - modeCard.Padding.Horizontal);
                 SetWrappedWidth(modes, modeInner);
-                SetWrappedWidth(_modeAutoRadio, modeInner);
-                SetWrappedWidth(_modePrintWindowRadio, modeInner);
-                SetWrappedWidth(_modeBitBltRadio, modeInner);
             };
             return page;
         }
 
         private Panel BuildTransferPage()
         {
-            Panel page = NewPage("配置备份", "导入先校验、预览，再改写当前草稿；点应用/保存并关闭才写正式配置。");
+            Panel page = NewPage("配置备份", null);
             var layout = PageLayout(page);
 
             FlowLayoutPanel transferStack;
@@ -1056,7 +1192,7 @@ namespace InspectionWidget
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true,
                 BackColor = UiTheme.CardBackColor,
-                Margin = new Padding(0, 0, 0, 10)
+                Margin = new Padding(0, 0, 0, 4)
             };
             var importButton = UiTheme.PrimaryButton("导入配置…");
             importButton.Width = 114;
@@ -1066,9 +1202,9 @@ namespace InspectionWidget
             exportButton.Width = 132;
             exportButton.AccessibleName = "导出不包含凭据的普通配置";
             exportButton.Click += delegate { ExportConfig(false); };
-            var backupButton = UiTheme.SecondaryButton("导出本机完整备份…");
-            backupButton.Width = 154;
-            backupButton.AccessibleName = "导出包含 DPAPI 密文的完整备份";
+            var backupButton = UiTheme.SecondaryButton("导出完整备份…");
+            backupButton.Width = 132;
+            backupButton.AccessibleName = "导出包含凭据密文的完整备份";
             backupButton.Click += delegate { ExportConfig(true); };
             buttons.Controls.Add(importButton);
             buttons.Controls.Add(exportButton);
@@ -1077,40 +1213,29 @@ namespace InspectionWidget
 
             _exportSourceLabel = new Label
             {
-                Text = "导出数据来源：最近一次成功应用的配置。存在未保存草稿时，导出前可选择应用后导出或仅导出已保存配置。",
+                Text = string.Empty,
                 AutoSize = true,
                 MaximumSize = new Size(380, 0),
-                Font = UiTheme.BodyFont,
-                ForeColor = UiTheme.PrimaryTextColor,
+                Font = UiTheme.SmallFont,
+                ForeColor = UiTheme.SecondaryTextColor,
                 BackColor = UiTheme.CardBackColor,
-                Margin = new Padding(0, 0, 0, 8)
+                Margin = new Padding(0, 6, 0, 0),
+                Visible = false
             };
             transferStack.Controls.Add(_exportSourceLabel);
 
             _importDetailLabel = new Label
             {
-                Text = "导入预览只更新窗口草稿，不会立即写盘；取消预览或取消设置窗口均不改变最后一次应用的配置。",
-                AutoSize = true,
-                MaximumSize = new Size(380, 0),
-                Font = UiTheme.SmallFont,
-                ForeColor = UiTheme.WeakTextColor,
-                BackColor = UiTheme.CardBackColor,
-                Margin = new Padding(0, 0, 0, 8)
-            };
-            transferStack.Controls.Add(_importDetailLabel);
-
-            var notes = new Label
-            {
-                Text = "普通配置：拓扑与普通设置，不含凭据。\n"
-                    + "本机完整备份：携带 DPAPI 密文，导入时不会解密到控件或日志；换 Windows 用户或机器后可能需要重新填写。\n"
-                    + "不能导出到应用的 config.json、.lock、损坏备份或 config.preimport.* 恢复备份路径。",
+                Text = string.Empty,
                 AutoSize = true,
                 MaximumSize = new Size(380, 0),
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
-                BackColor = UiTheme.CardBackColor
+                BackColor = UiTheme.CardBackColor,
+                Margin = new Padding(0, 4, 0, 0),
+                Visible = false
             };
-            transferStack.Controls.Add(notes);
+            transferStack.Controls.Add(_importDetailLabel);
             layout.Controls.Add(transferCard);
 
             var aboutCard = new Panel
@@ -1156,15 +1281,7 @@ namespace InspectionWidget
             };
             var aboutVersion = new Label
             {
-                Text = "巡检助手 v1.1.3 （Windows 桌面端）",
-                Font = UiTheme.SmallFont,
-                ForeColor = UiTheme.SecondaryTextColor,
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 3)
-            };
-            var aboutRuntime = new Label
-            {
-                Text = "运行环境：Windows 10/11（.NET Framework 4.8）",
+                Text = "巡检助手 v1.2.0",
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
                 AutoSize = true,
@@ -1204,7 +1321,6 @@ namespace InspectionWidget
             _configPathLabel = _aboutConfigPathLabel;
             aboutFlow.Controls.Add(aboutTitle);
             aboutFlow.Controls.Add(aboutVersion);
-            aboutFlow.Controls.Add(aboutRuntime);
             aboutFlow.Controls.Add(_aboutConfigPathLabel);
             aboutFlow.Controls.Add(_aboutRootPathLabel);
             aboutFlow.Controls.Add(repo);
@@ -1219,17 +1335,12 @@ namespace InspectionWidget
                 SetWrappedWidth(buttons, transferInner);
                 SetWrappedWidth(_exportSourceLabel, transferInner);
                 SetWrappedWidth(_importDetailLabel, transferInner);
-                SetWrappedWidth(notes, transferInner);
 
                 SetWrappedWidth(aboutCard, contentWidth);
                 int aboutInner = Math.Max(L(160), contentWidth - aboutCard.Padding.Horizontal);
                 SetWrappedWidth(aboutFlow, aboutInner);
-                SetWrappedWidth(aboutTitle, aboutInner);
-                SetWrappedWidth(aboutVersion, aboutInner);
-                SetWrappedWidth(aboutRuntime, aboutInner);
                 SetWrappedWidth(_aboutConfigPathLabel, aboutInner);
                 SetWrappedWidth(_aboutRootPathLabel, aboutInner);
-                SetWrappedWidth(repo, aboutInner);
             };
             return page;
         }
@@ -1272,19 +1383,30 @@ namespace InspectionWidget
         private void SetGroup(int index)
         {
             _currentGroup = index;
-            for (int i = 0; i < _groupPanels.Length; i++)
+            if (_contentHost != null)
+                _contentHost.SuspendLayout();
+            try
             {
-                bool active = i == index;
-                _groupPanels[i].Visible = active;
-                _navButtons[i].Font = active ? UiTheme.BodyBoldFont : UiTheme.BodyFont;
-                _navButtons[i].ForeColor = active ? UiTheme.AccentColor : UiTheme.PrimaryTextColor;
-                _navButtons[i].BackColor = active ? UiTheme.SelectedNavBackColor : UiTheme.SurfaceColor;
+                for (int i = 0; i < _groupPanels.Length; i++)
+                {
+                    bool active = i == index;
+                    if (_groupPanels[i].Visible != active)
+                        _groupPanels[i].Visible = active;
+                    _navButtons[i].Font = active ? UiTheme.BodyBoldFont : UiTheme.BodyFont;
+                    _navButtons[i].ForeColor = active ? UiTheme.AccentColor : UiTheme.PrimaryTextColor;
+                    _navButtons[i].BackColor = active ? UiTheme.SelectedNavBackColor : UiTheme.SurfaceColor;
+                }
+                _navAccent.Location = new Point(0, _navButtons[index].Top);
+                _navAccent.BringToFront();
+                if (index == GroupTransfer)
+                    RefreshAboutLabels();
+                UpdatePageLayout(_groupPanels[index]);
             }
-            _navAccent.Location = new Point(0, _navButtons[index].Top);
-            _navAccent.BringToFront();
-            if (index == GroupTransfer)
-                RefreshAboutLabels();
-            UpdatePageLayout(_groupPanels[index]);
+            finally
+            {
+                if (_contentHost != null)
+                    _contentHost.ResumeLayout(false);
+            }
         }
 
         private bool CommitDeviceOperation()
@@ -1322,8 +1444,14 @@ namespace InspectionWidget
         {
             if (_rootPathTextBox == null) return;
             _rootPathTextBox.Text = _draft.RootPath ?? string.Empty;
+            if (_usbRootPathTextBox != null)
+                _usbRootPathTextBox.Text = _draft.UsbSyncRootPath ?? string.Empty;
             if (_feedbackToolTip != null)
+            {
                 _feedbackToolTip.SetToolTip(_rootPathTextBox, _rootPathTextBox.Text);
+                if (_usbRootPathTextBox != null)
+                    _feedbackToolTip.SetToolTip(_usbRootPathTextBox, _usbRootPathTextBox.Text);
+            }
             _folderPatternTextBox.Text = FolderNamePattern.Normalize(_draft.FolderPattern);
             _autoClearCheckBox.Checked = _draft.AutoClearClipboard;
             _uiScaleComboBox.SelectedIndex = UiScale.IndexForPercent(_draft.UiScalePercent);
@@ -1342,20 +1470,28 @@ namespace InspectionWidget
 
         private void RefreshRootStatus()
         {
+            bool visible;
             if (string.IsNullOrEmpty(_draft.RootPath))
             {
-                _rootStatusLabel.Text = "尚未设置，截图暂不可用。";
+                _rootStatusLabel.Text = "尚未设置保存目录";
                 _rootStatusLabel.ForeColor = UiTheme.ErrorColor;
+                visible = true;
             }
             else if (!string.Equals(_draft.RootPath, _savedConfig.RootPath, StringComparison.OrdinalIgnoreCase))
             {
-                _rootStatusLabel.Text = "已更改；应用后生效，启动时不再询问。";
+                _rootStatusLabel.Text = "已更改，应用后生效";
                 _rootStatusLabel.ForeColor = UiTheme.SecondaryTextColor;
+                visible = true;
             }
             else
             {
-                _rootStatusLabel.Text = "已应用；启动时不再询问。";
-                _rootStatusLabel.ForeColor = UiTheme.SecondaryTextColor;
+                _rootStatusLabel.Text = string.Empty;
+                visible = false;
+            }
+            if (_rootStatusLabel.Visible != visible)
+            {
+                _rootStatusLabel.Visible = visible;
+                InvalidatePageLayout(_groupPanels[GroupStorage]);
             }
             if (_feedbackToolTip != null && _rootPathTextBox != null)
                 _feedbackToolTip.SetToolTip(_rootPathTextBox, _rootPathTextBox.Text);
@@ -1366,7 +1502,7 @@ namespace InspectionWidget
             string pattern = _folderPatternTextBox == null ? _draft.FolderPattern : _folderPatternTextBox.Text;
             string folder = FolderNamePattern.Format(FolderNamePattern.Normalize(pattern), DateTime.Now);
             _folderPreviewTextBox.Text = string.IsNullOrEmpty(_draft.RootPath)
-                ? folder + "（尚未设置截图根目录）"
+                ? folder + "（未设置根目录）"
                 : Path.Combine(_draft.RootPath, folder);
             if (_feedbackToolTip != null)
                 _feedbackToolTip.SetToolTip(_folderPreviewTextBox, _folderPreviewTextBox.Text);
@@ -1387,10 +1523,48 @@ namespace InspectionWidget
                     MarkDirty();
                     RefreshRootStatus();
                     RefreshFolderPreview();
-                    UpdatePageLayout(_groupPanels[_currentGroup]);
+                    UpdatePageLayout(_groupPanels[_currentGroup], true);
                     ClearFeedback();
                 }
             }
+        }
+
+        private void ChangeUsbRootPath()
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "选择 U盘巡检根目录";
+                dialog.ShowNewFolderButton = false;
+                if (!string.IsNullOrEmpty(_draft.UsbSyncRootPath))
+                    dialog.SelectedPath = _draft.UsbSyncRootPath;
+                if (dialog.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dialog.SelectedPath))
+                {
+                    _draft.UsbSyncRootPath = dialog.SelectedPath;
+                    if (_usbRootPathTextBox != null)
+                    {
+                        _usbRootPathTextBox.Text = dialog.SelectedPath;
+                        if (_feedbackToolTip != null)
+                            _feedbackToolTip.SetToolTip(_usbRootPathTextBox, dialog.SelectedPath);
+                    }
+                    MarkDirty();
+                    ClearFeedback();
+                }
+            }
+        }
+
+        private void ClearUsbRootPath()
+        {
+            if (string.IsNullOrEmpty(_draft.UsbSyncRootPath))
+                return;
+            _draft.UsbSyncRootPath = null;
+            if (_usbRootPathTextBox != null)
+            {
+                _usbRootPathTextBox.Text = string.Empty;
+                if (_feedbackToolTip != null)
+                    _feedbackToolTip.SetToolTip(_usbRootPathTextBox, string.Empty);
+            }
+            MarkDirty();
+            ClearFeedback();
         }
 
         private void SetCaptureMode(CaptureMode mode)
@@ -1424,7 +1598,7 @@ namespace InspectionWidget
             row.Panel = new TableLayoutPanel
             {
                 Height = 48,
-                ColumnCount = 8,
+                ColumnCount = 9,
                 RowCount = 1,
                 Margin = new Padding(0, 0, 0, 6),
                 Padding = new Padding(8, 4, 8, 4),
@@ -1440,12 +1614,12 @@ namespace InspectionWidget
                     e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
                 }
             };
-            for (int i = 0; i < 8; i++)
+            int[] widths = { 104, 100, 104, 72, 44, 44, 44, 30, 30 };
+            for (int i = 0; i < 9; i++)
             {
-                int width = i == 0 ? 120 : (i == 1 ? 115 : (i == 2 ? 100 : (i == 6 || i == 7 ? 32 : 48)));
-                row.Panel.ColumnStyles.Add(i == 2
+                row.Panel.ColumnStyles.Add(i == 3
                     ? new ColumnStyle(SizeType.Percent, 100f)
-                    : new ColumnStyle(SizeType.Absolute, width));
+                    : new ColumnStyle(SizeType.Absolute, widths[i]));
             }
 
             row.NameBox = new TextBox
@@ -1470,13 +1644,32 @@ namespace InspectionWidget
                 Font = UiTheme.BodyFont,
                 PasswordChar = '●',
                 Enabled = !draft.Cleared,
-                AccessibleName = "凭据新内容（不回显）"
+                AccessibleName = "凭据新内容"
             };
-            NativeMethods.SetCueBanner(row.SecretBox, draft.IsNew ? "输入密码或密钥" : "留空不修改");
+            NativeMethods.SetCueBanner(row.SecretBox, draft.IsNew ? "输入密码" : "留空不改");
             row.SecretBox.TextChanged += delegate
             {
                 if (!_loading) MarkDirty();
                 RefreshRowStatus(row);
+            };
+            row.HotkeyBox = new HotkeyTextBox
+            {
+                Text = draft.Hotkey ?? string.Empty,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Margin = new Padding(0, 0, 6, 0),
+                Font = UiTheme.SmallFont,
+                AccessibleName = "凭据快捷键"
+            };
+            NativeMethods.SetCueBanner(row.HotkeyBox, "按键绑定");
+            row.HotkeyBox.HotkeyCaptured += delegate(string hk)
+            {
+                draft.Hotkey = string.IsNullOrEmpty(hk) ? null : hk;
+                if (!_loading) MarkDirty();
+                ClearFeedback();
+            };
+            row.HotkeyBox.HotkeyRejected += delegate(string err)
+            {
+                ShowError(GroupCredentials, err, row.HotkeyBox);
             };
             row.StatusLabel = new Label
             {
@@ -1488,21 +1681,21 @@ namespace InspectionWidget
                 TextAlign = ContentAlignment.MiddleLeft
             };
             row.ClearButton = UiTheme.SecondaryButton("清除");
-            row.ClearButton.Width = 44;
+            row.ClearButton.Width = 40;
             row.ClearButton.Height = 30;
             row.ClearButton.Anchor = AnchorStyles.None;
             row.ClearButton.AccessibleName = "清除当前凭据内容";
             row.ClearButton.Margin = new Padding(2, 0, 2, 0);
             row.ClearButton.Click += delegate { ClearCredential(row); };
             row.UndoButton = UiTheme.SecondaryButton("撤销");
-            row.UndoButton.Width = 44;
+            row.UndoButton.Width = 40;
             row.UndoButton.Height = 30;
             row.UndoButton.Anchor = AnchorStyles.None;
             row.UndoButton.AccessibleName = "撤销清除凭据内容";
             row.UndoButton.Margin = new Padding(2, 0, 2, 0);
             row.UndoButton.Click += delegate { UndoClearCredential(row); };
             row.DeleteButton = UiTheme.SecondaryButton("删除");
-            row.DeleteButton.Width = 44;
+            row.DeleteButton.Width = 40;
             row.DeleteButton.Height = 30;
             row.DeleteButton.ForeColor = UiTheme.ErrorColor;
             row.DeleteButton.Anchor = AnchorStyles.None;
@@ -1510,7 +1703,7 @@ namespace InspectionWidget
             row.DeleteButton.Margin = new Padding(2, 0, 2, 0);
             row.DeleteButton.Click += delegate { DeleteCredential(row); };
             row.UpButton = UiTheme.SecondaryButton("↑");
-            row.UpButton.Width = 28;
+            row.UpButton.Width = 26;
             row.UpButton.Height = 30;
             row.UpButton.Anchor = AnchorStyles.None;
             row.UpButton.Margin = new Padding(2, 0, 2, 0);
@@ -1518,7 +1711,7 @@ namespace InspectionWidget
             row.UpButton.AccessibleName = "凭据上移";
             row.UpButton.Click += delegate { MoveCredential(row, -1); };
             row.DownButton = UiTheme.SecondaryButton("↓");
-            row.DownButton.Width = 28;
+            row.DownButton.Width = 26;
             row.DownButton.Height = 30;
             row.DownButton.Anchor = AnchorStyles.None;
             row.DownButton.Margin = new Padding(2, 0, 0, 0);
@@ -1528,13 +1721,14 @@ namespace InspectionWidget
 
             row.Panel.Controls.Add(row.NameBox, 0, 0);
             row.Panel.Controls.Add(row.SecretBox, 1, 0);
-            row.Panel.Controls.Add(row.StatusLabel, 2, 0);
-            row.Panel.Controls.Add(row.ClearButton, 3, 0);
-            row.Panel.Controls.Add(row.UndoButton, 4, 0);
-            row.Panel.Controls.Add(row.DeleteButton, 5, 0);
-            row.Panel.Controls.Add(row.UpButton, 6, 0);
-            row.Panel.Controls.Add(row.DownButton, 7, 0);
-            row.ToolTip.SetToolTip(row.SecretBox, "已存内容不回显；留空保留原密文，输入新内容则覆盖。");
+            row.Panel.Controls.Add(row.HotkeyBox, 2, 0);
+            row.Panel.Controls.Add(row.StatusLabel, 3, 0);
+            row.Panel.Controls.Add(row.ClearButton, 4, 0);
+            row.Panel.Controls.Add(row.UndoButton, 5, 0);
+            row.Panel.Controls.Add(row.DeleteButton, 6, 0);
+            row.Panel.Controls.Add(row.UpButton, 7, 0);
+            row.Panel.Controls.Add(row.DownButton, 8, 0);
+            row.ToolTip.SetToolTip(row.HotkeyBox, "按下组合键绑定，Backspace 清除");
             if (_layoutScaleApplied)
                 UiTheme.ScaleLayout(row.Panel, _uiScaleFactor);
             RefreshRowStatus(row);
@@ -1571,7 +1765,7 @@ namespace InspectionWidget
         {
             int step = L(56);
             int totalHeight = _credentialRows.Count * step;
-            int minimumWidth = L(420);
+            int minimumWidth = L(520);
             int width;
             int offsetX;
             int offsetY;
@@ -1860,27 +2054,27 @@ namespace InspectionWidget
         {
             if (row.Draft.Cleared)
             {
-                row.StatusLabel.Text = "已清除（可撤销）";
+                row.StatusLabel.Text = "已清除";
                 row.StatusLabel.ForeColor = UiTheme.WeakTextColor;
             }
             else if (row.Draft.IsNew)
             {
-                row.StatusLabel.Text = "新凭据：名称与内容必填";
+                row.StatusLabel.Text = "新凭据";
                 row.StatusLabel.ForeColor = UiTheme.SecondaryTextColor;
             }
             else if (!string.IsNullOrEmpty(row.SecretBox.Text))
             {
-                row.StatusLabel.Text = "已输入新内容（应用后覆盖）";
+                row.StatusLabel.Text = "已修改";
                 row.StatusLabel.ForeColor = UiTheme.SecondaryTextColor;
             }
             else if (row.Draft.OriginalNeedsReset || string.IsNullOrEmpty(row.Draft.OriginalSecret))
             {
-                row.StatusLabel.Text = "需重新设置";
+                row.StatusLabel.Text = "需重设";
                 row.StatusLabel.ForeColor = UiTheme.ErrorColor;
             }
             else
             {
-                row.StatusLabel.Text = "已设置（留空不修改）";
+                row.StatusLabel.Text = "已设置";
                 row.StatusLabel.ForeColor = UiTheme.SecondaryTextColor;
             }
             row.ToolTip.SetToolTip(row.StatusLabel, row.StatusLabel.Text);
@@ -2002,6 +2196,7 @@ namespace InspectionWidget
                 {
                     Title = row.NameBox.Text,
                     OriginalSecret = row.Draft.OriginalSecret,
+                    Hotkey = row.HotkeyBox != null ? row.HotkeyBox.Text : row.Draft.Hotkey,
                     OriginalNeedsReset = row.Draft.OriginalNeedsReset,
                     IsNew = row.Draft.IsNew,
                     Cleared = row.Draft.Cleared,
@@ -2038,6 +2233,7 @@ namespace InspectionWidget
                 CollectCredentialInputs(),
                 _draft.QuickLinks,
                 _draft.RootPath,
+                _draft.UsbSyncRootPath,
                 pattern,
                 _autoClearCheckBox.Checked,
                 scale,
@@ -2063,7 +2259,12 @@ namespace InspectionWidget
                     && outcome.CredentialErrorIndex < _credentialRows.Count)
                 {
                     CredentialRow row = _credentialRows[outcome.CredentialErrorIndex];
-                    focus = outcome.CredentialErrorOnTitle ? (Control)row.NameBox : row.SecretBox;
+                    if (outcome.CredentialErrorOnTitle)
+                        focus = row.NameBox;
+                    else if (outcome.CredentialErrorOnHotkey && row.HotkeyBox != null)
+                        focus = row.HotkeyBox;
+                    else
+                        focus = row.SecretBox;
                 }
                 ShowError(outcome.ErrorGroup, outcome.Error, focus);
                 return false;
@@ -2126,8 +2327,9 @@ namespace InspectionWidget
             _stale = false;
             UpdateTitle();
             RefreshRootStatus();
-            UpdatePageLayout(_groupPanels[_currentGroup]);
-            ShowSuccess("已应用。主面板已即时刷新。");
+            InvalidatePageLayout(_groupPanels[_currentGroup]);
+            UpdatePageLayout(_groupPanels[_currentGroup], true);
+            ShowSuccess("已应用");
 
             EventHandler handler = Saved;
             if (handler != null)
@@ -2201,10 +2403,11 @@ namespace InspectionWidget
                     MarkDirty();
                     _dirty = true;
                     UpdateTitle();
-                    _importDetailLabel.Text = "已导入到草稿：" + Path.GetFileName(document.SourcePath)
-                        + "。尚未写盘；点“应用”或“保存并关闭”后才会提交。";
-                    UpdatePageLayout(_groupPanels[_currentGroup]);
-                    ShowInfo("导入预览已写入窗口草稿，尚未保存；可继续检查或取消。");
+                    _importDetailLabel.Text = "已导入到草稿：" + Path.GetFileName(document.SourcePath) + "（需应用后生效）";
+                    _importDetailLabel.Visible = true;
+                    InvalidatePageLayout(_groupPanels[_currentGroup]);
+                    UpdatePageLayout(_groupPanels[_currentGroup], true);
+                    ShowInfo("已导入到草稿，点击“应用”生效");
                 }
             }
         }
@@ -2292,10 +2495,11 @@ namespace InspectionWidget
                     ShowError(GroupTransfer, "导出失败：" + error, _applyButton);
                     return;
                 }
-                _exportSourceLabel.Text = "最近一次导出：" + dialog.FileName
-                    + "（来源：最近一次成功应用的配置；"
-                    + (fullBackup ? "含本机 DPAPI 密文" : "不含凭据") + "）";
-                UpdatePageLayout(_groupPanels[_currentGroup]);
+                _exportSourceLabel.Text = "已导出：" + dialog.FileName
+                    + (fullBackup ? "（完整备份）" : "（普通配置）");
+                _exportSourceLabel.Visible = true;
+                InvalidatePageLayout(_groupPanels[_currentGroup]);
+                UpdatePageLayout(_groupPanels[_currentGroup], true);
                 ShowSuccess("导出完成：" + Path.GetFileName(dialog.FileName));
             }
         }
@@ -2356,7 +2560,7 @@ namespace InspectionWidget
 
                 var content = DialogCardHelper.CreateBodyHost(
                     UiTheme.WarningColor,
-                    "当前窗口还有未应用的更改。放弃后只保留最近一次成功应用的配置。");
+                    "当前有未应用的更改，确定放弃？");
                 var buttons = DialogCardHelper.CreateButtonDock();
 
                 var discard = UiTheme.DangerButton("放弃更改");
@@ -2399,7 +2603,7 @@ namespace InspectionWidget
 
                 var content = DialogCardHelper.CreateBodyHost(
                     UiTheme.AccentColor,
-                    "导出数据默认来自已成功应用的配置。是否先应用当前草稿？\n\n应用失败会停止导出，草稿保持完整。");
+                    "存在未应用的草稿，是否先应用再导出？");
                 var buttons = DialogCardHelper.CreateButtonDock();
 
                 var apply = UiTheme.PrimaryButton("应用后导出");

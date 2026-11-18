@@ -198,7 +198,7 @@ namespace InspectionWidget.Config
 
             string[] allowedConfig =
             {
-                "Devices", "Credentials", "RootPath", "FolderNamePattern", "CaptureMode",
+                "Devices", "Credentials", "RootPath", "UsbSyncRootPath", "FolderNamePattern", "CaptureMode",
                 "UiScalePercent", "AutoClearClipboard", "IsDeviceCollapsed",
                 "IsCredentialCollapsed", "LastDevice", "WindowLeft", "WindowTop", "TrayHintShown",
                 "QuickLinks", "PlanModeEnabled", "HideVisitedDevices"
@@ -382,6 +382,32 @@ namespace InspectionWidget.Config
                 }
                 doc.PresentFields.Add("RootPath");
                 doc.FieldSources["RootPath"] = "源文件";
+            }
+
+            if (source.TryGetValue("UsbSyncRootPath", out value))
+            {
+                if (value == null || value == JsonNull.Value)
+                {
+                    config.UsbSyncRootPath = null;
+                }
+                else
+                {
+                    string usbPath = value as string;
+                    if (usbPath == null)
+                    {
+                        error = "UsbSyncRootPath 必须是字符串或 null。";
+                        return false;
+                    }
+                    string usbPathError = ConfigValidator.ValidateRootPath(usbPath);
+                    if (usbPathError != null)
+                    {
+                        error = "U盘目录无效：" + usbPathError;
+                        return false;
+                    }
+                    config.UsbSyncRootPath = usbPath;
+                }
+                doc.PresentFields.Add("UsbSyncRootPath");
+                doc.FieldSources["UsbSyncRootPath"] = "源文件";
             }
 
             if (source.TryGetValue("FolderNamePattern", out value))
@@ -730,6 +756,7 @@ namespace InspectionWidget.Config
 
             var list = new List<CredentialEntry>();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var hotkeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < array.Count; i++)
             {
                 var entryObject = array[i] as Dictionary<string, object>;
@@ -738,7 +765,7 @@ namespace InspectionWidget.Config
                     error = "凭据列表第 " + (i + 1) + " 项必须是对象。";
                     return false;
                 }
-                string unknown = FindUnknown(entryObject, new[] { "Title", "EncryptedSecret" });
+                string unknown = FindUnknown(entryObject, new[] { "Title", "EncryptedSecret", "Hotkey" });
                 if (unknown != null)
                 {
                     error = "凭据列表第 " + (i + 1) + " 项包含未知字段：" + unknown;
@@ -769,7 +796,31 @@ namespace InspectionWidget.Config
                     error = "凭据「" + title + "」的密文必须是字符串。";
                     return false;
                 }
-                list.Add(new CredentialEntry { Title = title, EncryptedSecret = secret });
+                string hotkey = null;
+                object hotkeyValue;
+                if (entryObject.TryGetValue("Hotkey", out hotkeyValue)
+                    && hotkeyValue != null && hotkeyValue != JsonNull.Value)
+                {
+                    string rawHotkey = hotkeyValue as string;
+                    if (rawHotkey == null)
+                    {
+                        error = "凭据「" + title + "」的快捷键必须是字符串或 null。";
+                        return false;
+                    }
+                    string hotkeyErr = Credentials.HotkeySpec.Validate(rawHotkey);
+                    if (hotkeyErr != null)
+                    {
+                        error = "凭据「" + title + "」快捷键无效：" + hotkeyErr;
+                        return false;
+                    }
+                    hotkey = Credentials.HotkeySpec.Normalize(rawHotkey);
+                    if (!string.IsNullOrEmpty(hotkey) && !hotkeys.Add(hotkey))
+                    {
+                        error = "凭据快捷键「" + hotkey + "」重复。";
+                        return false;
+                    }
+                }
+                list.Add(new CredentialEntry { Title = title, EncryptedSecret = secret, Hotkey = hotkey });
             }
             result = list;
             return true;

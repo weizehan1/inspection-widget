@@ -67,23 +67,6 @@ namespace InspectionWidget
                 Padding = new Padding(0, 8, 0, 8)
             };
             top.Controls.Add(_countLabel, 0, 0);
-
-            var hint = new Label
-            {
-                AutoSize = true,
-                Font = UiTheme.SmallFont,
-                ForeColor = UiTheme.WeakTextColor,
-                Text = "双击或按 Enter 编辑；行序就是主面板按钮顺序。",
-                Padding = new Padding(0, 8, 8, 8)
-            };
-            top.SizeChanged += delegate
-            {
-                int countW = Math.Max(90, _countLabel.PreferredWidth + 16);
-                int availHint = Math.Max(140, top.ClientSize.Width - countW);
-                if (hint.MaximumSize.Width != availHint)
-                    hint.MaximumSize = new Size(availHint, 0);
-            };
-            top.Controls.Add(hint, 1, 0);
             root.Controls.Add(top, 0, 0);
 
             _grid = UiTheme.GridStyle(new DataGridView

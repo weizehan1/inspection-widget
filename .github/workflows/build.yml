@@ -154,7 +154,7 @@ jobs:
               throw "Tag 主版本($numericVer) 与 exe FileVersion($($ver.FileVersion)) 不一致。"
             }
             $settingsSrc = Get-Content "src\SettingsForm.cs" -Raw -Encoding utf8
-            if (-not $settingsSrc.Contains("巡检助手 v$tagVer ")) {
+            if (-not $settingsSrc.Contains("巡检助手 v$tagVer")) {
               throw "SettingsForm 关于卡片版本字符串与 Tag v$tagVer 不一致。"
             }
           }

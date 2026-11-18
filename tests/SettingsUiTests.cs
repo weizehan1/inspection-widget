@@ -514,17 +514,9 @@ namespace InspectionWidget.Tests
 
                     env.Invoke(env.Form, "OnNavClicked", 4);
                     Application.DoEvents();
-                    var exportSource = (Label)env.Field(env.Form, "_exportSourceLabel");
-                    var importDetail = (Label)env.Field(env.Form, "_importDetailLabel");
                     var aboutRoot = (Label)env.Field(env.Form, "_aboutRootPathLabel");
-                    Assert.True(exportSource.Right <= exportSource.Parent.ClientSize.Width,
-                        "导出说明应换行不溢出：" + exportSource.Bounds + " vs " + exportSource.Parent.ClientSize);
-                    Assert.True(importDetail.Right <= importDetail.Parent.ClientSize.Width,
-                        "导入说明应换行不溢出：" + importDetail.Bounds + " vs " + importDetail.Parent.ClientSize);
                     Assert.True(aboutRoot.Right <= aboutRoot.Parent.ClientSize.Width,
                         "关于根目录应换行不溢出：" + aboutRoot.Bounds + " vs " + aboutRoot.Parent.ClientSize);
-                    Assert.True(exportSource.Height > exportSource.Font.Height * 1.4f,
-                        "导出说明在最小宽度下应自动换行：" + exportSource.Height);
                 }
             });
         }

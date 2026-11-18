@@ -38,7 +38,7 @@ namespace InspectionWidget.Capture
         public const int SchemeBCredentialGap = 6;
         public const int SchemeBDeviceRowHeight = 40;
         public const int SchemeBDeviceRowGap = 6;
-        public const int SchemeBFooterHeight = 96;
+        public const int SchemeBFooterHeight = 128;
 
         /// <summary>v1.1.0 方案 B 缩放后的面板宽（352 * factor）。</summary>
         public static int ScaledSchemeBPanelWidth(double factor)

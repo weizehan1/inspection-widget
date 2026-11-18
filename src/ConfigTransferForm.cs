@@ -145,17 +145,17 @@ namespace InspectionWidget
             Panel optionsCard = UiTheme.CreateSectionCard("替换模式选项", out optionsLayout);
             _importRootCheck = new CheckBox
             {
-                Text = "导入截图保存目录",
+                Text = "导入保存目录与 U盘目录",
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
                 AutoSize = true,
-                Enabled = document.Has("RootPath"),
+                Enabled = document.Has("RootPath") || document.Has("UsbSyncRootPath"),
                 Margin = new Padding(0, 0, 0, 4)
             };
             _replaceCredentialsCheck = new CheckBox
             {
-                Text = "替换凭据（整表替换；空数组表示清空）",
+                Text = "替换凭据",
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,
@@ -165,7 +165,7 @@ namespace InspectionWidget
             };
             _restoreLocalCheck = new CheckBox
             {
-                Text = "恢复本机字段（窗口位置 / 上次设备 / 托盘提示）",
+                Text = "恢复窗口位置与上次设备",
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor,

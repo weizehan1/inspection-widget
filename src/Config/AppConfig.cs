@@ -21,6 +21,9 @@ namespace InspectionWidget.Config
         [DataMember]
         public string EncryptedSecret { get; set; }
 
+        [DataMember]
+        public string Hotkey { get; set; }
+
         /// <summary>运行时标记：密文解不开时置 true，仅界面提示用，不落盘。</summary>
         [IgnoreDataMember]
         public bool NeedsReset { get; set; }
@@ -59,6 +62,9 @@ namespace InspectionWidget.Config
     {
         [DataMember]
         public string RootPath { get; set; }
+
+        [DataMember]
+        public string UsbSyncRootPath { get; set; }
 
         [DataMember]
         public List<string> Devices { get; set; }
@@ -131,6 +137,8 @@ namespace InspectionWidget.Config
         [OnDeserializing]
         private void OnDeserializing(StreamingContext context)
         {
+            RootPath = null;
+            UsbSyncRootPath = null;
             AutoClearClipboard = true;
             IsCredentialCollapsed = false;
             IsDeviceCollapsed = false;
@@ -151,6 +159,7 @@ namespace InspectionWidget.Config
             return new AppConfig
             {
                 RootPath = null,
+                UsbSyncRootPath = null,
                 Devices = new List<string> { "设备1", "设备2" },
                 Credentials = new List<CredentialEntry>(),
                 IsCredentialCollapsed = false,

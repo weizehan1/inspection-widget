@@ -56,6 +56,7 @@ namespace InspectionWidget.Config
             var fields = new List<string>();
             fields.Add("    \"Devices\": " + StringArrayJson(config.Devices));
             fields.Add("    \"RootPath\": " + NullableStringJson(config.RootPath));
+            fields.Add("    \"UsbSyncRootPath\": " + NullableStringJson(config.UsbSyncRootPath));
             fields.Add("    \"FolderNamePattern\": " + NullableStringJson(config.FolderNamePattern));
             fields.Add("    \"CaptureMode\": " + ((int)config.CaptureMode).ToString());
             fields.Add("    \"UiScalePercent\": " + config.UiScalePercent.ToString());
@@ -146,6 +147,12 @@ namespace InspectionWidget.Config
                 error = rootValidation;
                 return false;
             }
+            string usbValidation = ConfigValidator.ValidateRootPath(source.UsbSyncRootPath);
+            if (usbValidation != null)
+            {
+                error = "U盘目录无效：" + usbValidation;
+                return false;
+            }
             // 文档也可能由调用方直接构造；生成可提交候选前统一再校验一次新字段。
             string quickLinksError = QuickLinkValidator.ValidateAll(source.QuickLinks);
             if (quickLinksError != null)
@@ -186,6 +193,17 @@ namespace InspectionWidget.Config
                 else if (document.Has("RootPath"))
                 {
                     plan.SettingChanges.Add("截图保存目录：保留当前值（未勾选导入）");
+                }
+
+                if (document.Has("UsbSyncRootPath") && options.ImportRootPath)
+                {
+                    result.UsbSyncRootPath = source.UsbSyncRootPath;
+                    plan.SettingChanges.Add("U盘联动目录：采用源文件中的值");
+                    AddSource(plan, document, "UsbSyncRootPath");
+                }
+                else if (document.Has("UsbSyncRootPath"))
+                {
+                    plan.SettingChanges.Add("U盘联动目录：保留当前值（未勾选导入）");
                 }
 
                 CopyField(document, result, source, "FolderNamePattern",
@@ -508,6 +526,7 @@ namespace InspectionWidget.Config
                 {
                     Title = entry.Title,
                     EncryptedSecret = entry.EncryptedSecret ?? string.Empty,
+                    Hotkey = entry.Hotkey,
                     NeedsReset = needsReset
                 });
             }
@@ -527,6 +546,7 @@ namespace InspectionWidget.Config
                 {
                     Title = entry.Title,
                     EncryptedSecret = entry.EncryptedSecret,
+                    Hotkey = entry.Hotkey,
                     NeedsReset = entry.NeedsReset
                 });
             }
@@ -584,7 +604,10 @@ namespace InspectionWidget.Config
                 CredentialEntry entry = credentials[i];
                 json.Append("{\"Title\": \"").Append(JsonEscape(entry.Title ?? string.Empty))
                     .Append("\", \"EncryptedSecret\": \"")
-                    .Append(JsonEscape(entry.EncryptedSecret ?? string.Empty)).Append("\"}");
+                    .Append(JsonEscape(entry.EncryptedSecret ?? string.Empty)).Append('"');
+                if (!string.IsNullOrEmpty(entry.Hotkey))
+                    json.Append(", \"Hotkey\": \"").Append(JsonEscape(entry.Hotkey)).Append('"');
+                json.Append('}');
             }
             json.Append(']');
             return json.ToString();

@@ -481,7 +481,7 @@ namespace InspectionWidget.Tests
                     Assert.NotNull(credBtn);
 
                     var subLabel = (Label)Field(env.Form, "_credentialSubLabel");
-                    Assert.Equal("点按复制，30 秒后清空", subLabel.Text);
+                    Assert.Equal(string.Empty, subLabel.Text);
 
                     Invoke(env.Form, "OnCredentialButtonClicked", credBtn, EventArgs.Empty);
                     Assert.Equal("s3cr3t-pass", gateway.LastWrittenText);
@@ -499,7 +499,7 @@ namespace InspectionWidget.Tests
                     Assert.Null((string)Field(env.Form, "_copiedCredentialTitle"));
                     Assert.Equal(0, (int)Field(env.Form, "_credentialCountdownSeconds"));
                     Assert.Equal(Color.White, credBtn.BackColor);
-                    Assert.Equal("点按复制，30 秒后清空", subLabel.Text);
+                    Assert.Equal(string.Empty, subLabel.Text);
 
                     Invoke(env.Form, "OnCredentialButtonClicked", credBtn, EventArgs.Empty);
                     Assert.Equal("运维账号", (string)Field(env.Form, "_copiedCredentialTitle"));
