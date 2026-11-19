@@ -140,13 +140,25 @@ namespace InspectionWidget.Credentials
             }
             AppendPart(sb, keyDisplay);
 
+            string built = sb.ToString();
+            if (IsReservedSystemHotkey(mod, vk))
+            {
+                error = "不支持绑定系统常用快捷键「" + built + "」，请改用其他组合（如 Ctrl+Alt+1）。";
+                return false;
+            }
+
             modifiers = mod;
             virtualKey = vk;
-            canonical = sb.ToString();
+            canonical = built;
             return true;
         }
 
         public static bool TryFromKeyEvent(Keys keyData, out string canonical, out string error)
+        {
+            return TryFromKeyEvent(keyData, false, out canonical, out error);
+        }
+
+        public static bool TryFromKeyEvent(Keys keyData, bool winDown, out string canonical, out string error)
         {
             canonical = null;
             error = null;
@@ -175,11 +187,21 @@ namespace InspectionWidget.Credentials
             if ((modifiers & Keys.Control) == Keys.Control) AppendPart(sb, "Ctrl");
             if ((modifiers & Keys.Alt) == Keys.Alt) AppendPart(sb, "Alt");
             if ((modifiers & Keys.Shift) == Keys.Shift) AppendPart(sb, "Shift");
+            if (winDown) AppendPart(sb, "Win");
             AppendPart(sb, keyName);
 
             uint mod;
             uint vk;
             return TryParse(sb.ToString(), out mod, out vk, out canonical, out error);
+        }
+
+        private static bool IsReservedSystemHotkey(uint modifiers, uint vk)
+        {
+            if (modifiers == NativeMethods.MOD_CONTROL)
+                return vk == 'V' || vk == 'C' || vk == 'X' || vk == 'A' || vk == 'Z';
+            if (modifiers == NativeMethods.MOD_ALT)
+                return vk == 0x73; // F4
+            return false;
         }
 
         public static string ValidateUnique(IList<string> hotkeys, out int duplicateIndex)

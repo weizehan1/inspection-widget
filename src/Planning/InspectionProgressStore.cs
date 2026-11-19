@@ -95,10 +95,6 @@ namespace InspectionWidget.Planning
                 if (!File.Exists(_path))
                     return true;
 
-                byte[] bytes = _lastLoadedBytes;
-                if (bytes == null)
-                    bytes = File.ReadAllBytes(_path);
-
                 string dir = System.IO.Path.GetDirectoryName(_path);
                 if (string.IsNullOrEmpty(dir))
                     dir = ".";
@@ -107,14 +103,49 @@ namespace InspectionWidget.Planning
                     + "." + Guid.NewGuid().ToString("N").Substring(0, 8)
                     + ".json";
                 string candidate = System.IO.Path.Combine(dir, name);
-                AtomicWriteResult writeResult = _writer.WriteAllBytes(candidate, bytes);
-                if (!writeResult.Written)
+
+                byte[] bytes = _lastLoadedBytes;
+                if (bytes != null)
                 {
-                    error = writeResult.Error ?? "写入损坏进度备份失败。";
-                    return false;
+                    AtomicWriteResult writeResult = _writer.WriteAllBytes(candidate, bytes);
+                    if (!writeResult.Written)
+                    {
+                        error = writeResult.Error ?? "写入损坏进度备份失败。";
+                        return false;
+                    }
+                    backupPath = candidate;
+                    return true;
                 }
-                backupPath = candidate;
-                return true;
+
+                // 超限或未加载进内存时，走流式拷贝至同目录临时文件再原子移动，避免 OOM / 2GiB 数组上限。
+                Directory.CreateDirectory(dir);
+                string tmp = System.IO.Path.Combine(dir, "." + name + ".tmp");
+                try
+                {
+                    var buffer = new byte[65536];
+                    using (var src = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var dst = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        int read;
+                        while ((read = src.Read(buffer, 0, buffer.Length)) > 0)
+                            dst.Write(buffer, 0, read);
+                        dst.Flush(true);
+                    }
+                    File.Move(tmp, candidate);
+                    backupPath = candidate;
+                    return true;
+                }
+                finally
+                {
+                    try
+                    {
+                        if (File.Exists(tmp))
+                            File.Delete(tmp);
+                    }
+                    catch
+                    {
+                    }
+                }
             }
             catch (Exception ex)
             {

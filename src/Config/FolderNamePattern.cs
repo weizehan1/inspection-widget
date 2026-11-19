@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace InspectionWidget.Config
 {
@@ -17,6 +18,14 @@ namespace InspectionWidget.Config
         // Linux/Mono 下该集合只有 '/' 与 '\0'，会把 Windows 非法模式放行）。
         private static readonly char[] InvalidChars =
             { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
+
+        private static readonly HashSet<string> ReservedNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "CON", "PRN", "AUX", "NUL",
+                "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+            };
 
         /// <summary>
         /// 按模式把日期格式化为文件夹名。先把占位换成哨兵再回填数值，
@@ -46,9 +55,16 @@ namespace InspectionWidget.Config
                 if (c < 0x20 || Array.IndexOf(InvalidChars, c) >= 0)
                     return "日期文件夹名不能包含 \\ / : * ? \" < > | 等字符。";
             }
+            if (pattern.EndsWith(" ", StringComparison.Ordinal) || pattern.EndsWith(".", StringComparison.Ordinal))
+                return "日期文件夹名末尾不能是空格或点。";
             string sample = Format(pattern, new DateTime(2026, 11, 3));
             if (string.IsNullOrWhiteSpace(sample) || sample == "." || sample == "..")
                 return "日期文件夹名不能是「.」或「..」。";
+            if (sample.EndsWith(" ", StringComparison.Ordinal) || sample.EndsWith(".", StringComparison.Ordinal))
+                return "日期文件夹名末尾不能是空格或点。";
+            string mainName = sample.Split('.')[0].TrimEnd(' ');
+            if (ReservedNames.Contains(mainName))
+                return "日期文件夹名不能使用 Windows 保留名（如 CON、PRN、NUL、COM1、LPT1）。";
             return null;
         }
 

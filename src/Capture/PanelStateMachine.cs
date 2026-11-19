@@ -47,7 +47,7 @@ namespace InspectionWidget.Capture
                     State = PanelState.Waiting;
                     return true;
                 case PanelState.Waiting:
-                    if (CurrentDevice == device)
+                    if (string.Equals(CurrentDevice, device, System.StringComparison.OrdinalIgnoreCase))
                     {
                         CurrentDevice = null;
                         State = PanelState.Idle;

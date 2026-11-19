@@ -22,6 +22,7 @@ namespace InspectionWidget
         private readonly Label _summaryLabel;
         private readonly TextBox _deviceChangeBox;
         private readonly Label _errorLabel;
+        private readonly ToolTip _errorToolTip = new ToolTip();
         private readonly double _uiScaleFactor;
         private Icon _ownedAppIcon;
 
@@ -205,7 +206,7 @@ namespace InspectionWidget
                 ReadOnly = true,
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical,
-                WordWrap = false,
+                WordWrap = true,
                 Font = UiTheme.SmallFont,
                 BackColor = UiTheme.PageBackColor,
                 ForeColor = UiTheme.PrimaryTextColor,
@@ -355,6 +356,7 @@ namespace InspectionWidget
         private void RefreshSummary()
         {
             _errorLabel.Text = string.Empty;
+            _errorToolTip.SetToolTip(_errorLabel, null);
             ConfigImportOptions options = CurrentOptions();
             ConfigImportPlan plan;
             string error;
@@ -364,6 +366,7 @@ namespace InspectionWidget
                 _summaryLabel.Text = "当前选择无法生成导入方案。";
                 _deviceChangeBox.Text = string.Empty;
                 _errorLabel.Text = error;
+                _errorToolTip.SetToolTip(_errorLabel, error);
                 return;
             }
             var lines = new List<string>();
@@ -403,6 +406,7 @@ namespace InspectionWidget
                 out plan, out error))
             {
                 _errorLabel.Text = error;
+                _errorToolTip.SetToolTip(_errorLabel, error);
                 return;
             }
             Plan = plan;
@@ -413,11 +417,16 @@ namespace InspectionWidget
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && _ownedAppIcon != null)
+            if (disposing)
             {
-                Icon = null;
-                _ownedAppIcon.Dispose();
-                _ownedAppIcon = null;
+                if (_errorToolTip != null)
+                    _errorToolTip.Dispose();
+                if (_ownedAppIcon != null)
+                {
+                    Icon = null;
+                    _ownedAppIcon.Dispose();
+                    _ownedAppIcon = null;
+                }
             }
             base.Dispose(disposing);
         }

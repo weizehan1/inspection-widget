@@ -700,6 +700,62 @@ namespace InspectionWidget.Tests
                 }
                 finally { SafeDeleteDir(dir); }
             });
+
+            TestRunner.Run("集成：同轮设置同时删除与改名时旧进度不盗用至新设备、有效改名保留进度", () =>
+            {
+                string dir = CreateTempDir();
+                try
+                {
+                    var clock = new StepClock { Now = new DateTime(2026, 11, 19, 10, 0, 0) };
+                    var store = new InspectionProgressStore(Path.Combine(dir, "progress.json"));
+                    var cfg = BuildPlanConfig("D:\\Shots", new[] { "旧设备A", "旧设备B" }, true, true);
+                    var sm = new PanelStateMachine();
+                    var ctrl = new InspectionSessionController(clock, sm, store, cfg);
+
+                    InspectionPlanToken t1, t2;
+                    string err;
+                    Assert.True(ctrl.TrySelectDevice("旧设备A", out t1, out err));
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(ctrl.RecordSaveSucceeded("旧设备A", Path.Combine(dir, "a.png"), t1, out err));
+
+                    Assert.True(ctrl.TrySelectDevice("旧设备B", out t2, out err));
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(ctrl.RecordSaveSucceeded("旧设备B", Path.Combine(dir, "b.png"), t2, out err));
+                    Assert.Equal(2, ctrl.Plan.VisitedCount);
+
+                    var nextCfg = BuildPlanConfig("D:\\Shots", new[] { "全新设备C", "新设备B" }, true, true);
+                    var renames = new List<DeviceRenameRecord>
+                    {
+                        new DeviceRenameRecord { OldName = "旧设备B", NewName = "新设备B" }
+                    };
+                    ctrl.ApplySavedConfig(nextCfg, renames, false, out err);
+                    Assert.Null(err);
+                    Assert.Equal(1, ctrl.Plan.VisitedCount);
+                    Assert.True(ctrl.Plan.IsVisited("新设备B"));
+                    Assert.False(ctrl.Plan.IsVisited("全新设备C"));
+                }
+                finally { SafeDeleteDir(dir); }
+            });
+
+            TestRunner.Run("筛选器：计划模式关闭时总数统计有效设备、VisitedCount 归零且不判定全部隐藏", () =>
+            {
+                var clock = new StepClock { Now = new DateTime(2026, 11, 19, 10, 0, 0) };
+                var plan = new InspectionPlan(clock, new[] { "A", "B" });
+                Assert.True(plan.MarkVisited("A", plan.CurrentToken));
+                Assert.True(plan.MarkVisited("B", plan.CurrentToken));
+                DeviceDisplaySnapshot res = InspectionDeviceDisplayFilter.Build(
+                    plan,
+                    new[] { "A", " ", "B" },
+                    false,
+                    true,
+                    false);
+                Assert.Equal(2, res.TotalCount);
+                Assert.Equal(0, res.VisitedCount);
+                Assert.Equal(DeviceListEmptyKind.None, res.EmptyKind);
+                Assert.Equal(2, res.Items.Count);
+            });
         }
 
         private sealed class FailingBackupOps : AtomicConfigWriter.IFileOperations

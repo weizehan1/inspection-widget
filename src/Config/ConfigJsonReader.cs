@@ -655,6 +655,11 @@ namespace InspectionWidget.Config
                 error = "QuickLinks 必须是数组或 null。";
                 return false;
             }
+            if (array.Count > QuickLinkValidator.MaxLinks)
+            {
+                error = "快捷链接最多配置 " + QuickLinkValidator.MaxLinks + " 条。";
+                return false;
+            }
             for (int i = 0; i < array.Count; i++)
             {
                 object itemValue = array[i];
@@ -1007,6 +1012,11 @@ namespace InspectionWidget.Config
                             case 'u':
                                 if (_position + 4 > _text.Length)
                                     throw new JsonFormatException("JSON Unicode 转义不完整。");
+                                for (int h = 0; h < 4; h++)
+                                {
+                                    if (!IsHexDigit(_text[_position + h]))
+                                        throw new JsonFormatException("JSON Unicode 转义无效。");
+                                }
                                 int code;
                                 if (!int.TryParse(_text.Substring(_position, 4),
                                     NumberStyles.HexNumber, CultureInfo.InvariantCulture, out code))
@@ -1101,6 +1111,13 @@ namespace InspectionWidget.Config
                     return true;
                 }
                 return false;
+            }
+
+            private static bool IsHexDigit(char c)
+            {
+                return (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F');
             }
         }
     }

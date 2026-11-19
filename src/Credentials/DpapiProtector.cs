@@ -15,8 +15,15 @@ namespace InspectionWidget.Credentials
         {
             if (plainText == null) throw new ArgumentNullException("plainText");
             byte[] data = Encoding.UTF8.GetBytes(plainText);
-            byte[] encrypted = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
-            return Convert.ToBase64String(encrypted);
+            try
+            {
+                byte[] encrypted = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
+                return Convert.ToBase64String(encrypted);
+            }
+            finally
+            {
+                Array.Clear(data, 0, data.Length);
+            }
         }
 
         public string Unprotect(string base64)
@@ -35,7 +42,14 @@ namespace InspectionWidget.Credentials
             }
 
             byte[] data = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
-            return Encoding.UTF8.GetString(data);
+            try
+            {
+                return Encoding.UTF8.GetString(data);
+            }
+            finally
+            {
+                Array.Clear(data, 0, data.Length);
+            }
         }
     }
 }

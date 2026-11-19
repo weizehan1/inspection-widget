@@ -311,6 +311,31 @@ namespace InspectionWidget.Tests
                 }
                 finally { Cleanup(dir); }
             });
+
+            TestRunner.Run("进度存储：超过 1 MiB 的损坏进度文件流式备份不丢数据且不崩溃", () =>
+            {
+                string dir = MakeTempDir();
+                try
+                {
+                    string path = Path.Combine(dir, "progress.json");
+                    long hugeSize = InspectionProgressStore.MaxFileBytes + 4096L;
+                    using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+                    {
+                        fs.SetLength(hugeSize);
+                    }
+
+                    var store = new InspectionProgressStore(path);
+                    InspectionProgressSnapshot snapshot;
+                    string error;
+                    Assert.False(store.TryLoad(out snapshot, out error));
+
+                    string backupPath;
+                    Assert.True(store.TryBackupCorruptCopy(out backupPath, out error), error);
+                    Assert.True(File.Exists(backupPath));
+                    Assert.Equal(hugeSize, new FileInfo(backupPath).Length);
+                }
+                finally { Cleanup(dir); }
+            });
         }
 
         private static InspectionProgressSnapshot MakeSnapshot()

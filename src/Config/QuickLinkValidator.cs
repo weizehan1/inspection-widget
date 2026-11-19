@@ -25,6 +25,8 @@ namespace InspectionWidget.Config
             foreach (QuickLinkEntry entry in entries)
             {
                 index++;
+                if (index > MaxLinks)
+                    return "快捷链接最多配置 " + MaxLinks + " 条。";
                 string error = Validate(entry);
                 if (error != null)
                     return "第 " + index + " 条快捷链接：" + error;

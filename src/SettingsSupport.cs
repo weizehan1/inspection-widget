@@ -136,6 +136,8 @@ namespace InspectionWidget
             public bool Saved;
             public string Error;
             public int ErrorGroup;
+            public bool ErrorOnRootPath;
+            public bool ErrorOnUsbRoot;
             public int CredentialErrorIndex;
             public bool CredentialErrorOnTitle;
             public bool CredentialErrorOnHotkey;
@@ -293,14 +295,23 @@ namespace InspectionWidget
 
             string rootError = ConfigValidator.ValidateRootPath(rootPath);
             if (rootError != null)
-                return Fail("存储与显示：" + rootError, storageGroup);
+                return FailStorage("存储与显示：" + rootError, storageGroup, onRootPath: true, onUsbRoot: false);
 
             string normalizedUsbRoot = string.IsNullOrWhiteSpace(usbSyncRootPath)
                 ? null
                 : usbSyncRootPath.Trim();
-            string usbError = ConfigValidator.ValidateRootPath(normalizedUsbRoot);
-            if (usbError != null)
-                return Fail("存储与显示：U盘目录——" + usbError, storageGroup);
+            if (normalizedUsbRoot != null)
+            {
+                string usbError = ConfigValidator.ValidateRootPath(normalizedUsbRoot, "U盘目录");
+                if (usbError != null)
+                    return FailStorage("存储与显示：" + usbError, storageGroup, onRootPath: false, onUsbRoot: true);
+                if (InspectionWidget.Storage.InspectionFileTransferService.PathsOverlap(
+                    rootPath, normalizedUsbRoot))
+                {
+                    return FailStorage("存储与显示：U盘目录不能与截图根目录相同或互相包含。",
+                        storageGroup, onRootPath: false, onUsbRoot: true);
+                }
+            }
 
             string patternError = FolderNamePattern.Validate(folderPattern);
             if (patternError != null)
@@ -456,6 +467,20 @@ namespace InspectionWidget
                 Saved = false,
                 Error = error,
                 ErrorGroup = group,
+                CredentialErrorIndex = -1,
+                LinkErrorIndex = -1
+            };
+        }
+
+        private static Outcome FailStorage(string error, int group, bool onRootPath, bool onUsbRoot)
+        {
+            return new Outcome
+            {
+                Saved = false,
+                Error = error,
+                ErrorGroup = group,
+                ErrorOnRootPath = onRootPath,
+                ErrorOnUsbRoot = onUsbRoot,
                 CredentialErrorIndex = -1,
                 LinkErrorIndex = -1
             };

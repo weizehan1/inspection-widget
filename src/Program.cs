@@ -16,30 +16,17 @@ namespace InspectionWidget
         [STAThread]
         private static void Main()
         {
-            // 单实例互斥（Task 0 审查 Minor-3 兜底）：首个实例异常退出后，
-            // 命名互斥被废弃，下一个实例在构造 Mutex 时会抛
-            // AbandonedMutexException——该异常的语义即「本线程已接管所有权」，
-            // 捕获后视为首次启动继续，不当作已有实例在运行而误退。
             Mutex mutex = null;
             bool createdNew;
             try
             {
-                mutex = new Mutex(true, MutexName, out createdNew);
+                // initiallyOwned=false 避免异常退出时废弃互斥所有权，同时在 Dispose 前保持命名内核对象存活。
+                mutex = new Mutex(false, MutexName, out createdNew);
             }
-            catch (AbandonedMutexException)
+            catch (UnauthorizedAccessException ex)
             {
-                createdNew = true;
-                // 构造未完成的 Mutex 对象不能依赖：另开一个同名句柄把命名
-                // 互斥保活到本进程结束，保证后续实例仍能探到它已存在；
-                // 开句柄失败也只降级为无保活句柄，不阻断启动。
-                try
-                {
-                    mutex = new Mutex(false, MutexName);
-                }
-                catch
-                {
-                    mutex = null;
-                }
+                ErrorLog.Write("单实例互斥", ex);
+                return;
             }
 
             if (!createdNew)
@@ -49,14 +36,7 @@ namespace InspectionWidget
                 return;
             }
 
-            if (mutex != null)
-            {
-                using (mutex)
-                {
-                    RunApplication();
-                }
-            }
-            else
+            using (mutex)
             {
                 RunApplication();
             }

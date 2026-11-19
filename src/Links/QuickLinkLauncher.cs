@@ -38,12 +38,36 @@ namespace InspectionWidget.Links
 
         private static void OpenInDefaultBrowser(string url)
         {
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT
+                && url.IndexOf('"') < 0
+                && url.Length <= 2000)
+            {
+                try
+                {
+                    var explorerStart = new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = "\"" + url + "\"",
+                        UseShellExecute = false
+                    };
+                    using (Process proc = Process.Start(explorerStart))
+                    {
+                    }
+                    return;
+                }
+                catch
+                {
+                }
+            }
+
             var start = new ProcessStartInfo
             {
                 FileName = url,
                 UseShellExecute = true
             };
-            Process.Start(start);
+            using (Process proc = Process.Start(start))
+            {
+            }
         }
     }
 }

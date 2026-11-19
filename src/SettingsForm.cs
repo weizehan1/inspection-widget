@@ -35,6 +35,8 @@ namespace InspectionWidget
         private bool _closingAfterSave;
         private bool _layoutScaleApplied;
         private bool _updatingPageLayout;
+        private bool _layingOutCredentialRows;
+        private bool _layingOutLinkRows;
         private int _currentGroup;
 
         public AppConfig ResultConfig { get; private set; }
@@ -110,6 +112,8 @@ namespace InspectionWidget
             public HotkeyTextBox()
             {
                 ReadOnly = true;
+                ImeMode = ImeMode.Disable;
+                ShortcutsEnabled = false;
                 Cursor = Cursors.Hand;
                 BackColor = UiTheme.CardBackColor;
             }
@@ -119,7 +123,12 @@ namespace InspectionWidget
                 Keys keyCode = keyData & Keys.KeyCode;
                 Keys mods = keyData & Keys.Modifiers;
 
-                if (mods == Keys.None && (keyCode == Keys.Tab || keyCode == Keys.Escape))
+                if (keyCode == Keys.ProcessKey)
+                    return true;
+
+                if ((mods == Keys.None && (keyCode == Keys.Tab || keyCode == Keys.Escape))
+                    || (mods == Keys.Shift && keyCode == Keys.Tab)
+                    || (mods == Keys.Alt && keyCode == Keys.F4))
                     return base.ProcessCmdKey(ref msg, keyData);
 
                 if (mods == Keys.None && (keyCode == Keys.Back || keyCode == Keys.Delete))
@@ -141,13 +150,18 @@ namespace InspectionWidget
                     return true;
                 }
 
+                bool winDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LWIN) & 0x8000) != 0
+                    || (NativeMethods.GetAsyncKeyState(NativeMethods.VK_RWIN) & 0x8000) != 0;
                 string canonical;
                 string error;
-                if (HotkeySpec.TryFromKeyEvent(keyData, out canonical, out error))
+                if (HotkeySpec.TryFromKeyEvent(keyData, winDown, out canonical, out error))
                 {
-                    Text = canonical;
-                    if (HotkeyCaptured != null)
-                        HotkeyCaptured(canonical);
+                    if (!string.Equals(Text, canonical, StringComparison.Ordinal))
+                    {
+                        Text = canonical;
+                        if (HotkeyCaptured != null)
+                            HotkeyCaptured(canonical);
+                    }
                 }
                 else if (HotkeyRejected != null && !string.IsNullOrEmpty(error))
                 {
@@ -192,7 +206,6 @@ namespace InspectionWidget
             public Button DeleteButton;
             public Button UpButton;
             public Button DownButton;
-            public ToolTip ToolTip;
         }
 
         public SettingsForm(AppConfig config, ConfigStore store, ICredentialProtector protector,
@@ -288,6 +301,7 @@ namespace InspectionWidget
                     }
                 }
             }
+            e.Cancel = false;
             base.OnFormClosing(e);
         }
 
@@ -305,6 +319,9 @@ namespace InspectionWidget
         {
             if (disposing)
             {
+                for (int i = 0; i < _credentialRows.Count; i++)
+                    DisposeCredentialRow(_credentialRows[i]);
+                _credentialRows.Clear();
                 if (_feedbackToolTip != null)
                 {
                     _feedbackToolTip.Dispose();
@@ -328,6 +345,8 @@ namespace InspectionWidget
                 if (!_deviceEditor.CancelCurrentEdit())
                     ShowError(GroupDevices, _deviceEditor.LastCancelDiagnostic,
                         _deviceEditor.Grid);
+                else
+                    ClearFeedback();
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
@@ -642,6 +661,10 @@ namespace InspectionWidget
                 meta.Layout.ResumeLayout(true);
                 _updatingPageLayout = false;
             }
+            if (page == _groupPanels[GroupCredentials])
+                LayoutCredentialRows();
+            else if (page == _groupPanels[GroupLinks])
+                LayoutLinkRows();
         }
 
         private void SetWrappedWidth(Control control, int containerInnerWidth)
@@ -754,6 +777,11 @@ namespace InspectionWidget
                 if (!_loading && _layoutScaleApplied)
                     LayoutCredentialRows();
             };
+            _credentialRowsPanel.ClientSizeChanged += delegate
+            {
+                if (!_loading && _layoutScaleApplied)
+                    LayoutCredentialRows();
+            };
             layout.Controls.Add(_credentialRowsPanel);
             _pageMetas[page].UpdateContent = delegate(int contentWidth, int remainingHeight)
             {
@@ -842,6 +870,11 @@ namespace InspectionWidget
                 BackColor = UiTheme.PageBackColor
             };
             _linkRowsPanel.Resize += delegate
+            {
+                if (!_loading && _layoutScaleApplied)
+                    LayoutLinkRows();
+            };
+            _linkRowsPanel.ClientSizeChanged += delegate
             {
                 if (!_loading && _layoutScaleApplied)
                     LayoutLinkRows();
@@ -1284,7 +1317,7 @@ namespace InspectionWidget
             };
             var aboutVersion = new Label
             {
-                Text = "巡检助手 v1.2.1",
+                Text = "巡检助手 v1.2.2",
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
                 AutoSize = true,
@@ -1511,12 +1544,15 @@ namespace InspectionWidget
                     dialog.SelectedPath = _draft.RootPath;
                 if (dialog.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dialog.SelectedPath))
                 {
-                    _draft.RootPath = dialog.SelectedPath;
-                    _rootPathTextBox.Text = dialog.SelectedPath;
-                    MarkDirty();
-                    RefreshRootStatus();
-                    RefreshFolderPreview();
-                    UpdatePageLayout(_groupPanels[_currentGroup], true);
+                    if (!string.Equals(_draft.RootPath, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _draft.RootPath = dialog.SelectedPath;
+                        _rootPathTextBox.Text = dialog.SelectedPath;
+                        MarkDirty();
+                        RefreshRootStatus();
+                        RefreshFolderPreview();
+                        UpdatePageLayout(_groupPanels[_currentGroup], true);
+                    }
                     ClearFeedback();
                 }
             }
@@ -1532,14 +1568,17 @@ namespace InspectionWidget
                     dialog.SelectedPath = _draft.UsbSyncRootPath;
                 if (dialog.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dialog.SelectedPath))
                 {
-                    _draft.UsbSyncRootPath = dialog.SelectedPath;
-                    if (_usbRootPathTextBox != null)
+                    if (!string.Equals(_draft.UsbSyncRootPath, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase))
                     {
-                        _usbRootPathTextBox.Text = dialog.SelectedPath;
-                        if (_feedbackToolTip != null)
-                            _feedbackToolTip.SetToolTip(_usbRootPathTextBox, dialog.SelectedPath);
+                        _draft.UsbSyncRootPath = dialog.SelectedPath;
+                        if (_usbRootPathTextBox != null)
+                        {
+                            _usbRootPathTextBox.Text = dialog.SelectedPath;
+                            if (_feedbackToolTip != null)
+                                _feedbackToolTip.SetToolTip(_usbRootPathTextBox, dialog.SelectedPath);
+                        }
+                        MarkDirty();
                     }
-                    MarkDirty();
                     ClearFeedback();
                 }
             }
@@ -1582,12 +1621,12 @@ namespace InspectionWidget
             }
             LayoutCredentialRows();
             UpdateCredentialAddState();
+            InvalidatePageLayout(_groupPanels[GroupCredentials]);
         }
 
         private CredentialRow CreateCredentialRow(CredentialDraft draft)
         {
             var row = new CredentialRow { Draft = draft };
-            row.ToolTip = new ToolTip();
             row.Panel = new TableLayoutPanel
             {
                 Height = 48,
@@ -1721,7 +1760,8 @@ namespace InspectionWidget
             row.Panel.Controls.Add(row.DeleteButton, 6, 0);
             row.Panel.Controls.Add(row.UpButton, 7, 0);
             row.Panel.Controls.Add(row.DownButton, 8, 0);
-            row.ToolTip.SetToolTip(row.HotkeyBox, "按下组合键绑定，Backspace 清除");
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(row.HotkeyBox, "按下组合键绑定，Backspace 清除");
             if (_layoutScaleApplied)
                 UiTheme.ScaleLayout(row.Panel, _uiScaleFactor);
             RefreshRowStatus(row);
@@ -1756,40 +1796,50 @@ namespace InspectionWidget
 
         private void LayoutCredentialRows()
         {
+            if (_layingOutCredentialRows)
+                return;
+            _layingOutCredentialRows = true;
             int step = L(56);
             int totalHeight = _credentialRows.Count * step;
-            int minimumWidth = L(520);
+            int minimumWidth = L(560);
             int width;
             int offsetX;
             int offsetY;
-            if (_credentialRowsPanel != null) _credentialRowsPanel.SuspendLayout();
             try
             {
                 PrepareAutoScrollPanel(_credentialRowsPanel, totalHeight, minimumWidth, out width, out offsetX, out offsetY);
-                if (_credentialRowsPanel != null)
+                if (_credentialRowsPanel != null) _credentialRowsPanel.SuspendLayout();
+                try
                 {
-                    int rightGap = L(2);
-                    width = Math.Max(minimumWidth, _credentialRowsPanel.ClientSize.Width - rightGap);
-                    if (_credentialHeader != null)
+                    if (_credentialRowsPanel != null)
                     {
-                        int scrollPad = _credentialRowsPanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
-                        _credentialHeader.Padding = new Padding(L(8), 0, L(8) + rightGap + scrollPad, 0);
+                        int rightGap = L(2);
+                        width = Math.Max(minimumWidth, _credentialRowsPanel.ClientSize.Width - rightGap);
+                        if (_credentialHeader != null)
+                        {
+                            int scrollPad = _credentialRowsPanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+                            _credentialHeader.Padding = new Padding(L(8), 0, L(8) + rightGap + scrollPad, 0);
+                        }
+                    }
+                    for (int i = 0; i < _credentialRows.Count; i++)
+                    {
+                        CredentialRow row = _credentialRows[i];
+                        row.Panel.Width = width;
+                        row.Panel.Location = new Point(offsetX, i * step + offsetY);
+                        row.UpButton.Enabled = i > 0;
+                        row.DownButton.Enabled = i < _credentialRows.Count - 1;
+                        row.ClearButton.Enabled = !row.Draft.IsNew && !row.Draft.Cleared;
+                        row.UndoButton.Enabled = row.Draft.Cleared;
                     }
                 }
-                for (int i = 0; i < _credentialRows.Count; i++)
+                finally
                 {
-                    CredentialRow row = _credentialRows[i];
-                    row.Panel.Width = width;
-                    row.Panel.Location = new Point(offsetX, i * step + offsetY);
-                    row.UpButton.Enabled = i > 0;
-                    row.DownButton.Enabled = i < _credentialRows.Count - 1;
-                    row.ClearButton.Enabled = !row.Draft.IsNew && !row.Draft.Cleared;
-                    row.UndoButton.Enabled = row.Draft.Cleared;
+                    if (_credentialRowsPanel != null) _credentialRowsPanel.ResumeLayout(true);
                 }
             }
             finally
             {
-                if (_credentialRowsPanel != null) _credentialRowsPanel.ResumeLayout(true);
+                _layingOutCredentialRows = false;
             }
         }
 
@@ -1814,6 +1864,7 @@ namespace InspectionWidget
             }
             LayoutLinkRows();
             UpdateLinkAddState();
+            InvalidatePageLayout(_groupPanels[GroupLinks]);
         }
 
         private LinkRow CreateLinkRow(QuickLinkEntry entry)
@@ -1942,43 +1993,51 @@ namespace InspectionWidget
 
         private void LayoutLinkRows()
         {
-            if (_linkRowsPanel == null)
+            if (_linkRowsPanel == null || _layingOutLinkRows)
                 return;
+            _layingOutLinkRows = true;
             int step = L(56);
             int totalHeight = _linkRows.Count * step;
             int minimumWidth = L(400);
             int width;
             int offsetX;
             int offsetY;
-            _linkRowsPanel.SuspendLayout();
             try
             {
                 PrepareAutoScrollPanel(_linkRowsPanel, totalHeight, minimumWidth, out width, out offsetX, out offsetY);
-                int rightGap = L(2);
-                width = Math.Max(minimumWidth, _linkRowsPanel.ClientSize.Width - rightGap);
-                if (_linkHeader != null)
+                _linkRowsPanel.SuspendLayout();
+                try
                 {
-                    int scrollPad = _linkRowsPanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
-                    _linkHeader.Padding = new Padding(L(8), 0, L(8) + rightGap + scrollPad, 0);
+                    int rightGap = L(2);
+                    width = Math.Max(minimumWidth, _linkRowsPanel.ClientSize.Width - rightGap);
+                    if (_linkHeader != null)
+                    {
+                        int scrollPad = _linkRowsPanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+                        _linkHeader.Padding = new Padding(L(8), 0, L(8) + rightGap + scrollPad, 0);
+                    }
+                    for (int i = 0; i < _linkRows.Count; i++)
+                    {
+                        LinkRow row = _linkRows[i];
+                        row.Panel.Width = width;
+                        row.Panel.Location = new Point(offsetX, i * step + offsetY);
+                        row.UpButton.Enabled = i > 0;
+                        row.DownButton.Enabled = i < _linkRows.Count - 1;
+                    }
+                    if (_linkEmptyLabel != null)
+                    {
+                        _linkEmptyLabel.Visible = _linkRows.Count == 0;
+                        if (_linkEmptyLabel.Visible)
+                            _linkEmptyLabel.Location = new Point(offsetX, L(4) + offsetY);
+                    }
                 }
-                for (int i = 0; i < _linkRows.Count; i++)
+                finally
                 {
-                    LinkRow row = _linkRows[i];
-                    row.Panel.Width = width;
-                    row.Panel.Location = new Point(offsetX, i * step + offsetY);
-                    row.UpButton.Enabled = i > 0;
-                    row.DownButton.Enabled = i < _linkRows.Count - 1;
-                }
-                if (_linkEmptyLabel != null)
-                {
-                    _linkEmptyLabel.Visible = _linkRows.Count == 0;
-                    if (_linkEmptyLabel.Visible)
-                        _linkEmptyLabel.Location = new Point(offsetX, L(4) + offsetY);
+                    _linkRowsPanel.ResumeLayout(true);
                 }
             }
             finally
             {
-                _linkRowsPanel.ResumeLayout(true);
+                _layingOutLinkRows = false;
             }
         }
 
@@ -2070,7 +2129,8 @@ namespace InspectionWidget
                 row.StatusLabel.Text = "已设置";
                 row.StatusLabel.ForeColor = UiTheme.SecondaryTextColor;
             }
-            row.ToolTip.SetToolTip(row.StatusLabel, row.StatusLabel.Text);
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(row.StatusLabel, row.StatusLabel.Text);
         }
 
         private void AddCredential()
@@ -2152,12 +2212,17 @@ namespace InspectionWidget
 
         private void DisposeCredentialRow(CredentialRow row)
         {
+            if (_feedbackToolTip != null)
+            {
+                if (row.HotkeyBox != null)
+                    _feedbackToolTip.SetToolTip(row.HotkeyBox, null);
+                if (row.StatusLabel != null)
+                    _feedbackToolTip.SetToolTip(row.StatusLabel, null);
+            }
             if (row.Panel != null)
             {
                 row.Panel.Dispose();
             }
-            if (row.ToolTip != null)
-                row.ToolTip.Dispose();
         }
 
         private void UpdateCredentialAddState()
@@ -2247,7 +2312,14 @@ namespace InspectionWidget
                     focus = outcome.LinkErrorOnTitle ? (Control)linkRow.TitleBox : linkRow.UrlBox;
                 }
                 else if (outcome.ErrorGroup == GroupStorage)
-                    focus = _folderPatternTextBox;
+                {
+                    if (outcome.ErrorOnUsbRoot && _usbRootPathTextBox != null)
+                        focus = _usbRootPathTextBox;
+                    else if (outcome.ErrorOnRootPath && _rootPathTextBox != null)
+                        focus = _rootPathTextBox;
+                    else
+                        focus = _folderPatternTextBox;
+                }
                 else if (outcome.CredentialErrorIndex >= 0
                     && outcome.CredentialErrorIndex < _credentialRows.Count)
                 {
@@ -2295,7 +2367,8 @@ namespace InspectionWidget
                     _applyButton.Enabled = false;
                     _saveButton.Enabled = false;
                 }
-                ShowError(GroupTransfer, applied.Error, _applyButton);
+                ShowError(GroupTransfer, applied.Error,
+                    _applyButton.Enabled ? (Control)_applyButton : null);
                 return false;
             }
 
@@ -2304,6 +2377,8 @@ namespace InspectionWidget
             ResultConfig = applied.Result;
             _savedConfig = AppConfigCloner.Clone(applied.Result);
             _draft.AcceptSaved(applied.Result, applied.Save.Revision);
+            if (_importDetailLabel != null)
+                _importDetailLabel.Visible = false;
             _loading = true;
             try
             {
@@ -2320,7 +2395,8 @@ namespace InspectionWidget
             _stale = false;
             UpdateTitle();
             RefreshRootStatus();
-            InvalidatePageLayout(_groupPanels[_currentGroup]);
+            for (int i = 0; i < _groupPanels.Length; i++)
+                InvalidatePageLayout(_groupPanels[i]);
             UpdatePageLayout(_groupPanels[_currentGroup], true);
             ShowSuccess("已应用");
 
@@ -2398,7 +2474,8 @@ namespace InspectionWidget
                     UpdateTitle();
                     _importDetailLabel.Text = "已导入到草稿：" + Path.GetFileName(document.SourcePath) + "（需应用后生效）";
                     _importDetailLabel.Visible = true;
-                    InvalidatePageLayout(_groupPanels[_currentGroup]);
+                    for (int i = 0; i < _groupPanels.Length; i++)
+                        InvalidatePageLayout(_groupPanels[i]);
                     UpdatePageLayout(_groupPanels[_currentGroup], true);
                     ShowInfo("已导入到草稿，点击“应用”生效");
                 }

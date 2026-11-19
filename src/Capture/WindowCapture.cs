@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Threading;
 using InspectionWidget.Config;
 using InspectionWidget.Native;
@@ -61,9 +62,10 @@ namespace InspectionWidget.Capture
         public CaptureOutcome Capture(IntPtr hwnd, CaptureMode mode, Rectangle selfBounds,
             Action hideSelf, Action showSelf)
         {
-            // 1. 复核：窗口已关闭/最小化 → WindowGone
-            if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd))
-                return Gone("窗口已关闭或最小化");
+            // 1. 复核：窗口已关闭/隐藏/最小化 → WindowGone
+            if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd)
+                || NativeMethods.IsIconic(hwnd) || WindowResolver.IsWindowHiddenOrCloaked(hwnd))
+                return Gone("窗口已关闭、隐藏或最小化");
 
             Rectangle winRect;
             if (!TryGetWindowRect(hwnd, out winRect) || winRect.Width <= 0 || winRect.Height <= 0)
@@ -108,7 +110,14 @@ namespace InspectionWidget.Capture
         /// <summary>返回 null 表示应走 BitBlt 回退（仅 Auto 档）。</summary>
         private CaptureOutcome TryPrintWindow(IntPtr hwnd, Rectangle winRect, Rectangle dwmRect, CaptureMode mode, string dwmNote)
         {
-            var bmp = new Bitmap(winRect.Width, winRect.Height);
+            if (LateAttemptCount >= 8)
+            {
+                return mode == CaptureMode.PrintWindowOnly
+                    ? Failed("此前多次 PrintWindow 无响应，已跳过", dwmNote)
+                    : null;
+            }
+
+            var bmp = new Bitmap(winRect.Width, winRect.Height, PixelFormat.Format32bppRgb);
             var attempt = new PrintAttempt { Bitmap = bmp };
 
             var thread = new Thread(delegate()
@@ -147,7 +156,17 @@ namespace InspectionWidget.Capture
             });
             thread.IsBackground = true;
             thread.Name = "InspectionWidget.PrintWindow";
-            thread.Start();
+            try
+            {
+                thread.Start();
+            }
+            catch (Exception ex)
+            {
+                bmp.Dispose();
+                if (mode == CaptureMode.PrintWindowOnly)
+                    return Failed("无法启动抓图线程：" + ex.Message, dwmNote);
+                return null;
+            }
 
             if (!thread.Join(PrintWindowTimeoutMilliseconds))
             {
@@ -258,7 +277,9 @@ namespace InspectionWidget.Capture
                     Thread.Sleep(60);
                 }
 
-                bmp = new Bitmap(dwmRect.Width, dwmRect.Height);
+                TryDwmFlush();
+
+                bmp = new Bitmap(dwmRect.Width, dwmRect.Height, PixelFormat.Format32bppRgb);
                 using (Graphics g = Graphics.FromImage(bmp))
                 {
                     g.CopyFromScreen(dwmRect.Location, Point.Empty, dwmRect.Size);
@@ -305,6 +326,17 @@ namespace InspectionWidget.Capture
         }
 
         // ---------- 辅助 ----------
+
+        private static void TryDwmFlush()
+        {
+            try
+            {
+                NativeMethods.DwmFlush();
+            }
+            catch
+            {
+            }
+        }
 
         private static bool TryGetWindowRect(IntPtr hwnd, out Rectangle rect)
         {

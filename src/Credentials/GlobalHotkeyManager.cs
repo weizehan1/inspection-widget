@@ -75,7 +75,7 @@ namespace InspectionWidget.Credentials
             for (int i = 0; i < credentials.Count; i++)
             {
                 CredentialEntry entry = credentials[i];
-                if (entry == null || string.IsNullOrWhiteSpace(entry.Hotkey))
+                if (entry == null || entry.NeedsReset || string.IsNullOrWhiteSpace(entry.Hotkey))
                     continue;
 
                 uint modifiers;

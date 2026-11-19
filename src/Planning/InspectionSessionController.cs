@@ -267,16 +267,7 @@ namespace InspectionWidget.Planning
             }
             else
             {
-                if (renames != null)
-                {
-                    for (int i = 0; i < renames.Count; i++)
-                    {
-                        DeviceRenameRecord r = renames[i];
-                        if (r != null)
-                            _plan.RenameDevice(r.OldName, r.NewName);
-                    }
-                }
-                _plan.ReconcileDevices(_config.Devices);
+                _plan.ReconcileWithRenames(_config.Devices, renames);
             }
             if (!HideVisitedDevices)
                 _showVisitedOverride = false;

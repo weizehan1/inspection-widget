@@ -59,6 +59,11 @@ namespace InspectionWidget.Tests
                 Assert.NotNull(DeviceNameValidator.Validate("CON.txt", None)));
             TestRunner.Run("校验器：带扩展名 nul.png 非法", () =>
                 Assert.NotNull(DeviceNameValidator.Validate("nul.png", None)));
+            TestRunner.Run("校验器：保留名末尾带空格非法（CON ）", () =>
+            {
+                Assert.NotNull(DeviceNameValidator.Validate("CON ", None));
+                Assert.NotNull(DeviceNameValidator.Validate("COM1 ", None));
+            });
             TestRunner.Run("校验器：COM0 不是保留名（合法）", () =>
                 Assert.Null(DeviceNameValidator.Validate("COM0", None)));
             TestRunner.Run("校验器：CONSOLE 不是保留名（合法）", () =>

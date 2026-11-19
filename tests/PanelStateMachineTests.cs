@@ -183,6 +183,16 @@ namespace InspectionWidget.Tests
                 Assert.Equal("设备B", sm.CurrentDevice);
             });
 
+            TestRunner.Run("状态机：大小写不同但同名设备再次点击切换取消等待", () =>
+            {
+                var sm = new PanelStateMachine();
+                Assert.True(sm.SelectDevice("Server-A"));
+                Assert.Equal(PanelState.Waiting, sm.State);
+                Assert.True(sm.SelectDevice("server-a"));
+                Assert.Equal(PanelState.Idle, sm.State);
+                Assert.Null(sm.CurrentDevice);
+            });
+
             TestRunner.Run("状态机：失败后可重新走完整流程且请求号继续递增", () =>
             {
                 var sm = new PanelStateMachine();

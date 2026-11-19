@@ -141,6 +141,34 @@ namespace InspectionWidget.Tests
 
             TestRunner.Run("启动器：生产构造可用（构造不启动浏览器）", () =>
                 Assert.NotNull(new QuickLinkLauncher()));
+
+            TestRunner.Run("校验与解析：快捷链接超出 12 条上限及畸形 \\uXXXX 转义被拒绝", () =>
+            {
+                var tooMany = new List<QuickLinkEntry>();
+                var linkJson = new List<string>();
+                for (int i = 0; i < QuickLinkValidator.MaxLinks + 1; i++)
+                {
+                    var item = new QuickLinkEntry { Title = "站点" + i, Url = "https://example.com/" + i, Enabled = true };
+                    tooMany.Add(item);
+                    linkJson.Add("{\"Title\":\"站点" + i + "\",\"Url\":\"https://example.com/" + i + "\",\"Enabled\":true}");
+                }
+                Assert.NotNull(QuickLinkValidator.ValidateAll(tooMany));
+
+                ConfigImportDocument doc;
+                string err;
+                string overJson = "{\"Format\":\"InspectionWidget.Settings\",\"Version\":1,"
+                    + "\"CredentialMode\":\"Excluded\",\"Config\":{\"Devices\":[],\"QuickLinks\":["
+                    + string.Join(",", linkJson.ToArray()) + "]}}";
+                Assert.False(ConfigJsonReader.TryParse(overJson, out doc, out err));
+
+                string badHexJson = "{\"Format\":\"InspectionWidget.Settings\",\"Version\":1,"
+                    + "\"CredentialMode\":\"Excluded\",\"Config\":{\"RootPath\":\"\\u12GZ\",\"Devices\":[]}}";
+                Assert.False(ConfigJsonReader.TryParse(badHexJson, out doc, out err));
+
+                string shortHexJson = "{\"Format\":\"InspectionWidget.Settings\",\"Version\":1,"
+                    + "\"CredentialMode\":\"Excluded\",\"Config\":{\"RootPath\":\"\\u12\",\"Devices\":[]}}";
+                Assert.False(ConfigJsonReader.TryParse(shortHexJson, out doc, out err));
+            });
         }
 
         private static AppConfig Deserialize(string json)

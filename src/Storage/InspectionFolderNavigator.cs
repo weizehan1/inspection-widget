@@ -184,7 +184,9 @@ namespace InspectionWidget.Storage
                 FileName = folder,
                 UseShellExecute = true
             };
-            Process.Start(start);
+            using (Process proc = Process.Start(start))
+            {
+            }
         }
     }
 }

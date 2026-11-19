@@ -241,7 +241,11 @@ namespace InspectionWidget
                 if (grid.RowHeadersWidth > 0)
                     grid.RowHeadersWidth = Scale(grid.RowHeadersWidth, factor);
                 if (grid.RowTemplate != null)
+                {
                     grid.RowTemplate.Height = Scale(grid.RowTemplate.Height, factor);
+                    for (int i = 0; i < grid.Rows.Count; i++)
+                        grid.Rows[i].Height = grid.RowTemplate.Height;
+                }
                 if (grid.ColumnHeadersDefaultCellStyle != null)
                     grid.ColumnHeadersDefaultCellStyle.Padding = ScalePadding(grid.ColumnHeadersDefaultCellStyle.Padding, factor);
                 if (grid.DefaultCellStyle != null)

@@ -20,6 +20,7 @@ namespace InspectionWidget
             var card = new Panel
             {
                 Dock = DockStyle.Fill,
+                AutoScroll = true,
                 BackColor = UiTheme.CardBackColor,
                 Padding = new Padding(17, 14, 14, 14)
             };
@@ -40,11 +41,19 @@ namespace InspectionWidget
             var message = new Label
             {
                 Text = bodyText,
-                AutoSize = false,
-                Dock = DockStyle.Fill,
+                AutoSize = true,
+                Location = new Point(card.Padding.Left, card.Padding.Top),
+                MaximumSize = new Size(380, 0),
                 Font = UiTheme.BodyFont,
                 ForeColor = UiTheme.PrimaryTextColor,
                 BackColor = UiTheme.CardBackColor
+            };
+            card.SizeChanged += delegate
+            {
+                int maxW = System.Math.Max(120, card.ClientSize.Width - card.Padding.Horizontal);
+                if (message.MaximumSize.Width != maxW)
+                    message.MaximumSize = new Size(maxW, 0);
+                message.Location = new Point(card.Padding.Left, card.Padding.Top);
             };
             card.Controls.Add(message);
             host.Controls.Add(card);

@@ -150,6 +150,74 @@ namespace InspectionWidget.Tests
                 Assert.True(dupOutcome.CredentialErrorOnHotkey);
                 Assert.Equal(1, dupOutcome.CredentialErrorIndex);
             });
+
+            TestRunner.Run("快捷键与协调器：拒绝保留键、Win 独立采样、NeedsReset 跳过绑定与 U盘重迭拒绝", () =>
+            {
+                uint mod;
+                uint vk;
+                string canonical;
+                string err;
+                string[] reserved = { "Ctrl+V", "Ctrl+C", "Ctrl+X", "Ctrl+A", "Ctrl+Z", "Alt+F4" };
+                for (int i = 0; i < reserved.Length; i++)
+                    Assert.False(HotkeySpec.TryParse(reserved[i], out mod, out vk, out canonical, out err));
+
+                Assert.True(HotkeySpec.TryFromKeyEvent(Keys.Control | Keys.K, true, out canonical, out err), err);
+                Assert.Equal("Ctrl+Win+K", canonical);
+
+                var registrar = new FakeHotkeyRegistrar();
+                var manager = new GlobalHotkeyManager(registrar);
+                var creds = new List<CredentialEntry>
+                {
+                    new CredentialEntry { Title = "失效项", Hotkey = "Ctrl+Alt+1", NeedsReset = true },
+                    new CredentialEntry { Title = "正常项", Hotkey = "Ctrl+Alt+2", NeedsReset = false }
+                };
+                List<HotkeyBindingFailure> failures = manager.Bind(new IntPtr(1234), creds);
+                Assert.Equal(0, failures.Count);
+                Assert.Equal(1, registrar.Registered.Count);
+                int onlyId = -1;
+                foreach (int id in registrar.Registered.Keys) { onlyId = id; break; }
+                int credIdx;
+                Assert.True(manager.TryResolveHotkey(onlyId, out credIdx));
+                Assert.Equal(1, credIdx);
+
+                SettingsSaveCoordinator.Outcome overlapOutcome = SettingsSaveCoordinator.Build(
+                    AppConfig.CreateDefault(),
+                    new List<string> { "设备A" },
+                    new List<CredentialRowCollector.RowInput>(),
+                    new List<QuickLinkEntry>(),
+                    "D:/巡检",
+                    "D:/巡检/USB",
+                    "巡检-yyyy-MM-dd",
+                    true,
+                    100,
+                    CaptureMode.Auto,
+                    true,
+                    true,
+                    new FakeProtector());
+                Assert.False(overlapOutcome.Saved);
+                Assert.Equal(3, overlapOutcome.ErrorGroup);
+                Assert.True(overlapOutcome.ErrorOnUsbRoot);
+                Assert.False(overlapOutcome.ErrorOnRootPath);
+
+                SettingsSaveCoordinator.Outcome badRootOutcome = SettingsSaveCoordinator.Build(
+                    AppConfig.CreateDefault(),
+                    new List<string> { "设备A" },
+                    new List<CredentialRowCollector.RowInput>(),
+                    new List<QuickLinkEntry>(),
+                    "relative",
+                    null,
+                    "巡检-yyyy-MM-dd",
+                    true,
+                    100,
+                    CaptureMode.Auto,
+                    true,
+                    true,
+                    new FakeProtector());
+                Assert.False(badRootOutcome.Saved);
+                Assert.Equal(3, badRootOutcome.ErrorGroup);
+                Assert.True(badRootOutcome.ErrorOnRootPath);
+                Assert.False(badRootOutcome.ErrorOnUsbRoot);
+            });
         }
 
         private sealed class FakeProtector : ICredentialProtector

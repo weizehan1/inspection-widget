@@ -3,7 +3,7 @@
 # 在 windows-latest 上用 MSBuild（VS2022 工具链）构建 Release：
 # - src/InspectionWidget.csproj 已配置 <ApplicationManifest>..\app.manifest</ApplicationManifest>，
 #   MSBuild 将 requireAdministrator 与 DPI 声明内嵌进 exe，产名单文件交付。
-# - 所有分支/PR/手动触发仅使用最小只读权限完成构建、443 逻辑用例 + 27 Windows UI 用例（共 470 条）、
+# - 所有分支/PR/手动触发仅使用最小只读权限完成构建、467 逻辑用例 + 32 Windows UI 用例（共 499 条）、
 #   产物版本与清单自检，以及全量构建/测试日志留存（失败亦上传）。
 # - 仅当推送 v* 标签时触发 release 任务（独立赋予 contents: write），先校验 tag 版本一致性，
 #   再以显式 view 判存的幂等流程创建或更新 GitHub Release 并附带 exe 与 .sha256。
@@ -75,7 +75,7 @@ jobs:
           $msbuildExit = $LASTEXITCODE
           if ($msbuildExit -ne 0) { throw "测试工程 MSBuild 构建失败，退出码 $msbuildExit" }
 
-      - name: 运行纯逻辑与集成测试（443+ 条）
+      - name: 运行纯逻辑与集成测试（467+ 条）
         shell: pwsh
         run: |
           try { chcp 65001 2>$null | Out-Null } catch {}
@@ -94,12 +94,12 @@ jobs:
           $passCount = ([regex]::Matches($raw, '(?m)^\[PASS\]')).Count
           Write-Host "逻辑测试通过数：$passCount（汇总：$reportedPass / $reportedTotal）"
           if ($reportedFail -ne 0) { throw "逻辑测试汇总报告失败数为 $reportedFail。" }
-          if ($reportedTotal -lt 443) { throw "纯逻辑测试总数低于预期基线 443：实际为 $reportedTotal 条。" }
+          if ($reportedTotal -lt 467) { throw "纯逻辑测试总数低于预期基线 467：实际为 $reportedTotal 条。" }
           if ($passCount -ne $reportedTotal -or $reportedPass -ne $reportedTotal) {
             throw "预期 [PASS] 与汇总均等于 $reportedTotal，实际 [PASS]=$passCount、汇总通过=$reportedPass。"
           }
 
-      - name: 运行含 Windows 窗体全量测试（443+ 逻辑 + 27 UI）
+      - name: 运行含 Windows 窗体全量测试（467+ 逻辑 + 32 UI）
         shell: pwsh
         run: |
           try { chcp 65001 2>$null | Out-Null } catch {}
@@ -118,7 +118,7 @@ jobs:
           $passCount = ([regex]::Matches($raw, '(?m)^\[PASS\]')).Count
           Write-Host "全量测试通过数（逻辑+UI）：$passCount（汇总：$reportedPass / $reportedTotal）"
           if ($reportedFail -ne 0) { throw "全量测试汇总报告失败数为 $reportedFail。" }
-          if ($reportedTotal -lt 470) { throw "全量测试总数低于预期基线 470（443 逻辑 + 27 UI）：实际为 $reportedTotal 条。" }
+          if ($reportedTotal -lt 499) { throw "全量测试总数低于预期基线 499（467 逻辑 + 32 UI）：实际为 $reportedTotal 条。" }
           if ($passCount -ne $reportedTotal -or $reportedPass -ne $reportedTotal) {
             throw "预期 [PASS] 与汇总均等于 $reportedTotal，实际 [PASS]=$passCount、汇总通过=$reportedPass。"
           }

@@ -41,18 +41,24 @@ namespace InspectionWidget.Config
 
         public static string ValidateRootPath(string path)
         {
+            return ValidateRootPath(path, "截图保存目录");
+        }
+
+        public static string ValidateRootPath(string path, string fieldLabel)
+        {
+            string label = string.IsNullOrEmpty(fieldLabel) ? "目录路径" : fieldLabel;
             if (path == null)
                 return null;
             if (string.IsNullOrWhiteSpace(path))
-                return "截图保存目录不能为空字符串。";
+                return label + "不能为空字符串。";
             string trimmed = path.TrimEnd(' ', '.');
             if (trimmed.Length != path.Length)
-                return "截图保存目录不能以空格或点结尾。";
+                return label + "不能以空格或点结尾。";
             for (int i = 0; i < trimmed.Length; i++)
             {
                 char c = trimmed[i];
                 if (char.IsControl(c))
-                    return "截图保存目录不能包含控制字符。";
+                    return label + "不能包含控制字符。";
                 if (c == '<' || c == '>' || c == '"' || c == '|' || c == '?' || c == '*'
                     || c == ':')
                 {
@@ -62,7 +68,7 @@ namespace InspectionWidget.Config
                     {
                         continue;
                     }
-                    return "截图保存目录不能包含 < > \" | ? * : 等字符（盘符后的冒号除外）。";
+                    return label + "不能包含 < > \" | ? * : 等字符（盘符后的冒号除外）。";
                 }
             }
 
@@ -76,21 +82,21 @@ namespace InspectionWidget.Config
                 for (int i = 0; i < parts.Length; i++)
                 {
                     if (IsReservedDirectoryName(parts[i]))
-                        return "截图保存目录不能使用 Windows 保留名：" + parts[i];
+                        return label + "不能使用 Windows 保留名：" + parts[i];
                 }
                 return null;
             }
 
             if (!(trimmed.Length >= 3 && char.IsLetter(trimmed[0])
                 && trimmed[1] == ':' && (trimmed[2] == '\\' || trimmed[2] == '/')))
-                return "截图保存目录必须是绝对路径（盘符或 UNC）。";
+                return label + "必须是绝对路径（盘符或 UNC）。";
 
             string[] segments = trimmed.Substring(3).Split(
                 new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
             for (int i = 0; i < segments.Length; i++)
             {
                 if (IsReservedDirectoryName(segments[i]))
-                    return "截图保存目录不能使用 Windows 保留名：" + segments[i];
+                    return label + "不能使用 Windows 保留名：" + segments[i];
             }
             return null;
         }
@@ -114,6 +120,7 @@ namespace InspectionWidget.Config
                 return "凭据最多 " + CredentialRowCollector.MaxCredentials + " 条。";
 
             var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var hotkeys = new List<string>();
             for (int i = 0; i < credentials.Count; i++)
             {
                 CredentialEntry entry = credentials[i];
@@ -123,7 +130,15 @@ namespace InspectionWidget.Config
                     return "凭据列表第 " + (i + 1) + " 项名称为空。";
                 if (!titles.Add(entry.Title))
                     return "凭据名称「" + entry.Title + "」重复。";
+                string hotkeyErr = Credentials.HotkeySpec.Validate(entry.Hotkey);
+                if (hotkeyErr != null)
+                    return "凭据「" + entry.Title + "」快捷键无效：" + hotkeyErr;
+                hotkeys.Add(entry.Hotkey);
             }
+            int dupHotkeyIndex;
+            string dupHotkeyErr = Credentials.HotkeySpec.ValidateUnique(hotkeys, out dupHotkeyIndex);
+            if (dupHotkeyErr != null)
+                return dupHotkeyErr;
             return null;
         }
 

@@ -16,7 +16,7 @@ namespace InspectionWidget.Tests
     /// </summary>
     public static class SettingsUiTests
     {
-        public const int CaseCount = 18;
+        public const int CaseCount = 19;
 
         public static void RunAll()
         {
@@ -519,6 +519,54 @@ namespace InspectionWidget.Tests
                         "关于根目录应换行不溢出：" + aboutRoot.Bounds + " vs " + aboutRoot.Parent.ClientSize);
                 }
             });
+
+            TestRunner.Run("UI：v1.2.2 配置预览换行、关于版本标签及 HotkeyTextBox 输入限制检查", () =>
+            {
+                Console.WriteLine("[START] v1.2.2 SettingsForm 与 ConfigTransferForm 回归检查");
+                using (var env = new UiEnv())
+                {
+                    env.Invoke(env.Form, "OnNavClicked", 1);
+                    env.Invoke(env.Form, "AddCredential");
+                    Application.DoEvents();
+                    var credRows = (IList)env.Field(env.Form, "_credentialRows");
+                    var hotkeyBox = (TextBox)env.Field(credRows[credRows.Count - 1], "HotkeyBox");
+                    Assert.Equal(ImeMode.Disable, hotkeyBox.ImeMode);
+                    Assert.False(hotkeyBox.ShortcutsEnabled);
+
+                    env.Invoke(env.Form, "OnNavClicked", 4);
+                    Application.DoEvents();
+                    var transferPage = ((Panel[])env.Field(env.Form, "_groupPanels"))[4];
+                    Assert.True(FindLabelWithText(transferPage, "巡检助手 v1.2.2"),
+                        "关于卡片应显示巡检助手 v1.2.2");
+
+                    ConfigImportDocument doc;
+                    string err;
+                    Assert.True(ConfigJsonReader.TryParse(
+                        "{\"Format\":\"InspectionWidget.Settings\",\"Version\":1,"
+                        + "\"CredentialMode\":\"Excluded\",\"Config\":{\"Devices\":[]}}",
+                        out doc, out err), err);
+                    using (var preview = new ConfigTransferForm(doc, env.Config, new FakeProtector(), 1.0))
+                    {
+                        var changes = (TextBox)env.Field(preview, "_deviceChangeBox");
+                        Assert.Equal(ScrollBars.Vertical, changes.ScrollBars);
+                        Assert.True(changes.WordWrap, "ConfigTransferForm._deviceChangeBox 应开启 WordWrap");
+                    }
+                }
+            });
+        }
+
+        private static bool FindLabelWithText(Control root, string text)
+        {
+            if (root == null) return false;
+            var label = root as Label;
+            if (label != null && string.Equals(label.Text, text, StringComparison.Ordinal))
+                return true;
+            foreach (Control child in root.Controls)
+            {
+                if (FindLabelWithText(child, text))
+                    return true;
+            }
+            return false;
         }
 
         private static void AssertBottomButtonsVisible(UiEnv env)

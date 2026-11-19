@@ -65,11 +65,22 @@ namespace InspectionWidget.Storage
                 return new SaveResult { Saved = false, Error = "尚未保存：没有可保存的截图" };
             if (string.IsNullOrEmpty(deviceName))
                 return new SaveResult { Saved = false, Error = "尚未保存：设备名为空" };
+            string deviceError = DeviceNameValidator.Validate(deviceName, null);
+            if (deviceError != null)
+                return new SaveResult { Saved = false, Error = "尚未保存：" + deviceError };
 
             if (FolderNamePattern.Validate(folderNamePattern) != null)
                 folderNamePattern = FolderNamePattern.Default;
             string datePart = FolderNamePattern.Format(folderNamePattern, captureDate);
-            string primaryDir = Path.Combine(rootPath, datePart);
+            string primaryDir;
+            try
+            {
+                primaryDir = Path.Combine(rootPath, datePart);
+            }
+            catch (Exception ex)
+            {
+                return new SaveResult { Saved = false, Error = "尚未保存：目录路径无效（" + ex.Message + "）" };
+            }
 
             string[] chain =
             {
@@ -134,6 +145,9 @@ namespace InspectionWidget.Storage
                 throw new ArgumentException("目录为空。", "dir");
             if (string.IsNullOrEmpty(deviceName))
                 throw new ArgumentException("设备名为空。", "deviceName");
+            string deviceError = DeviceNameValidator.Validate(deviceName, null);
+            if (deviceError != null)
+                throw new ArgumentException(deviceError, "deviceName");
 
             Directory.CreateDirectory(dir);
             for (int n = 0; n <= MaxSequence; n++)
@@ -193,6 +207,8 @@ namespace InspectionWidget.Storage
             for (int n = 0; n <= MaxSequence; n++)
             {
                 string candidate = Path.Combine(dir, FileNameFor(deviceName, n));
+                if (Directory.Exists(candidate))
+                    continue;
                 FileStream stream = null;
                 bool created = false;
                 try

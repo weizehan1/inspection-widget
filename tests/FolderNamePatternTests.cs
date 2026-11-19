@@ -164,6 +164,15 @@ namespace InspectionWidget.Tests
                     try { Directory.Delete(baseDir, true); } catch { }
                 }
             });
+
+            TestRunner.Run("文件夹模式校验：拒绝末尾空格或点以及 Windows 保留设备名", () =>
+            {
+                Assert.NotNull(FolderNamePattern.Validate("巡检-yyyy-MM-dd."));
+                Assert.NotNull(FolderNamePattern.Validate("巡检-yyyy-MM-dd "));
+                Assert.NotNull(FolderNamePattern.Validate("CON"));
+                Assert.NotNull(FolderNamePattern.Validate("nul"));
+                Assert.NotNull(FolderNamePattern.Validate("COM1"));
+            });
         }
     }
 }

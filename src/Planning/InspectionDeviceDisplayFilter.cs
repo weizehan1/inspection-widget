@@ -41,8 +41,21 @@ namespace InspectionWidget.Planning
                 ? plan.Devices
                 : (configuredDevices ?? (IReadOnlyList<string>)new string[0]);
 
-            int totalCount = planModeEnabled && plan != null ? plan.TotalCount : sourceDevices.Count;
-            int visitedCount = plan != null ? plan.VisitedCount : 0;
+            int totalCount;
+            if (planModeEnabled && plan != null)
+            {
+                totalCount = plan.TotalCount;
+            }
+            else
+            {
+                totalCount = 0;
+                for (int i = 0; i < sourceDevices.Count; i++)
+                {
+                    if (!string.IsNullOrWhiteSpace(sourceDevices[i]))
+                        totalCount++;
+                }
+            }
+            int visitedCount = planModeEnabled && plan != null ? plan.VisitedCount : 0;
             bool filteringActive = planModeEnabled && hideVisitedDevices && !showVisitedOverride;
 
             for (int i = 0; i < sourceDevices.Count; i++)
@@ -63,8 +76,10 @@ namespace InspectionWidget.Planning
             DeviceListEmptyKind emptyKind = DeviceListEmptyKind.None;
             if (totalCount == 0)
                 emptyKind = DeviceListEmptyKind.NoDevicesConfigured;
-            else if (items.Count == 0)
+            else if (items.Count == 0 && filteringActive)
                 emptyKind = DeviceListEmptyKind.AllVisitedHidden;
+            else if (items.Count == 0)
+                emptyKind = DeviceListEmptyKind.NoDevicesConfigured;
 
             return new DeviceDisplaySnapshot
             {

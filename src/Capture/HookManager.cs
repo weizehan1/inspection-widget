@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -47,9 +48,10 @@ namespace InspectionWidget.Capture
         private const int TimeoutMilliseconds = 30 * 1000;
 
         /// <summary>Down 已吞、Stop 先到时，等配对 Up 或安全窗到后再卸钩的时长。</summary>
-        private const int PendingUpSafetyWindowMilliseconds = 200;
+        private const int PendingUpSafetyWindowMilliseconds = 450;
 
         private readonly object _lock = new object();
+        private readonly List<HookSession> _deferredSessions = new List<HookSession>();
         private HookSession _session;
         private int _nextSessionId;
         private bool _disposed;
@@ -150,18 +152,38 @@ namespace InspectionWidget.Capture
             thread.Start();
 
             // 同步等挂钩结果：失败要让调用方（MainForm）当场知道并回 Idle 提示。
-            if (!session.Ready.WaitOne(5000) || session.StartError != null)
+            // 无论成功或失败，Ready 仅在此处等待，在 finally 中按 ReadyLock 确定性释放。
+            bool readySignaled = false;
+            try
+            {
+                readySignaled = session.Ready.WaitOne(5000);
+            }
+            finally
+            {
+                DisposeReady(session);
+            }
+
+            if (!readySignaled || session.StartError != null)
             {
                 Exception error = session.StartError != null
                     ? session.StartError
                     : new InvalidOperationException("钩子线程启动超时。");
-                Stop();
+                StopSession(session, true);
                 throw new InvalidOperationException("选窗钩子启动失败：" + error.Message, error);
             }
 
-            session.TimeoutTimer = new Timer(
-                delegate(object state) { OnTimeoutTimer(session); },
-                null, TimeoutMilliseconds, Timeout.Infinite);
+            lock (_lock)
+            {
+                if (!_disposed
+                    && object.ReferenceEquals(_session, session)
+                    && !session.TeardownRequested
+                    && !session.TornDown)
+                {
+                    session.TimeoutTimer = new Timer(
+                        delegate(object state) { OnTimeoutTimer(session); },
+                        null, TimeoutMilliseconds, Timeout.Infinite);
+                }
+            }
             return session.Id;
         }
 
@@ -204,39 +226,89 @@ namespace InspectionWidget.Capture
         /// <summary>成对卸载并停线程，幂等；未运行直接返回。</summary>
         public void Stop()
         {
+            StopSession(null, false);
+        }
+
+        private bool StopSession(HookSession expectedSession, bool forceImmediate)
+        {
             HookSession session;
+            bool deferTeardown = false;
             lock (_lock)
             {
-                session = _session;
-                if (session == null || session.TeardownRequested)
-                    return;
+                session = expectedSession ?? _session;
+                if (session == null
+                    || (expectedSession != null && !object.ReferenceEquals(_session, expectedSession))
+                    || session.TeardownRequested)
+                {
+                    return false;
+                }
                 session.TeardownRequested = true;
                 if (session.TimeoutTimer != null)
+                {
                     session.TimeoutTimer.Dispose();
+                    session.TimeoutTimer = null;
+                }
+
+                // 成对吞 Up 的收尾：左键或右键 Down 已被吞、配对 Up 还没到时不能立刻卸钩，
+                // 否则那次 Up 会漏给目标窗口（等于多点了一下或弹出目标窗口右键菜单）。此时延迟卸载：
+                // 等 Up 到达被吞（回调内完成收尾），或安全窗到后强制收尾。
+                if (!forceImmediate && !session.TornDown && (session.SwallowNextUp || session.SwallowNextRightUp))
+                {
+                    if (!_deferredSessions.Contains(session))
+                        _deferredSessions.Add(session);
+                    HookSession deferredSession = session;
+                    session.DeferredTeardownTimer = new Timer(
+                        delegate(object state) { FinalizeTeardown(deferredSession, false); },
+                        null, PendingUpSafetyWindowMilliseconds, Timeout.Infinite);
+                    deferTeardown = true;
+                }
             }
 
-            // 成对吞 Up 的收尾：左键或右键 Down 已被吞、配对 Up 还没到时不能立刻卸钩，
-            // 否则那次 Up 会漏给目标窗口（等于多点了一下或弹出目标窗口右键菜单）。此时延迟卸载：
-            // 等 Up 到达被吞（回调内完成收尾），或 200ms 安全窗到后强制收尾。
-            if (session.SwallowNextUp || session.SwallowNextRightUp)
-            {
-                session.DeferredTeardownTimer = new Timer(
-                    delegate(object state) { FinalizeTeardown(session, false); },
-                    null, PendingUpSafetyWindowMilliseconds, Timeout.Infinite);
-                return;
-            }
-            FinalizeTeardown(session, false);
+            if (!deferTeardown)
+                FinalizeTeardown(session, false);
+            return true;
         }
 
         public void Dispose()
         {
+            var toFinalize = new List<HookSession>();
             lock (_lock)
             {
                 if (_disposed)
                     return;
                 _disposed = true;
+                if (_session != null)
+                {
+                    toFinalize.Add(_session);
+                    _session = null;
+                }
+                for (int i = 0; i < _deferredSessions.Count; i++)
+                {
+                    HookSession deferred = _deferredSessions[i];
+                    if (deferred != null && !toFinalize.Contains(deferred))
+                        toFinalize.Add(deferred);
+                }
+                _deferredSessions.Clear();
+
+                for (int i = 0; i < toFinalize.Count; i++)
+                {
+                    HookSession s = toFinalize[i];
+                    s.TeardownRequested = true;
+                    if (s.TimeoutTimer != null)
+                    {
+                        s.TimeoutTimer.Dispose();
+                        s.TimeoutTimer = null;
+                    }
+                    if (s.DeferredTeardownTimer != null)
+                    {
+                        s.DeferredTeardownTimer.Dispose();
+                        s.DeferredTeardownTimer = null;
+                    }
+                }
             }
-            Stop();
+
+            for (int i = 0; i < toFinalize.Count; i++)
+                FinalizeTeardown(toFinalize[i], false);
         }
 
         // ---------- 钩子线程 ----------
@@ -244,17 +316,33 @@ namespace InspectionWidget.Capture
         private void HookThreadMain(HookSession session)
         {
             session.ThreadId = NativeMethods.GetCurrentThreadId();
+            NativeMethods.MSG initMsg;
+            NativeMethods.PeekMessage(out initMsg, IntPtr.Zero, 0, 0, NativeMethods.PM_NOREMOVE);
             try
             {
                 IntPtr hMod = NativeMethods.GetModuleHandle(null);
-                session.MouseHook = NativeMethods.SetWindowsHookEx(
-                    NativeMethods.WH_MOUSE_LL, session.MouseProc, hMod, 0);
-                if (session.MouseHook == IntPtr.Zero)
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "SetWindowsHookEx(WH_MOUSE_LL) 失败。");
-                session.KeyboardHook = NativeMethods.SetWindowsHookEx(
-                    NativeMethods.WH_KEYBOARD_LL, session.KeyboardProc, hMod, 0);
-                if (session.KeyboardHook == IntPtr.Zero)
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "SetWindowsHookEx(WH_KEYBOARD_LL) 失败。");
+                lock (session.HookLock)
+                {
+                    if (session.TeardownRequested || session.TornDown)
+                    {
+                        SignalReady(session);
+                        return;
+                    }
+                    session.MouseHook = NativeMethods.SetWindowsHookEx(
+                        NativeMethods.WH_MOUSE_LL, session.MouseProc, hMod, 0);
+                    if (session.MouseHook == IntPtr.Zero)
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "SetWindowsHookEx(WH_MOUSE_LL) 失败。");
+                    session.KeyboardHook = NativeMethods.SetWindowsHookEx(
+                        NativeMethods.WH_KEYBOARD_LL, session.KeyboardProc, hMod, 0);
+                    if (session.KeyboardHook == IntPtr.Zero)
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "SetWindowsHookEx(WH_KEYBOARD_LL) 失败。");
+                    if (session.TeardownRequested || session.TornDown)
+                    {
+                        Unhook(session);
+                        SignalReady(session);
+                        return;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -323,12 +411,19 @@ namespace InspectionWidget.Capture
                 if (session.TornDown)
                     return;
                 session.TornDown = true;
+                _deferredSessions.Remove(session);
                 if (object.ReferenceEquals(_session, session))
                     _session = null;
                 if (session.DeferredTeardownTimer != null)
+                {
                     session.DeferredTeardownTimer.Dispose();
+                    session.DeferredTeardownTimer = null;
+                }
                 if (session.TimeoutTimer != null)
+                {
                     session.TimeoutTimer.Dispose();
+                    session.TimeoutTimer = null;
+                }
             }
 
             if (session.ThreadId != 0)
@@ -356,23 +451,29 @@ namespace InspectionWidget.Capture
 
         private IntPtr MouseHookCallback(HookSession session, int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            try
             {
-                int message = wParam.ToInt32();
-                if (message == NativeMethods.WM_LBUTTONDOWN
-                    || message == NativeMethods.WM_LBUTTONUP
-                    || message == NativeMethods.WM_RBUTTONDOWN
-                    || message == NativeMethods.WM_RBUTTONUP)
+                if (nCode >= 0)
                 {
-                    Point pt = Point.Empty;
-                    if (message == NativeMethods.WM_LBUTTONDOWN)
+                    int message = unchecked((int)wParam.ToInt64());
+                    if (message == NativeMethods.WM_LBUTTONDOWN
+                        || message == NativeMethods.WM_LBUTTONUP
+                        || message == NativeMethods.WM_RBUTTONDOWN
+                        || message == NativeMethods.WM_RBUTTONUP)
                     {
-                        var data = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
-                        pt = data.pt.ToPoint();
+                        Point pt = Point.Empty;
+                        if (message == NativeMethods.WM_LBUTTONDOWN && lParam != IntPtr.Zero)
+                        {
+                            var data = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+                            pt = data.pt.ToPoint();
+                        }
+                        if (HandleMouseMessage(session, message, pt))
+                            return (IntPtr)1;
                     }
-                    if (HandleMouseMessage(session, message, pt))
-                        return (IntPtr)1;
                 }
+            }
+            catch
+            {
             }
             return NativeMethods.CallNextHookEx(session.MouseHook, nCode, wParam, lParam);
         }
@@ -384,47 +485,72 @@ namespace InspectionWidget.Capture
 
             if (message == NativeMethods.WM_LBUTTONDOWN)
             {
-                if (session.TeardownRequested)
-                    return false;
-                Rectangle bounds;
                 lock (_lock)
                 {
-                    bounds = session.SelfBounds;
+                    if (session.TeardownRequested)
+                        return false;
+                    if (session.SelfBounds.Contains(pt))
+                    {
+                        session.SwallowNextUp = false;
+                        return false;
+                    }
+                    session.PendingPoint = pt;
+                    session.SwallowNextUp = true;
+                    return true;
                 }
-                if (bounds.Contains(pt))
-                    return false;
-                session.PendingPoint = pt;
-                session.SwallowNextUp = true;
-                return true;
             }
-            if (message == NativeMethods.WM_LBUTTONUP && session.SwallowNextUp)
+            if (message == NativeMethods.WM_LBUTTONUP)
             {
-                session.SwallowNextUp = false;
-                Point pending = session.PendingPoint;
-                int sessionId = session.Id;
-                PostEvent(session, delegate
+                Point pending;
+                int sessionId;
+                bool shouldPost;
+                bool shouldFinalize;
+                lock (_lock)
                 {
-                    Action<Point, int> handler = ExternalClick;
-                    if (handler != null)
-                        handler(pending, sessionId);
-                });
-                if (session.TeardownRequested && !session.SwallowNextRightUp)
+                    if (!session.SwallowNextUp)
+                        return false;
+                    session.SwallowNextUp = false;
+                    pending = session.PendingPoint;
+                    sessionId = session.Id;
+                    shouldPost = !session.TeardownRequested;
+                    shouldFinalize = session.TeardownRequested && !session.SwallowNextRightUp;
+                }
+                if (shouldPost)
+                {
+                    PostEvent(session, delegate
+                    {
+                        Action<Point, int> handler = ExternalClick;
+                        if (handler != null)
+                            handler(pending, sessionId);
+                    });
+                }
+                if (shouldFinalize)
                     FinalizeTeardown(session, true);
                 return true;
             }
             if (message == NativeMethods.WM_RBUTTONDOWN)
             {
-                if (session.TeardownRequested)
-                    return false;
-                // 口径：任意位置右键都算取消（含组件自身），并成对吞掉 WM_RBUTTONUP 防弹目标窗口菜单。
-                session.SwallowNextRightUp = true;
+                lock (_lock)
+                {
+                    if (session.TeardownRequested)
+                        return false;
+                    // 口径：任意位置右键都算取消（含组件自身），并成对吞掉 WM_RBUTTONUP 防弹目标窗口菜单。
+                    session.SwallowNextRightUp = true;
+                }
                 PostCancelIfActive(session);
                 return true;
             }
-            if (message == NativeMethods.WM_RBUTTONUP && session.SwallowNextRightUp)
+            if (message == NativeMethods.WM_RBUTTONUP)
             {
-                session.SwallowNextRightUp = false;
-                if (session.TeardownRequested && !session.SwallowNextUp)
+                bool shouldFinalize;
+                lock (_lock)
+                {
+                    if (!session.SwallowNextRightUp)
+                        return false;
+                    session.SwallowNextRightUp = false;
+                    shouldFinalize = session.TeardownRequested && !session.SwallowNextUp;
+                }
+                if (shouldFinalize)
                     FinalizeTeardown(session, true);
                 return true;
             }
@@ -433,19 +559,30 @@ namespace InspectionWidget.Capture
 
         private IntPtr KeyboardHookCallback(HookSession session, int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && wParam.ToInt32() == NativeMethods.WM_KEYDOWN)
+            try
             {
-                var data = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
-                if (HandleKeyboardMessage(session, NativeMethods.WM_KEYDOWN, (int)data.vkCode))
-                    return (IntPtr)1;
+                if (nCode >= 0 && unchecked((int)wParam.ToInt64()) == NativeMethods.WM_KEYDOWN && lParam != IntPtr.Zero)
+                {
+                    var data = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
+                    if (HandleKeyboardMessage(session, NativeMethods.WM_KEYDOWN, (int)data.vkCode))
+                        return (IntPtr)1;
+                }
+            }
+            catch
+            {
             }
             return NativeMethods.CallNextHookEx(session.KeyboardHook, nCode, wParam, lParam);
         }
 
         internal bool HandleKeyboardMessage(HookSession session, int message, int vkCode)
         {
-            if (session == null || session.TeardownRequested)
+            if (session == null)
                 return false;
+            lock (_lock)
+            {
+                if (session.TeardownRequested)
+                    return false;
+            }
             if (message == NativeMethods.WM_KEYDOWN && vkCode == NativeMethods.VK_ESCAPE)
             {
                 PostCancelIfActive(session);
@@ -473,12 +610,8 @@ namespace InspectionWidget.Capture
 
         private void OnTimeoutTimer(HookSession session)
         {
-            lock (_lock)
-            {
-                if (!object.ReferenceEquals(_session, session) || session.TeardownRequested)
-                    return;
-            }
-            Stop();
+            if (!StopSession(session, false))
+                return;
             PostEvent(session, delegate
             {
                 Action handler = TimeoutElapsed;
@@ -496,7 +629,16 @@ namespace InspectionWidget.Capture
             SynchronizationContext context = session.Context;
             if (context != null)
             {
-                context.Post(delegate(object state) { action(); }, null);
+                try
+                {
+                    context.Post(delegate(object state) { action(); }, null);
+                }
+                catch (InvalidAsynchronousStateException)
+                {
+                }
+                catch (ObjectDisposedException)
+                {
+                }
             }
             else
             {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using InspectionWidget.Config;
 using InspectionWidget.Storage;
 
 namespace InspectionWidget.Planning
@@ -201,6 +202,52 @@ namespace InspectionWidget.Planning
         }
 
         /// <summary>
+        /// 按配置变更与待提交改名记录统一对账设备清单：
+        /// 在临时状态表中按顺序重放改名后再映射回最终设备清单，避免“删 B 后将 A 改名为 B”
+        /// 或“删 A 后将 B 改名为 A”时的名称碰撞导致丢失或张冠李戴已点状态。
+        /// </summary>
+        public void ReconcileWithRenames(IEnumerable<string> devices, IReadOnlyList<DeviceRenameRecord> renames)
+        {
+            var state = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < _devices.Count; i++)
+            {
+                string existing = _devices[i];
+                state[existing] = _visited.Contains(existing);
+            }
+
+            if (renames != null)
+            {
+                for (int i = 0; i < renames.Count; i++)
+                {
+                    DeviceRenameRecord record = renames[i];
+                    if (record == null || string.IsNullOrWhiteSpace(record.OldName) || string.IsNullOrWhiteSpace(record.NewName))
+                        continue;
+                    string oldTrimmed = record.OldName.Trim();
+                    string newTrimmed = record.NewName.Trim();
+                    if (string.Equals(oldTrimmed, newTrimmed, StringComparison.Ordinal))
+                        continue;
+                    bool wasVisited;
+                    bool existed = state.TryGetValue(oldTrimmed, out wasVisited);
+                    state.Remove(oldTrimmed);
+                    state[newTrimmed] = existed && wasVisited;
+                }
+            }
+
+            List<string> incoming = NormalizeDevices(devices);
+            _devices.Clear();
+            _devices.AddRange(incoming);
+            _visited.Clear();
+            for (int i = 0; i < incoming.Count; i++)
+            {
+                bool wasVisited;
+                if (state.TryGetValue(incoming[i], out wasVisited) && wasVisited)
+                    _visited.Add(incoming[i]);
+            }
+            if (_completionPending && !IsComplete)
+                _completionPending = false;
+        }
+
+        /// <summary>
         /// 导入替换设备清单：明确开新轮（新 ID、清空对勾/保存路径/通知状态），
         /// 绝不把旧清单的对勾继承到新清单。
         /// </summary>
@@ -396,7 +443,7 @@ namespace InspectionWidget.Planning
             _savedPaths.Clear();
             _savedPaths.AddRange(savedPaths);
             _completionPrompted = snapshot.CompletionPrompted;
-            _completionPending = snapshot.CompletionPending;
+            _completionPending = snapshot.CompletionPending && !snapshot.CompletionPrompted && IsComplete;
             status = ProgressRestoreStatus.Restored;
             return true;
         }

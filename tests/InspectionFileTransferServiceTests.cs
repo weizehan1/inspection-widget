@@ -130,7 +130,7 @@ namespace InspectionWidget.Tests
                 }
             });
 
-            TestRunner.Run("U盘同步：增量拷贝当日文件夹及子目录，跳过目标已有同名文件", () =>
+            TestRunner.Run("U盘同步：同内容跳过、同文件名不同内容自动顺延、不覆盖本地原文件", () =>
             {
                 string temp = CreateTempDir();
                 try
@@ -143,10 +143,12 @@ namespace InspectionWidget.Tests
 
                     Directory.CreateDirectory(Path.Combine(usbToday, "nested"));
                     File.WriteAllText(Path.Combine(usbToday, "inner-1.png"), "new-from-usb");
+                    File.WriteAllText(Path.Combine(usbToday, "same.png"), "identical-bytes");
                     File.WriteAllText(Path.Combine(usbToday, "shared.png"), "usb-copy");
                     File.WriteAllText(Path.Combine(usbToday, "nested", "db.png"), "nested-img");
 
                     Directory.CreateDirectory(targetToday);
+                    File.WriteAllText(Path.Combine(targetToday, "same.png"), "identical-bytes");
                     File.WriteAllText(Path.Combine(targetToday, "shared.png"), "outer-existing");
 
                     var svc = new InspectionFileTransferService();
@@ -154,16 +156,62 @@ namespace InspectionWidget.Tests
 
                     UsbSyncResult first = svc.SyncFromUsb(usbRoot, targetRoot, "巡检-yyyy-MM-dd", day);
                     Assert.Equal(UsbSyncStatus.Success, first.Status);
-                    Assert.Equal(2, first.CopiedFileCount);
+                    Assert.Equal(3, first.CopiedFileCount);
                     Assert.Equal(1, first.SkippedFileCount);
                     Assert.Equal("outer-existing", File.ReadAllText(Path.Combine(targetToday, "shared.png")));
+                    Assert.Equal("usb-copy", File.ReadAllText(Path.Combine(targetToday, "shared-1.png")));
                     Assert.Equal("new-from-usb", File.ReadAllText(Path.Combine(targetToday, "inner-1.png")));
                     Assert.Equal("nested-img", File.ReadAllText(Path.Combine(targetToday, "nested", "db.png")));
 
                     UsbSyncResult second = svc.SyncFromUsb(usbRoot, targetRoot, "巡检-yyyy-MM-dd", day);
                     Assert.Equal(UsbSyncStatus.Success, second.Status);
                     Assert.Equal(0, second.CopiedFileCount);
-                    Assert.Equal(3, second.SkippedFileCount);
+                    Assert.Equal(4, second.SkippedFileCount);
+                }
+                finally
+                {
+                    CleanupDir(temp);
+                }
+            });
+
+            TestRunner.Run("贴入与U盘同步：目录重迭拒绝、空子目录惰性创建与点文件命名保持", () =>
+            {
+                string temp = CreateTempDir();
+                try
+                {
+                    Assert.True(InspectionFileTransferService.PathsOverlap(
+                        Path.Combine(temp, "inspections"),
+                        Path.Combine(temp, "inspections", "usb")));
+                    Assert.False(InspectionFileTransferService.PathsOverlap(
+                        Path.Combine(temp, "inspections"),
+                        Path.Combine(temp, "inspections2")));
+
+                    string usbToday = Path.Combine(temp, "usb", "巡检-2026-11-18");
+                    string targetRoot = Path.Combine(temp, "outer");
+                    Directory.CreateDirectory(Path.Combine(usbToday, "empty-sub"));
+                    File.WriteAllText(Path.Combine(usbToday, ".env"), "usb-env");
+
+                    string targetToday = Path.Combine(targetRoot, "巡检-2026-11-18");
+                    Directory.CreateDirectory(targetToday);
+                    File.WriteAllText(Path.Combine(targetToday, ".env"), "local-env");
+
+                    var svc = new InspectionFileTransferService();
+                    DateTime day = new DateTime(2026, 11, 18);
+
+                    UsbSyncResult syncRes = svc.SyncFromUsb(
+                        Path.Combine(temp, "usb"), targetRoot, "巡检-yyyy-MM-dd", day);
+                    Assert.Equal(UsbSyncStatus.Success, syncRes.Status);
+                    Assert.Equal(1, syncRes.CopiedFileCount);
+                    Assert.True(File.Exists(Path.Combine(targetToday, ".env-1")));
+                    Assert.False(Directory.Exists(Path.Combine(targetToday, "empty-sub")),
+                        "空子目录不应被预先创建");
+
+                    UsbSyncResult overlapRes = svc.SyncFromUsb(
+                        Path.Combine(temp, "outer", "nested"),
+                        Path.Combine(temp, "outer"),
+                        "巡检-yyyy-MM-dd",
+                        day);
+                    Assert.Equal(UsbSyncStatus.Error, overlapRes.Status);
                 }
                 finally
                 {

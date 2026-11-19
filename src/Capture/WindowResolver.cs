@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text;
 using InspectionWidget.Native;
 
@@ -30,6 +32,23 @@ namespace InspectionWidget.Capture
     /// </summary>
     public static class WindowResolver
     {
+        private static readonly uint CurrentProcessId = ResolveCurrentProcessId();
+
+        private static uint ResolveCurrentProcessId()
+        {
+            try
+            {
+                using (Process current = Process.GetCurrentProcess())
+                {
+                    return (uint)current.Id;
+                }
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         public static ResolveResult ResolveTopLevel(Point pt, IntPtr selfHwnd)
         {
             return ResolveTopLevel(pt, selfHwnd, IntPtr.Zero);
@@ -61,7 +80,9 @@ namespace InspectionWidget.Capture
                 return result;
             }
 
-            bool isSelf = root == selfHwnd || (ignoredHwnd != IntPtr.Zero && root == ignoredHwnd);
+            bool isSelf = root == selfHwnd
+                || (ignoredHwnd != IntPtr.Zero && root == ignoredHwnd)
+                || IsSameProcess(root);
             string className = GetClassNameText(root);
             result.ClassName = className;
             if (TargetClassifier.IsExcluded(className, isSelf))
@@ -77,16 +98,62 @@ namespace InspectionWidget.Capture
                 return result;
             }
 
+            if (IsWindowHiddenOrCloaked(root))
+            {
+                result.Reason = ResolveReason.Gone;
+                return result;
+            }
+
             result.Reason = ResolveReason.Ok;
             return result;
         }
 
-        /// <summary>截图前复核：句柄仍是有效窗口且未被最小化。</summary>
+        /// <summary>截图前复核：句柄仍是有效窗口且未被最小化或隐藏。</summary>
         public static bool StillValid(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)
                 return false;
-            return NativeMethods.IsWindow(hwnd) && !NativeMethods.IsIconic(hwnd);
+            return NativeMethods.IsWindow(hwnd)
+                && !NativeMethods.IsIconic(hwnd)
+                && !IsWindowHiddenOrCloaked(hwnd);
+        }
+
+        internal static bool IsWindowHiddenOrCloaked(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero || !NativeMethods.IsWindowVisible(hwnd))
+                return true;
+            try
+            {
+                int cloaked;
+                if (NativeMethods.DwmGetWindowAttribute(
+                    hwnd,
+                    NativeMethods.DWMWA_CLOAKED,
+                    out cloaked,
+                    Marshal.SizeOf(typeof(int))) == 0)
+                {
+                    return cloaked != 0;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        private static bool IsSameProcess(IntPtr hwnd)
+        {
+            if (CurrentProcessId == 0 || hwnd == IntPtr.Zero)
+                return false;
+            try
+            {
+                uint pid;
+                NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
+                return pid != 0 && pid == CurrentProcessId;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>读取目标窗口视觉外框（优先 DWM 扩展边框以避开透明阴影）。</summary>

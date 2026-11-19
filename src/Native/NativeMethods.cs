@@ -26,6 +26,8 @@ namespace InspectionWidget.Native
 
         public const int VK_ESCAPE = 0x1B;
 
+        public const uint PM_NOREMOVE = 0x0000;
+
         /// <summary>GetAncestor 标志：取根窗口（顶层窗口）。</summary>
         public const uint GA_ROOT = 2;
 
@@ -101,7 +103,7 @@ namespace InspectionWidget.Native
 
         // ---------- user32：钩子与消息循环 ----------
 
-        [DllImport("user32.dll", SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -111,18 +113,22 @@ namespace InspectionWidget.Native
         [DllImport("user32.dll")]
         public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
-        [DllImport("user32.dll", SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool PostThreadMessage(uint idThread, uint msg, UIntPtr wParam, IntPtr lParam);
 
-        [DllImport("user32.dll", SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         public static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool TranslateMessage(ref MSG lpMsg);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr DispatchMessage(ref MSG lpMsg);
 
         // ---------- user32：窗口查询与操作 ----------
@@ -149,6 +155,19 @@ namespace InspectionWidget.Native
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        public const uint LWA_ALPHA = 0x00000002;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -225,8 +244,17 @@ namespace InspectionWidget.Native
         /// <summary>DwmGetWindowAttribute 属性：扩展边框边界（真实内容区，含透明边修正）。</summary>
         public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 
+        /// <summary>DwmGetWindowAttribute 属性：窗口是否被 DWM 隐藏（如其他虚拟桌面或挂起 UWP）。</summary>
+        public const int DWMWA_CLOAKED = 14;
+
         [DllImport("dwmapi.dll")]
         public static extern int DwmGetWindowAttribute(IntPtr hWnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(IntPtr hWnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmFlush();
 
         // ---------- kernel32 ----------
 
@@ -263,10 +291,9 @@ namespace InspectionWidget.Native
                 }
             };
 
+            textBox.HandleCreated += delegate { apply(); };
             if (textBox.IsHandleCreated)
                 apply();
-            else
-                textBox.HandleCreated += delegate { apply(); };
         }
 
         // ---------- user32：全局快捷键与 SendInput ----------
@@ -280,7 +307,9 @@ namespace InspectionWidget.Native
         public const uint MOD_NOREPEAT = 0x4000;
 
         public const uint INPUT_KEYBOARD = 1;
+        public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         public const uint KEYEVENTF_KEYUP = 0x0002;
+        public const uint MAPVK_VK_TO_VSC = 0;
 
         public const ushort VK_SHIFT = 0x10;
         public const ushort VK_CONTROL = 0x11;
@@ -355,5 +384,8 @@ namespace InspectionWidget.Native
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern uint MapVirtualKey(uint uCode, uint uMapType);
     }
 }

@@ -15,7 +15,8 @@ namespace InspectionWidget.Capture
             "Progman",
             "WorkerW",
             "Shell_TrayWnd",
-            "Shell_SecondaryTrayWnd"
+            "Shell_SecondaryTrayWnd",
+            "#32769"
         };
 
         public static bool IsExcluded(string className, bool isSelf)

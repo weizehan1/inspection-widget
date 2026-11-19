@@ -184,6 +184,26 @@ namespace InspectionWidget.Tests
                     Assert.Equal(1, skippedCount);
                 }
             });
+
+            TestRunner.Run("编排：连续两次 Copy 后仅清理最新回执，旧内容已被覆盖后不误清最新密文", () =>
+            {
+                var gateway = new FakeClipboardGateway();
+                int clearedCount = 0;
+                int skippedCount = 0;
+                using (var guard = new ClipboardGuard(gateway, true, 3600))
+                {
+                    guard.Cleared += () => clearedCount++;
+                    guard.ClearSkipped += () => skippedCount++;
+                    guard.Copy("first-secret");
+                    guard.Copy("second-secret");
+                    Assert.Equal("second-secret", gateway.CurrentText);
+                    Assert.True(guard.TryClearNow());
+                    Assert.Null(gateway.CurrentText);
+                    Assert.False(guard.TryClearNow());
+                    Assert.Equal(1, clearedCount);
+                    Assert.Equal(0, skippedCount);
+                }
+            });
         }
     }
 }

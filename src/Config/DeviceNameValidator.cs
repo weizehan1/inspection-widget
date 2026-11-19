@@ -44,7 +44,7 @@ namespace InspectionWidget.Config
                 return "设备名末尾不能是空格或点。";
 
             // 保留名按第一个点前的主名比对：CON、con.txt、nul.png 都算保留名
-            string mainName = name.Split('.')[0];
+            string mainName = name.Split('.')[0].TrimEnd(' ');
             if (ReservedNames.Contains(mainName))
                 return "设备名不能使用 Windows 保留名（如 CON、PRN、NUL、COM1、LPT1）。";
 

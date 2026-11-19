@@ -15,7 +15,7 @@ namespace InspectionWidget.Tests
 {
     public static class MainFormUiTests
     {
-        public const int CaseCount = 11;
+        public const int CaseCount = 13;
 
         private sealed class StepClock : IClock
         {
@@ -752,6 +752,74 @@ namespace InspectionWidget.Tests
                     }
                 }
             });
+
+            TestRunner.Run("UI-Main：内置弹窗启用 AutoScroll 与 AutoSize 正文标签；高亮层支持 WS_EX_LAYERED 并安全切换", () =>
+            {
+                using (var recovery = new ProgressRecoveryDialog("D:\\progress.json", "坏文件"))
+                {
+                    Panel card = FindAutoScrollCard(recovery);
+                    Assert.NotNull(card);
+                    Assert.True(card.AutoScroll);
+                    bool foundAutoSizeLabel = false;
+                    foreach (Control child in card.Controls)
+                    {
+                        var lbl = child as Label;
+                        if (lbl != null && lbl.AutoSize)
+                        {
+                            foundAutoSizeLabel = true;
+                            break;
+                        }
+                    }
+                    Assert.True(foundAutoSizeLabel);
+                }
+
+                using (var overlay = new TargetHighlightOverlay())
+                {
+                    PropertyInfo cpProp = typeof(Control).GetProperty("CreateParams",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+                    var cp = (CreateParams)cpProp.GetValue(overlay, null);
+                    Assert.True((cp.ExStyle & 0x00080000) != 0, "Overlay 应包含 WS_EX_LAYERED");
+                    overlay.ShowTarget(new Rectangle(10, 10, 200, 120), 3);
+                    overlay.ShowTarget(new Rectangle(30, 30, 240, 150), 3);
+                    Assert.True(overlay.Visible);
+                    overlay.HideOverlay();
+                    Assert.False(overlay.Visible);
+                }
+            });
+
+            TestRunner.Run("UI-Main：模态或操作前调 CancelWaitingIfActive 立即退出 Waiting 并清空等待令牌", () =>
+            {
+                AppConfig cfg = MainEnv.BuildDefaultConfig();
+                cfg.PlanModeEnabled = true;
+                using (var env = new MainEnv(cfg))
+                {
+                    env.Form.Show();
+                    Application.DoEvents();
+
+                    var sm = (PanelStateMachine)Field(env.Form, "_stateMachine");
+                    Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    Assert.Equal(PanelState.Waiting, sm.State);
+                    int stopsBefore = env.Hooks.StopCallCount;
+
+                    Invoke(env.Form, "CancelWaitingIfActive");
+                    Assert.Equal(PanelState.Idle, sm.State);
+                    Assert.Equal(stopsBefore + 1, env.Hooks.StopCallCount);
+                    Assert.Null(Field(env.Form, "_waitingPlanToken"));
+                }
+            });
+        }
+
+        private static Panel FindAutoScrollCard(Control root)
+        {
+            if (root == null) return null;
+            var p = root as Panel;
+            if (p != null && p.AutoScroll) return p;
+            foreach (Control child in root.Controls)
+            {
+                Panel hit = FindAutoScrollCard(child);
+                if (hit != null) return hit;
+            }
+            return null;
         }
     }
 }

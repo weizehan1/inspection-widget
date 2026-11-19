@@ -111,6 +111,36 @@ namespace InspectionWidget.Tests
                     Cleanup(sandbox);
                 }
             });
+
+            TestRunner.Run("错误日志：记录 InnerException 详情并在超过 2 MiB 时轮转生成 .1 归档", () =>
+            {
+                string primary = MakeTempDir();
+                string fallback = MakeTempDir();
+                try
+                {
+                    string logPath = Path.Combine(primary, "error.log");
+                    using (var fs = new FileStream(logPath, FileMode.CreateNew, FileAccess.Write))
+                    {
+                        fs.SetLength(2L * 1024L * 1024L + 1024L);
+                    }
+
+                    ErrorLog.SetDirectoriesForTests(primary, fallback);
+                    ErrorLog.Write("轮转测试",
+                        new InvalidOperationException("外层异常", new ArgumentException("内层根因")));
+
+                    Assert.True(File.Exists(logPath + ".1"), "超过 2 MiB 后应轮转出 .1 归档");
+                    string text = File.ReadAllText(logPath);
+                    Assert.True(text.Contains("外层异常"));
+                    Assert.True(text.Contains("ArgumentException"));
+                    Assert.True(text.Contains("内层根因"));
+                }
+                finally
+                {
+                    ErrorLog.ResetDirectoriesForTests();
+                    Cleanup(primary);
+                    Cleanup(fallback);
+                }
+            });
         }
 
         private static string MakeTempDir()

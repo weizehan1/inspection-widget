@@ -61,6 +61,7 @@ namespace InspectionWidget.Config
     {
         /// <summary>读取失败草稿的不可提交基线：与 null（旧调用不校验）明确区分。</summary>
         public const string UnusableRevision = "unusable:load-failed";
+        public const long MaxFileBytes = 5L * 1024L * 1024L;
 
         internal static bool IsUnusableRevision(string revision)
         {
@@ -259,6 +260,9 @@ namespace InspectionWidget.Config
                 byte[] bytes;
                 try
                 {
+                    var info = new FileInfo(target);
+                    if (info.Length > MaxFileBytes)
+                        return ProtectIo("配置文件超过 5 MiB 上限，已保护原文件未覆盖。");
                     bytes = File.ReadAllBytes(target);
                 }
                 catch (Exception ex)

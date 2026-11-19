@@ -62,7 +62,7 @@ namespace InspectionWidget.Credentials
             };
 
             // 先给用户指尖抬起留极短缓冲，避免快捷键修饰键残留粘连
-            for (int step = 0; step < 6; step++)
+            for (int step = 0; step < 10; step++)
             {
                 if (!AnyKeyDown(modifiers))
                     return;
@@ -70,6 +70,13 @@ namespace InspectionWidget.Credentials
             }
 
             var releases = new List<NativeMethods.INPUT>();
+            bool altHeld = IsKeyDown(NativeMethods.VK_LMENU) || IsKeyDown(NativeMethods.VK_RMENU);
+            if (altHeld)
+            {
+                // 注入掩码键打断单独 Alt 抬起触发目标窗口顶部菜单栏的默认行为
+                releases.Add(KeyInput(0xFF, false));
+                releases.Add(KeyInput(0xFF, true));
+            }
             for (int i = 0; i < modifiers.Length; i++)
             {
                 if (IsKeyDown(modifiers[i]))
@@ -101,15 +108,33 @@ namespace InspectionWidget.Credentials
             return (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
         }
 
+        private static bool IsExtendedKey(ushort vk)
+        {
+            return vk == NativeMethods.VK_RCONTROL
+                || vk == NativeMethods.VK_RMENU
+                || vk == NativeMethods.VK_LWIN
+                || vk == NativeMethods.VK_RWIN;
+        }
+
         private static NativeMethods.INPUT KeyInput(ushort vk, bool keyUp)
         {
+            ushort scan = 0;
+            try
+            {
+                scan = (ushort)NativeMethods.MapVirtualKey(vk, NativeMethods.MAPVK_VK_TO_VSC);
+            }
+            catch
+            {
+            }
+            uint flags = (keyUp ? NativeMethods.KEYEVENTF_KEYUP : 0u)
+                | (IsExtendedKey(vk) ? NativeMethods.KEYEVENTF_EXTENDEDKEY : 0u);
             var input = new NativeMethods.INPUT();
             input.type = NativeMethods.INPUT_KEYBOARD;
             input.u.ki = new NativeMethods.KEYBDINPUT
             {
                 wVk = vk,
-                wScan = 0,
-                dwFlags = keyUp ? NativeMethods.KEYEVENTF_KEYUP : 0u,
+                wScan = scan,
+                dwFlags = flags,
                 time = 0,
                 dwExtraInfo = IntPtr.Zero
             };

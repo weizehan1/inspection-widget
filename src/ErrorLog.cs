@@ -15,6 +15,7 @@ namespace InspectionWidget
     {
         private const string LogFileName = "error.log";
         private const string FallbackDirName = "InspectionWidget";
+        internal const long MaxLogBytes = 2L * 1024L * 1024L;
 
         private static readonly object Sync = new object();
 
@@ -34,8 +35,8 @@ namespace InspectionWidget
                 {
                     if (_lastWrittenPath != null)
                         return _lastWrittenPath;
+                    return PrimaryLogPath;
                 }
-                return PrimaryLogPath;
             }
         }
 
@@ -134,17 +135,25 @@ namespace InspectionWidget
             sb.Append(' ');
             if (ex == null)
             {
-                sb.Append("（无异常对象）");
+                sb.AppendLine("（无异常对象）");
+                return sb.ToString();
             }
-            else
+
+            Exception cur = ex;
+            int depth = 0;
+            while (cur != null && depth < 8)
             {
-                sb.Append(ex.GetType().Name);
+                if (depth > 0)
+                    sb.Append("--- InnerException --- ");
+                sb.Append(cur.GetType().Name);
                 sb.Append(": ");
-                sb.Append(ex.Message);
+                sb.Append(cur.Message);
+                sb.AppendLine();
+                if (cur.StackTrace != null)
+                    sb.AppendLine(cur.StackTrace);
+                cur = cur.InnerException;
+                depth++;
             }
-            sb.AppendLine();
-            if (ex != null && ex.StackTrace != null)
-                sb.AppendLine(ex.StackTrace);
             return sb.ToString();
         }
 
@@ -155,12 +164,32 @@ namespace InspectionWidget
                 string dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir))
                     Directory.CreateDirectory(dir);
+                RotateIfOversized(path);
                 File.AppendAllText(path, text, Encoding.UTF8);
                 return true;
             }
             catch
             {
                 return false;
+            }
+        }
+
+        private static void RotateIfOversized(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return;
+                var info = new FileInfo(path);
+                if (info.Length < MaxLogBytes)
+                    return;
+                string archive = path + ".1";
+                if (File.Exists(archive))
+                    File.Delete(archive);
+                File.Move(path, archive);
+            }
+            catch
+            {
             }
         }
     }

@@ -156,7 +156,9 @@ namespace InspectionWidget
         // Waiting 会话代次守卫（Task 3 审查 M-3）：进入 Waiting 时记录 HookManager
         // 返回的钩子会话号，ExternalClick 消费前比对，上一会话的迟到事件直接丢弃。
         private int _waitingSessionId;
-        private bool _settingsDialogOpen;
+        private int _modalDialogDepth;
+        private bool IsModalDialogOpen { get { return _modalDialogDepth > 0; } }
+        private int _pasteInFlight;
         private bool _hiddenForCapture;
         private Timer _dayRolloverTimer;
 
@@ -183,7 +185,7 @@ namespace InspectionWidget
         private ContextMenuStrip _trayMenu;
         private ContextMenuStrip _folderMenu;
         private Icon _ownedAppIcon;
-        private bool _formClosing;
+        private volatile bool _formClosing;
 
         private Panel _scrollHost;
         private Panel _quickLinkHeaderPanel;
@@ -459,7 +461,10 @@ namespace InspectionWidget
                 }
                 if (_pendingImage != null)
                 {
-                    _pendingImage.Dispose();
+                    if (!_saveInFlight)
+                        _pendingImage.Dispose();
+                    _pendingImage = null;
+                    _pendingRequest = null;
                     _pendingGeneration++;
                 }
                 if (_rootToolTip != null) _rootToolTip.Dispose();
@@ -471,6 +476,13 @@ namespace InspectionWidget
                     _deviceRowMenu.Dispose();
                     _deviceRowMenu = null;
                 }
+                if (_usbSyncMenu != null)
+                {
+                    _usbSyncMenu.Dispose();
+                    _usbSyncMenu = null;
+                }
+                if (_hotkeyManager != null)
+                    _hotkeyManager.Dispose();
                 if (_targetHoverTimer != null)
                 {
                     _targetHoverTimer.Stop();
@@ -597,6 +609,15 @@ namespace InspectionWidget
 
             if (_configWriteProtected)
                 ShowConfigLoadErrorFeedback();
+            else if (load.Kind == ConfigLoadKind.CorruptBackedUp)
+            {
+                string msg = "配置损坏已备份并恢复默认：" + (load.BackupPath ?? "备份路径未知");
+                if (_deviceListError != null)
+                    msg += "；" + _deviceListError;
+                else if (_session.HasProgressError)
+                    msg += "；进度读取失败：" + _session.ProgressError;
+                ShowPersistentFeedback(msg, ErrorColor);
+            }
             else if (_deviceListError == null && _session.HasProgressError)
                 ShowProgressErrorFeedback();
 
@@ -614,10 +635,28 @@ namespace InspectionWidget
             if (_config == null)
                 return;
             if (double.IsNaN(_appliedScaleFactor) || Math.Abs(ScaleFactor - _appliedScaleFactor) > 0.001)
+            {
                 ApplyScaleAndRebuild(true, true);
+            }
             else
+            {
                 LayoutSections();
-            RebindCredentialHotkeys();
+                RebindCredentialHotkeys();
+            }
+            if (!string.IsNullOrEmpty(_hotkeyWarning)
+                && !_configWriteProtected
+                && _deviceListError == null
+                && (_session == null || !_session.HasProgressError))
+            {
+                ShowFeedback(_hotkeyWarning, true);
+            }
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            if (_hotkeyManager != null)
+                _hotkeyManager.UnbindAll();
+            base.OnHandleDestroyed(e);
         }
 
         protected override void WndProc(ref Message m)
@@ -1720,6 +1759,10 @@ namespace InspectionWidget
                 string err = !string.IsNullOrEmpty(progressErr) ? progressErr : _session.ProgressError;
                 ShowPersistentFeedback("配置已重新读取，但进度保存失败：" + err, ErrorColor);
             }
+            else if (!string.IsNullOrEmpty(_hotkeyWarning))
+            {
+                ShowFeedback("配置已重新读取，但" + _hotkeyWarning, true);
+            }
             else
             {
                 ShowSuccessFeedback("配置已重新读取");
@@ -1775,6 +1818,14 @@ namespace InspectionWidget
         private void RefreshConfigState()
         {
             _deviceListError = DeviceNameValidator.ValidateAll(_config.Devices);
+            if (_session != null)
+            {
+                bool rolled;
+                _session.EnsureCurrentDayResetIfRolled(out rolled);
+                string todayText = FormatFullDate(_clock.Now);
+                if (_dateLabel != null && !string.Equals(_dateLabel.Text, todayText, StringComparison.Ordinal))
+                    _dateLabel.Text = todayText;
+            }
 
             RebuildQuickLinks();
             RebuildPlanCard();
@@ -1784,6 +1835,12 @@ namespace InspectionWidget
             UpdateDeviceHeader();
             UpdateRootLabel();
             RefreshStateVisuals();
+            if (_session != null && _stateMachine.State == PanelState.Idle)
+            {
+                _uiRenderedPlanDate = _session.Plan.Date;
+                _session.ConsumePendingRolloverRefresh();
+                _pendingDayRolloverRefresh = false;
+            }
             RebindCredentialHotkeys();
 
             if (_configWriteProtected)
@@ -1840,6 +1897,8 @@ namespace InspectionWidget
         {
             foreach (Control old in _quickLinkControls)
             {
+                if (_deviceToolTip != null)
+                    _deviceToolTip.SetToolTip(old, null);
                 _quickLinkZonePanel.Controls.Remove(old);
                 old.Dispose();
             }
@@ -2057,12 +2116,6 @@ namespace InspectionWidget
                     Items = new List<DeviceDisplayItem>(),
                     EmptyKind = DeviceListEmptyKind.None
                 };
-            if (_session != null)
-            {
-                _uiRenderedPlanDate = _session.Plan.Date;
-                _session.ConsumePendingRolloverRefresh();
-                _pendingDayRolloverRefresh = false;
-            }
 
             if (!_config.IsDeviceCollapsed && _deviceHint == null && CanReuseDeviceRows(_deviceDisplay))
             {
@@ -2127,6 +2180,9 @@ namespace InspectionWidget
                 if (row == null || row.Panel == null || row.Panel.IsDisposed)
                     return false;
                 if (row.Panel.Height != expectedHeight)
+                    return false;
+                if (!object.ReferenceEquals(row.StatusLabel.Font, Font11)
+                    || !object.ReferenceEquals(row.UnmarkButton.Font, Font11))
                     return false;
                 if (!string.Equals(row.Device, display.Items[i].Name, StringComparison.Ordinal))
                     return false;
@@ -2325,6 +2381,8 @@ namespace InspectionWidget
             rowPanel.MouseClick += onRowMouseClick;
             nameLabel.MouseClick += onRowMouseClick;
             statusLabel.MouseClick += onRowMouseClick;
+            unmarkBtn.MouseEnter += onEnter;
+            unmarkBtn.MouseLeave += onLeave;
             unmarkBtn.Click += delegate { OnUnmarkDeviceClicked(device); };
 
             rowPanel.Controls.Add(nameLabel);
@@ -2368,6 +2426,7 @@ namespace InspectionWidget
             if (widget == null || _deviceRowMenu == null || IsDisposed)
                 return;
             string device = widget.Device;
+            DisposeToolStripItems(_deviceRowMenu.Items);
             _deviceRowMenu.Items.Clear();
 
             var captureItem = new ToolStripMenuItem("截取「" + device + "」");
@@ -2476,10 +2535,24 @@ namespace InspectionWidget
             }
         }
 
+        private static void DisposeToolStripItems(ToolStripItemCollection items)
+        {
+            if (items == null)
+                return;
+            for (int i = 0; i < items.Count; i++)
+            {
+                ToolStripItem item = items[i];
+                if (item != null)
+                    item.Dispose();
+            }
+        }
+
         private void RebuildCredentialControls()
         {
             foreach (Control old in _credentialControls)
             {
+                if (_deviceToolTip != null)
+                    _deviceToolTip.SetToolTip(old, null);
                 _credentialZonePanel.Controls.Remove(old);
                 old.Dispose();
             }
@@ -2691,6 +2764,7 @@ namespace InspectionWidget
             RebuildDeviceButtons();
             UpdateDeviceHeader();
             ApplyHeightAnchored();
+            SyncRolloverUiIfIdle();
         }
 
         private void UpdateRootLabel()
@@ -2766,6 +2840,7 @@ namespace InspectionWidget
         private void OnResetRoundClicked(object sender, EventArgs e)
         {
             if (_session == null) return;
+            CancelWaitingIfActive();
             if (ShowScaledDialog(delegate { return new ResetRoundConfirmDialog(); }) != DialogResult.Yes)
                 return;
             string progressErr;
@@ -2774,6 +2849,7 @@ namespace InspectionWidget
             RebuildDeviceButtons();
             RefreshStateVisuals();
             ApplyHeightAnchored();
+            SyncRolloverUiIfIdle();
             if (!string.IsNullOrEmpty(progressErr))
                 ShowPersistentFeedback("进度保存失败：" + progressErr, ErrorColor);
             else if (!_configWriteProtected && _deviceListError == null)
@@ -2790,6 +2866,7 @@ namespace InspectionWidget
             if (_session == null || !_session.HasProgressError)
                 return;
 
+            CancelWaitingIfActive();
             string err;
             if (!_session.IsProgressProtected)
             {
@@ -2809,7 +2886,7 @@ namespace InspectionWidget
                 return;
             }
 
-            _settingsDialogOpen = true;
+            _modalDialogDepth++;
             try
             {
                 string path = _progressStore != null ? _progressStore.Path : null;
@@ -2853,7 +2930,7 @@ namespace InspectionWidget
             }
             finally
             {
-                _settingsDialogOpen = false;
+                _modalDialogDepth--;
             }
         }
 
@@ -2878,10 +2955,15 @@ namespace InspectionWidget
                 RebuildDeviceButtons();
                 RefreshStateVisuals();
                 ApplyHeightAnchored();
+                SyncRolloverUiIfIdle();
                 if (!string.IsNullOrEmpty(progressErr))
                     ShowPersistentFeedback("进度保存失败：" + progressErr, ErrorColor);
                 else if (!RestorePersistentFeedbackIfNeeded())
                     ShowFeedback("已恢复未点：" + device, false);
+            }
+            else if (_session.HasPendingRolloverRefresh)
+            {
+                SyncRolloverUiIfIdle();
             }
         }
 
@@ -2948,7 +3030,7 @@ namespace InspectionWidget
 
         private void RebindCredentialHotkeys()
         {
-            if (!IsHandleCreated || IsDisposed || _config == null || _hotkeyManager == null)
+            if (!IsHandleCreated || IsDisposed || _config == null || _hotkeyManager == null || IsModalDialogOpen)
                 return;
             List<HotkeyBindingFailure> failures = _hotkeyManager.Bind(Handle, _config.Credentials);
             _hotkeyWarning = failures.Count > 0 ? failures[0].Error : null;
@@ -2956,7 +3038,7 @@ namespace InspectionWidget
 
         private void OnCredentialHotkeyTriggered(int credentialIndex)
         {
-            if (_formClosing || IsDisposed || _config == null || _config.Credentials == null)
+            if (_formClosing || IsDisposed || IsModalDialogOpen || _config == null || _config.Credentials == null)
                 return;
             if (credentialIndex < 0 || credentialIndex >= _config.Credentials.Count)
                 return;
@@ -2997,13 +3079,32 @@ namespace InspectionWidget
 
                     if (alsoPaste)
                     {
+                        if (System.Threading.Interlocked.CompareExchange(ref _pasteInFlight, 1, 0) != 0)
+                        {
+                            ShowSuccessFeedback(_config.AutoClearClipboard && _credentialCountdownSeconds > 0
+                                ? "已复制「" + entry.Title + "」（" + _credentialCountdownSeconds + " 秒后清空，自动粘贴忙碌中）"
+                                : "已复制「" + entry.Title + "」（自动粘贴忙碌中）");
+                            break;
+                        }
                         string title = entry.Title;
                         int clearSec = _config.AutoClearClipboard ? _credentialCountdownSeconds : 0;
                         IPasteSimulator simulator = _pasteSimulator;
                         var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
                         {
                             string pasteErr = null;
-                            bool pasted = simulator != null && simulator.TryPaste(out pasteErr);
+                            bool pasted = false;
+                            try
+                            {
+                                pasted = simulator != null && simulator.TryPaste(out pasteErr);
+                            }
+                            catch (Exception ex)
+                            {
+                                pasteErr = ex.Message;
+                            }
+                            finally
+                            {
+                                System.Threading.Interlocked.Exchange(ref _pasteInFlight, 0);
+                            }
                             if (IsDisposed || _formClosing)
                                 return;
                             try
@@ -3125,15 +3226,25 @@ namespace InspectionWidget
         {
             if (_configWriteProtected && !RetryConfigLoad())
                 return;
+            if (_stateMachine.State == PanelState.Capturing || _saveInFlight)
+            {
+                ShowFeedback("正在截图或保存中，请稍后再打开设置", true);
+                return;
+            }
+            CancelWaitingIfActive();
 
             double systemDpiScale = GetSystemDpiScale();
-            _settingsDialogOpen = true;
+            bool anySaved = false;
+            _modalDialogDepth++;
+            if (_hotkeyManager != null)
+                _hotkeyManager.UnbindAll();
             try
             {
                 using (var form = new SettingsForm(_config, _store, _protector, systemDpiScale))
                 {
                     form.Saved += delegate
                     {
+                        anySaved = true;
                         // 成功落盘即刷新运行态，不等 ShowDialog 返回；一次提交只走一次。
                         bool autoClearChanged =
                             ConfigStore.ShouldRebuildClipboardGuard(_config, form.ResultConfig);
@@ -3142,6 +3253,7 @@ namespace InspectionWidget
                         _configWriteProtected = false;
                         _configLoadError = null;
                         EnsureConfigLists();
+                        ReconcilePendingRequestAfterSettings(form.LastAppliedDeviceRenames);
                         string progressErr = null;
                         if (_session != null)
                         {
@@ -3171,10 +3283,44 @@ namespace InspectionWidget
             }
             finally
             {
-                _settingsDialogOpen = false;
+                _modalDialogDepth--;
+                if (!IsModalDialogOpen)
+                {
+                    RebindCredentialHotkeys();
+                    if (!string.IsNullOrEmpty(_hotkeyWarning)
+                        && !_configWriteProtected
+                        && _deviceListError == null
+                        && (_session == null || !_session.HasProgressError)
+                        && _pendingImage == null)
+                    {
+                        ShowFeedback((anySaved ? "设置已应用，但" : string.Empty) + _hotkeyWarning, true);
+                    }
+                }
             }
             SyncRolloverUiIfIdle();
             TryMaybeShowCompletionPrompt();
+        }
+
+        private void ReconcilePendingRequestAfterSettings(IReadOnlyList<DeviceRenameRecord> renames)
+        {
+            if (_pendingRequest == null || _saveInFlight)
+                return;
+            if (!string.IsNullOrEmpty(_config.RootPath))
+                _pendingRequest.RootPath = _config.RootPath;
+            _pendingRequest.FolderPattern = _config.FolderNamePattern;
+            if (renames != null && !string.IsNullOrEmpty(_pendingRequest.Device))
+            {
+                string currentDevice = _pendingRequest.Device;
+                for (int i = 0; i < renames.Count; i++)
+                {
+                    DeviceRenameRecord rename = renames[i];
+                    if (rename == null || string.IsNullOrWhiteSpace(rename.OldName) || string.IsNullOrWhiteSpace(rename.NewName))
+                        continue;
+                    if (string.Equals(currentDevice, rename.OldName.Trim(), StringComparison.OrdinalIgnoreCase))
+                        currentDevice = rename.NewName.Trim();
+                }
+                _pendingRequest.Device = currentDevice;
+            }
         }
 
         private void OnRootLabelClicked(object sender, EventArgs e)
@@ -3186,8 +3332,7 @@ namespace InspectionWidget
         {
             if (_configWriteProtected)
             {
-                if (RetryConfigLoad())
-                    ShowSuccessFeedback("配置读取已恢复，保存已解除保护");
+                RetryConfigLoad();
                 return;
             }
             if (string.IsNullOrEmpty(_config.RootPath))
@@ -3196,7 +3341,13 @@ namespace InspectionWidget
                 return;
             }
 
-            string[] paths = ReadClipboardFileDropPaths();
+            bool clipboardBusy;
+            string[] paths = ReadClipboardFileDropPaths(out clipboardBusy);
+            if (clipboardBusy)
+            {
+                ShowFeedback("剪贴板正被占用，请稍后重试", true);
+                return;
+            }
             if (paths == null || paths.Length == 0)
             {
                 ShowFeedback("剪贴板中没有文件或文件夹", true);
@@ -3205,14 +3356,31 @@ namespace InspectionWidget
 
             string rootPath = _config.RootPath;
             string pattern = _config.FolderNamePattern;
+            bool rolled;
+            if (_session != null)
+                _session.EnsureCurrentDayResetIfRolled(out rolled);
             DateTime now = _clock.Now;
+            InspectionPlanToken token = _session != null ? _session.Plan.CurrentToken : default(InspectionPlanToken);
             if (_pasteFileButton != null)
                 _pasteFileButton.Enabled = false;
+            ShowFeedback("正在存入剪贴板文件…", false);
 
             var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
             {
-                ClipboardCopyResult copyResult = _fileTransferService.CopyClipboardItems(
-                    paths, rootPath, pattern, now);
+                ClipboardCopyResult copyResult;
+                try
+                {
+                    copyResult = _fileTransferService.CopyClipboardItems(
+                        paths, rootPath, pattern, now);
+                }
+                catch (Exception ex)
+                {
+                    copyResult = new ClipboardCopyResult
+                    {
+                        Success = false,
+                        Error = "复制失败：" + ex.Message
+                    };
+                }
                 if (IsDisposed || _formClosing)
                     return;
                 try
@@ -3225,6 +3393,12 @@ namespace InspectionWidget
                             return;
                         if (copyResult.Success)
                         {
+                            if (_session != null && !string.IsNullOrEmpty(copyResult.SampleSavedFilePath))
+                            {
+                                string progressErr;
+                                _session.RecordSaveSucceeded(copyResult.SampleSavedFilePath, token, out progressErr);
+                                RebuildPlanCard();
+                            }
                             int total = copyResult.CopiedFileCount + copyResult.CopiedDirectoryCount;
                             ShowSuccessFeedback("已存入今日目录：" + total + " 项");
                         }
@@ -3242,31 +3416,41 @@ namespace InspectionWidget
             worker.Start();
         }
 
-        private static string[] ReadClipboardFileDropPaths()
+        private static string[] ReadClipboardFileDropPaths(out bool clipboardBusy)
         {
-            try
+            clipboardBusy = false;
+            for (int attempt = 0; attempt < 3; attempt++)
             {
-                if (!Clipboard.ContainsFileDropList())
+                try
+                {
+                    if (!Clipboard.ContainsFileDropList())
+                        return null;
+                    System.Collections.Specialized.StringCollection list = Clipboard.GetFileDropList();
+                    if (list == null || list.Count == 0)
+                        return null;
+                    var paths = new string[list.Count];
+                    list.CopyTo(paths, 0);
+                    return paths;
+                }
+                catch (System.Runtime.InteropServices.ExternalException)
+                {
+                    clipboardBusy = true;
+                    if (attempt < 2)
+                        System.Threading.Thread.Sleep(30);
+                }
+                catch
+                {
                     return null;
-                System.Collections.Specialized.StringCollection list = Clipboard.GetFileDropList();
-                if (list == null || list.Count == 0)
-                    return null;
-                var paths = new string[list.Count];
-                list.CopyTo(paths, 0);
-                return paths;
+                }
             }
-            catch
-            {
-                return null;
-            }
+            return null;
         }
 
         private void OnUsbSyncClicked(object sender, EventArgs e)
         {
             if (_configWriteProtected)
             {
-                if (RetryConfigLoad())
-                    ShowSuccessFeedback("配置读取已恢复，保存已解除保护");
+                RetryConfigLoad();
                 return;
             }
             if (string.IsNullOrEmpty(_config.RootPath))
@@ -3284,31 +3468,80 @@ namespace InspectionWidget
 
         private void PromptAndSaveUsbRootPath(bool syncAfterSelect)
         {
+            if (_configWriteProtected)
+            {
+                RetryConfigLoad();
+                return;
+            }
+            CancelWaitingIfActive();
             using (var dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "选择 U盘巡检根目录（例如 D:\\巡检）";
                 dialog.ShowNewFolderButton = false;
                 if (!string.IsNullOrEmpty(_config.UsbSyncRootPath))
                     dialog.SelectedPath = _config.UsbSyncRootPath;
-                if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrEmpty(dialog.SelectedPath))
+                DialogResult dr;
+                _modalDialogDepth++;
+                try
+                {
+                    dr = dialog.ShowDialog(this);
+                }
+                finally
+                {
+                    _modalDialogDepth--;
+                }
+                if (dr != DialogResult.OK || string.IsNullOrEmpty(dialog.SelectedPath))
                     return;
 
-                _config.UsbSyncRootPath = dialog.SelectedPath;
-                SaveBestEffort();
+                string chosen = dialog.SelectedPath.Trim();
+                string usbError = ConfigValidator.ValidateRootPath(chosen, "U盘目录");
+                if (usbError != null)
+                {
+                    ShowFeedback("U盘目录无效：" + usbError, true);
+                    return;
+                }
+                if (!string.IsNullOrEmpty(_config.RootPath)
+                    && InspectionFileTransferService.PathsOverlap(_config.RootPath, chosen))
+                {
+                    ShowFeedback("U盘目录与当前截图目录不能重叠", true);
+                    return;
+                }
+
+                string prev = _config.UsbSyncRootPath;
+                _config.UsbSyncRootPath = chosen;
+                SaveResult saved = SaveBestEffortResult();
+                if (saved == null || !saved.Saved)
+                {
+                    _config.UsbSyncRootPath = prev;
+                    ShowFeedback("U盘目录保存失败：" + (saved != null ? saved.Error : "未知错误"), true);
+                    return;
+                }
                 UpdateUsbSyncToolTip();
                 if (syncAfterSelect)
                     RunUsbSync();
                 else
-                    ShowSuccessFeedback("已设置 U盘目录：" + dialog.SelectedPath);
+                    ShowSuccessFeedback("已设置 U盘目录：" + chosen);
             }
         }
 
         private void ClearUsbRootPathFromMain()
         {
+            if (_configWriteProtected)
+            {
+                RetryConfigLoad();
+                return;
+            }
             if (string.IsNullOrEmpty(_config.UsbSyncRootPath))
                 return;
+            string prev = _config.UsbSyncRootPath;
             _config.UsbSyncRootPath = null;
-            SaveBestEffort();
+            SaveResult saved = SaveBestEffortResult();
+            if (saved == null || !saved.Saved)
+            {
+                _config.UsbSyncRootPath = prev;
+                ShowFeedback("清除 U盘目录失败：" + (saved != null ? saved.Error : "未知错误"), true);
+                return;
+            }
             UpdateUsbSyncToolTip();
             ShowSuccessFeedback("已清除 U盘目录");
         }
@@ -3318,14 +3551,31 @@ namespace InspectionWidget
             string usbRoot = _config.UsbSyncRootPath;
             string targetRoot = _config.RootPath;
             string pattern = _config.FolderNamePattern;
+            bool rolled;
+            if (_session != null)
+                _session.EnsureCurrentDayResetIfRolled(out rolled);
             DateTime now = _clock.Now;
+            InspectionPlanToken token = _session != null ? _session.Plan.CurrentToken : default(InspectionPlanToken);
             if (_usbSyncButton != null)
                 _usbSyncButton.Enabled = false;
+            ShowFeedback("正在从U盘同步今日文件…", false);
 
             var worker = new System.Threading.Thread(new System.Threading.ThreadStart(delegate
             {
-                UsbSyncResult syncResult = _fileTransferService.SyncFromUsb(
-                    usbRoot, targetRoot, pattern, now);
+                UsbSyncResult syncResult;
+                try
+                {
+                    syncResult = _fileTransferService.SyncFromUsb(
+                        usbRoot, targetRoot, pattern, now);
+                }
+                catch (Exception ex)
+                {
+                    syncResult = new UsbSyncResult
+                    {
+                        Status = UsbSyncStatus.Error,
+                        Error = "U盘同步失败：" + ex.Message
+                    };
+                }
                 if (IsDisposed || _formClosing)
                     return;
                 try
@@ -3338,6 +3588,12 @@ namespace InspectionWidget
                             return;
                         if (syncResult.Status == UsbSyncStatus.Success)
                         {
+                            if (_session != null && !string.IsNullOrEmpty(syncResult.SampleSavedFilePath))
+                            {
+                                string progressErr;
+                                _session.RecordSaveSucceeded(syncResult.SampleSavedFilePath, token, out progressErr);
+                                RebuildPlanCard();
+                            }
                             if (syncResult.CopiedFileCount == 0 && syncResult.SkippedFileCount == 0)
                             {
                                 ShowFeedback("U盘今日巡检目录为空", false);
@@ -3372,8 +3628,7 @@ namespace InspectionWidget
         {
             if (_configWriteProtected)
             {
-                if (RetryConfigLoad())
-                    ShowSuccessFeedback("配置读取已恢复，保存已解除保护");
+                RetryConfigLoad();
                 return;
             }
             if (string.IsNullOrEmpty(_config.RootPath))
@@ -3381,6 +3636,9 @@ namespace InspectionWidget
                 ShowFeedback("尚未设置保存目录，请先在设置中选择", true);
                 return;
             }
+            CancelWaitingIfActive();
+            if (_stateMachine.State == PanelState.Idle)
+                SyncRolloverUiIfIdle();
 
             List<string> folders = _session != null
                 ? _session.ResolveOpenFolders()
@@ -3397,9 +3655,20 @@ namespace InspectionWidget
                 return;
             }
 
+            string todayConfigured = null;
+            try
+            {
+                todayConfigured = InspectionFileTransferService.ResolveTodayDirectory(
+                    _config.RootPath, _config.FolderNamePattern, _clock.Now);
+            }
+            catch
+            {
+            }
+
             // 本轮有主目录和暂存目录等多处文件：让用户清晰选择打开哪一处，避免漏看暂存图
             if (_folderMenu != null)
             {
+                DisposeToolStripItems(_folderMenu.Items);
                 _folderMenu.Dispose();
                 _folderMenu = null;
             }
@@ -3407,7 +3676,12 @@ namespace InspectionWidget
             for (int i = 0; i < folders.Count; i++)
             {
                 string folder = folders[i];
-                var item = new ToolStripMenuItem((i == 0 ? "今日目录：" : "暂存目录：") + folder);
+                bool isTodayConfigured = !string.IsNullOrEmpty(todayConfigured)
+                    && string.Equals(
+                        folder.TrimEnd('\\', '/'),
+                        todayConfigured.TrimEnd('\\', '/'),
+                        StringComparison.OrdinalIgnoreCase);
+                var item = new ToolStripMenuItem((isTodayConfigured ? "今日目录：" : "暂存目录：") + folder);
                 item.Click += delegate { OpenSingleInspectionFolder(folder); };
                 menu.Items.Add(item);
             }
@@ -3431,7 +3705,9 @@ namespace InspectionWidget
                 {
                     if (latest != null)
                     {
-                        Process.Start("explorer.exe", "/select,\"" + latest + "\"");
+                        using (Process proc = Process.Start("explorer.exe", "/select,\"" + latest + "\""))
+                        {
+                        }
                     }
                     else
                     {
@@ -3446,6 +3722,11 @@ namespace InspectionWidget
                 }
             }));
             worker.IsBackground = true;
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                try { worker.SetApartmentState(System.Threading.ApartmentState.STA); }
+                catch { }
+            }
             worker.Name = "InspectionWidget.OpenFolderWorker";
             worker.Start();
         }
@@ -3572,6 +3853,8 @@ namespace InspectionWidget
                 }
 
                 row.UnmarkButton.Visible = row.Visited && !isWaitingTarget && !isCapturingTarget;
+                row.StatusLabel.Font = Font11;
+                row.UnmarkButton.Font = Font11;
                 row.Panel.Enabled = ScreenshotAvailable;
                 UpdateDeviceRowBackColor(row);
                 LayoutSingleDeviceRow(row, row.Panel.Width, row.Panel.Height);
@@ -3582,6 +3865,16 @@ namespace InspectionWidget
         }
 
         // ---------- 选窗钩子接线（Task 3） ----------
+
+        private void CancelWaitingIfActive()
+        {
+            if (_stateMachine == null || _stateMachine.State != PanelState.Waiting)
+                return;
+            _waitingSessionId = 0;
+            _waitingPlanToken = default(InspectionPlanToken);
+            if (_stateMachine.Cancel())
+                OnStateChanged();
+        }
 
         /// <summary>
         /// 状态变化集中点：刷新视觉，并按状态统一启停钩子（Waiting→Start，其余→Stop）。
@@ -3696,11 +3989,24 @@ namespace InspectionWidget
         /// </summary>
         private void OnHookExternalClick(Point pt, int sessionId)
         {
+            if (_formClosing || IsDisposed)
+                return;
             if (InvokeRequired)
             {
-                BeginInvoke(new Action<Point, int>(OnHookExternalClick), pt, sessionId);
+                try
+                {
+                    BeginInvoke(new Action<Point, int>(OnHookExternalClick), pt, sessionId);
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
                 return;
             }
+            if (_formClosing || IsDisposed)
+                return;
             // 代次守卫（M-3）：事件所属会话号与当前 Waiting 会话不一致 →
             // 上一会话的迟到事件，直接丢弃，不解析不转移状态。
             if (sessionId != _waitingSessionId)
@@ -3708,6 +4014,8 @@ namespace InspectionWidget
             if (_stateMachine.State != PanelState.Waiting)
                 return;
 
+            if (_targetOverlay != null && !_targetOverlay.IsDisposed)
+                _targetOverlay.HideOverlay();
             ResolveResult result = WindowResolver.ResolveTopLevel(pt, this.Handle, GetTargetOverlayHandle());
             switch (result.Reason)
             {
@@ -3728,16 +4036,26 @@ namespace InspectionWidget
                     if (!_stateMachine.BeginCapture())
                         return;
                     OnStateChanged(); // Capturing → 停钩
-                    // 进 Capturing 即组请求快照（Task 5）：根目录取当前配置、
-                    // 日期与计划代次在此刻固定，保存与失败重试全程共用。
+                    // 进 Capturing 即组请求快照（Task 5）：先同步跨日状态再与 Date 同刻采样 PlanToken，
+                    // 避免跨午夜选窗时截图落入次日文件夹却被旧轮 Token 拒收。
+                    if (_session != null)
+                    {
+                        bool rolled;
+                        _session.EnsureCurrentDayResetIfRolled(out rolled);
+                    }
+                    DateTime captureDate = _clock.Now;
+                    InspectionPlanToken captureToken = _session != null
+                        ? _session.Plan.CurrentToken
+                        : _waitingPlanToken;
+                    _waitingPlanToken = captureToken;
                     _currentRequest = new CaptureRequest
                     {
                         Device = _stateMachine.CurrentDevice,
                         RootPath = _config.RootPath,
-                        Date = _clock.Now,
+                        Date = captureDate,
                         RequestId = _stateMachine.CurrentRequestId,
                         FolderPattern = _config.FolderNamePattern,
-                        PlanToken = _waitingPlanToken
+                        PlanToken = captureToken
                     };
                     OnTargetResolved(result, _stateMachine.CurrentRequestId);
                     break;
@@ -3774,11 +4092,24 @@ namespace InspectionWidget
 
         private void OnHookCancelRequested()
         {
+            if (_formClosing || IsDisposed)
+                return;
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(OnHookCancelRequested));
+                try
+                {
+                    BeginInvoke(new Action(OnHookCancelRequested));
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
                 return;
             }
+            if (_formClosing || IsDisposed)
+                return;
             bool cancelled = _stateMachine.Cancel();
             if (!cancelled)
                 return;
@@ -3791,11 +4122,24 @@ namespace InspectionWidget
 
         private void OnHookTimeoutElapsed()
         {
+            if (_formClosing || IsDisposed)
+                return;
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(OnHookTimeoutElapsed));
+                try
+                {
+                    BeginInvoke(new Action(OnHookTimeoutElapsed));
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
                 return;
             }
+            if (_formClosing || IsDisposed)
+                return;
             bool cancelled = _stateMachine.Cancel();
             if (!cancelled)
                 return;
@@ -3878,7 +4222,7 @@ namespace InspectionWidget
                     };
                 }
 
-                if (IsDisposed)
+                if (IsDisposed || _formClosing)
                 {
                     if (outcome.Image != null) outcome.Image.Dispose();
                     return;
@@ -3908,6 +4252,12 @@ namespace InspectionWidget
         /// </summary>
         private void OnCaptureCompleted(CaptureOutcome outcome, int requestId, string title)
         {
+            if (_formClosing || IsDisposed)
+            {
+                if (outcome != null && outcome.Image != null)
+                    outcome.Image.Dispose();
+                return;
+            }
             if (requestId != _stateMachine.CurrentRequestId
                 || _stateMachine.State != PanelState.Capturing)
             {
@@ -3984,7 +4334,7 @@ namespace InspectionWidget
                     result = new StorageSaveResult { Saved = false, Error = "尚未保存：" + ex.Message };
                 }
 
-                if (IsDisposed)
+                if (IsDisposed || _formClosing)
                 {
                     image.Dispose();
                     return;
@@ -4014,6 +4364,13 @@ namespace InspectionWidget
         /// </summary>
         private void OnSaveCompleted(StorageSaveResult result, Bitmap image, CaptureRequest request, bool completesCapture, int saveGeneration)
         {
+            if (_formClosing || IsDisposed)
+            {
+                if (image != null)
+                    image.Dispose();
+                _saveInFlight = false;
+                return;
+            }
             // 先完成成功/失败与待重试登记，再切换 Idle/处理完成弹窗，避免弹窗时失败状态尚未就绪。
             if (result != null && result.Saved)
             {
@@ -4274,7 +4631,17 @@ namespace InspectionWidget
             {
                 dialog.Description = "选择截图保存根目录，只需选这一次";
                 dialog.ShowNewFolderButton = true;
-                if (dialog.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dialog.SelectedPath))
+                DialogResult dr;
+                _modalDialogDepth++;
+                try
+                {
+                    dr = dialog.ShowDialog(this);
+                }
+                finally
+                {
+                    _modalDialogDepth--;
+                }
+                if (dr == DialogResult.OK && !string.IsNullOrEmpty(dialog.SelectedPath))
                 {
                     string chosen = dialog.SelectedPath;
                     _config.RootPath = chosen;
@@ -4423,6 +4790,7 @@ namespace InspectionWidget
         /// </summary>
         private void OnMinimizeClicked(object sender, EventArgs e)
         {
+            CancelWaitingIfActive();
             Hide();
             if (_config != null && !_config.TrayHintShown)
             {
@@ -4435,10 +4803,16 @@ namespace InspectionWidget
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            if (e.Cancel)
+                return;
             _formClosing = true;
             StopTargetHoverHighlight();
             if (_credentialCountdownTimer != null)
                 _credentialCountdownTimer.Stop();
+            if (_feedbackTimer != null)
+                _feedbackTimer.Stop();
+            if (_dayRolloverTimer != null)
+                _dayRolloverTimer.Stop();
             // 托盘图标先隐藏并释放，避免进程退出后托盘区残影。
             if (_trayIcon != null)
             {
@@ -4488,12 +4862,30 @@ namespace InspectionWidget
         /// </summary>
         public void RecoverToIdle()
         {
+            if (_formClosing || IsDisposed)
+                return;
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(RecoverToIdle));
+                try
+                {
+                    BeginInvoke(new Action(RecoverToIdle));
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
                 return;
             }
+            if (_formClosing || IsDisposed)
+                return;
 
+            if (_hiddenForCapture || Opacity < 0.99)
+            {
+                Opacity = 1;
+                _hiddenForCapture = false;
+            }
             _waitingPlanToken = default(InspectionPlanToken);
             if (_stateMachine.State == PanelState.Waiting)
                 _stateMachine.Cancel();
@@ -4584,7 +4976,7 @@ namespace InspectionWidget
             string progressErr;
             if (!_session.TryClaimCompletionPrompt(
                 _saveInFlight,
-                _settingsDialogOpen,
+                IsModalDialogOpen,
                 hiddenOrTransparent,
                 panelVisible,
                 out progressErr))
@@ -4611,10 +5003,18 @@ namespace InspectionWidget
         {
             double scale = ScaleFactor;
             UiTheme.UseFontScale(scale);
-            using (Form dialog = factory())
+            _modalDialogDepth++;
+            try
             {
-                UiTheme.ScaleLayout(dialog, scale);
-                return dialog.ShowDialog(this);
+                using (Form dialog = factory())
+                {
+                    UiTheme.ScaleLayout(dialog, scale);
+                    return dialog.ShowDialog(this);
+                }
+            }
+            finally
+            {
+                _modalDialogDepth--;
             }
         }
     }

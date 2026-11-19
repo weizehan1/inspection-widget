@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
 using InspectionWidget.Config;
@@ -13,6 +14,8 @@ namespace InspectionWidget
     {
         private readonly SettingsDraft _draft;
         private readonly DataGridView _grid;
+        private readonly BindingSource _bindingSource;
+        private readonly ListChangedEventHandler _devicesListChangedHandler;
         private readonly Label _countLabel;
         private readonly Button _addButton;
         private readonly Button _deleteButton;
@@ -96,7 +99,8 @@ namespace InspectionWidget
                 MinimumWidth = 220,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
-            _grid.DataSource = new BindingSource { DataSource = _draft.Devices };
+            _bindingSource = new BindingSource { DataSource = _draft.Devices };
+            _grid.DataSource = _bindingSource;
             _grid.BorderStyle = BorderStyle.None;
             _grid.CellBeginEdit += OnCellBeginEdit;
             _grid.CellValidating += OnCellValidating;
@@ -147,11 +151,27 @@ namespace InspectionWidget
             root.Controls.Add(buttons, 0, 2);
 
             Controls.Add(root);
-            _draft.Devices.ListChanged += delegate
+            _devicesListChangedHandler = delegate
             {
                 if (!_loading) UpdateCountAndButtons();
             };
+            _draft.Devices.ListChanged += _devicesListChangedHandler;
             UpdateCountAndButtons();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_devicesListChangedHandler != null)
+                    _draft.Devices.ListChanged -= _devicesListChangedHandler;
+                if (_bindingSource != null)
+                {
+                    _grid.DataSource = null;
+                    _bindingSource.Dispose();
+                }
+            }
+            base.Dispose(disposing);
         }
 
         public DataGridView Grid
@@ -404,11 +424,15 @@ namespace InspectionWidget
 
         private void OnCellEndEdit(object sender, DataGridViewCellEventArgs e)
         {
-            if (_cancellingEdit)
+            if (e.RowIndex < 0 || e.RowIndex >= _grid.Rows.Count)
             {
                 _editOldName = null;
-                if (e.RowIndex >= 0)
-                    _grid.Rows[e.RowIndex].ErrorText = string.Empty;
+                return;
+            }
+            if (_cancellingEdit || e.RowIndex >= _draft.Devices.Count)
+            {
+                _editOldName = null;
+                _grid.Rows[e.RowIndex].ErrorText = string.Empty;
                 return;
             }
 
@@ -452,7 +476,8 @@ namespace InspectionWidget
         private void OnDataError(object sender, DataGridViewDataErrorEventArgs e)
         {
             e.ThrowException = false;
-            ReportValidation("设备表格输入无法提交：" + e.Exception.Message);
+            string detail = e.Exception != null ? e.Exception.Message : "未知错误";
+            ReportValidation("设备表格输入无法提交：" + detail);
         }
 
         private void SelectRow(int index)

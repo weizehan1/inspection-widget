@@ -715,6 +715,46 @@ namespace InspectionWidget.Tests
                 }
                 finally { Cleanup(dir); }
             });
+
+            TestRunner.Run("配置校验与限流：拒绝保留/非法/重复凭据快捷键及超过 5 MiB 的配置文件", () =>
+            {
+                string hotkeyErr = ConfigValidator.ValidateCredentialList(new List<CredentialEntry>
+                {
+                    new CredentialEntry { Title = "A", Hotkey = "Ctrl+V" }
+                });
+                Assert.NotNull(hotkeyErr);
+
+                string dupErr = ConfigValidator.ValidateCredentialList(new List<CredentialEntry>
+                {
+                    new CredentialEntry { Title = "A", Hotkey = "Ctrl+Alt+1" },
+                    new CredentialEntry { Title = "B", Hotkey = "alt+ctrl+d1" }
+                });
+                Assert.NotNull(dupErr);
+
+                AssertParseFails(
+                    Exchange(ConfigJsonReader.CredentialModeDpapi,
+                        "{\"Devices\":[],\"Credentials\":[{\"Title\":\"A\",\"EncryptedSecret\":\"QUJD\",\"Hotkey\":\"Ctrl+V\"}]}"),
+                    "Ctrl+V");
+
+                string dir = MakeTempDir();
+                try
+                {
+                    string cfgPath = Path.Combine(dir, "config.json");
+                    using (var fs = new FileStream(cfgPath, FileMode.CreateNew, FileAccess.Write))
+                    {
+                        fs.SetLength(ConfigStore.MaxFileBytes + 4096L);
+                    }
+                    var store = new ConfigStore(new ConfigPaths
+                    {
+                        AuthoritativePath = cfgPath,
+                        IsFallback = false
+                    }, delegate { return true; });
+                    LoadResult res = store.Load();
+                    Assert.Equal(ConfigLoadKind.IoErrorKept, res.Kind);
+                    Assert.True(res.Error.Contains("5 MiB"), res.Error);
+                }
+                finally { Cleanup(dir); }
+            });
         }
 
         private static AppConfig SampleConfig()

@@ -304,6 +304,27 @@ namespace InspectionWidget.Tests
                     Assert.Equal(Path.Combine(dirs.Root, Device + "-2.png"), third);
                 }
             });
+
+            TestRunner.Run("保存与校验：目录占用目标文件名时自动顺延，非法设备名拒绝保存", () =>
+            {
+                using (var dirs = new TempDirs())
+                using (Bitmap bmp = MakeBitmap())
+                {
+                    string dateDir = Path.Combine(dirs.Root, "巡检-2026-11-02");
+                    Directory.CreateDirectory(Path.Combine(dateDir, Device + ".png"));
+
+                    var saver = new ScreenshotSaver(dirs.Exe, dirs.Lad);
+                    SaveResult r = saver.Save(bmp, dirs.Root, Device, Day1);
+                    Assert.True(r.Saved, r.Error);
+                    Assert.Equal(Path.Combine(dateDir, Device + "-1.png"), r.FullPath);
+                    Assert.True(File.Exists(r.FullPath));
+
+                    SaveResult badCon = saver.Save(bmp, dirs.Root, "CON", Day1);
+                    Assert.False(badCon.Saved);
+                    SaveResult badSlash = saver.Save(bmp, dirs.Root, "bad/name", Day1);
+                    Assert.False(badSlash.Saved);
+                }
+            });
         }
     }
 }

@@ -108,13 +108,18 @@ namespace InspectionWidget.Credentials
                 cleared = false;
             }
 
+            bool isCurrent;
+            lock (_sync)
+            {
+                isCurrent = object.ReferenceEquals(_receipt, receipt);
+                if (cleared && isCurrent)
+                    _receipt = null;
+            }
+            if (!isCurrent)
+                return cleared;
+
             if (cleared)
             {
-                lock (_sync)
-                {
-                    if (object.ReferenceEquals(_receipt, receipt))
-                        _receipt = null;
-                }
                 Action clearedHandler = Cleared;
                 if (clearedHandler != null)
                     clearedHandler();

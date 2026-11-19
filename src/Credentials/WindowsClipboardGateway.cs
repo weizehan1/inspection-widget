@@ -254,7 +254,15 @@ namespace InspectionWidget.Credentials
         private static bool SetUnicodeText(uint format, string value)
         {
             byte[] bytes = Encoding.Unicode.GetBytes(value + "\0");
-            IntPtr handle = AllocAndFill(bytes);
+            IntPtr handle;
+            try
+            {
+                handle = AllocAndFill(bytes);
+            }
+            finally
+            {
+                Array.Clear(bytes, 0, bytes.Length);
+            }
             if (handle == IntPtr.Zero)
                 return false;
             if (NativeMethods.SetClipboardData(format, handle) == IntPtr.Zero)
@@ -303,13 +311,21 @@ namespace InspectionWidget.Credentials
 
         private static string ComputeSha256(string text)
         {
-            using (SHA256 sha = SHA256.Create())
+            byte[] raw = Encoding.UTF8.GetBytes(text);
+            try
             {
-                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(text));
-                var sb = new StringBuilder(hash.Length * 2);
-                for (int i = 0; i < hash.Length; i++)
-                    sb.Append(hash[i].ToString("x2"));
-                return sb.ToString();
+                using (SHA256 sha = SHA256.Create())
+                {
+                    byte[] hash = sha.ComputeHash(raw);
+                    var sb = new StringBuilder(hash.Length * 2);
+                    for (int i = 0; i < hash.Length; i++)
+                        sb.Append(hash[i].ToString("x2"));
+                    return sb.ToString();
+                }
+            }
+            finally
+            {
+                Array.Clear(raw, 0, raw.Length);
             }
         }
 
