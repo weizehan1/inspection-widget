@@ -168,6 +168,10 @@ namespace InspectionWidget
         private Button _closeButton;
         private ToolTip _titleToolTip;
         private ToolTip _deviceToolTip;
+        private ToolTip _deviceRowToolTip;
+        private ContextMenuStrip _deviceRowMenu;
+        private TargetHighlightOverlay _targetOverlay;
+        private Timer _targetHoverTimer;
         private Bitmap _gearImage;
         private Bitmap _gearHoverImage;
         private bool _settingsHovered;
@@ -236,6 +240,7 @@ namespace InspectionWidget
         private sealed class DeviceRowPanel : Panel
         {
             public Action ActivateAction;
+            public Action<int> NavigateAction;
 
             public DeviceRowPanel()
             {
@@ -251,7 +256,8 @@ namespace InspectionWidget
 
             protected override bool IsInputKey(Keys keyData)
             {
-                if (keyData == Keys.Enter || keyData == Keys.Space)
+                if (keyData == Keys.Enter || keyData == Keys.Space
+                    || keyData == Keys.Up || keyData == Keys.Down)
                     return true;
                 return base.IsInputKey(keyData);
             }
@@ -264,6 +270,18 @@ namespace InspectionWidget
                     e.Handled = true;
                     if (ActivateAction != null)
                         ActivateAction();
+                    return;
+                }
+                if (!e.Handled && e.KeyCode == Keys.Up && NavigateAction != null)
+                {
+                    e.Handled = true;
+                    NavigateAction(-1);
+                    return;
+                }
+                if (!e.Handled && e.KeyCode == Keys.Down && NavigateAction != null)
+                {
+                    e.Handled = true;
+                    NavigateAction(1);
                 }
             }
 
@@ -447,6 +465,23 @@ namespace InspectionWidget
                 if (_rootToolTip != null) _rootToolTip.Dispose();
                 if (_titleToolTip != null) _titleToolTip.Dispose();
                 if (_deviceToolTip != null) _deviceToolTip.Dispose();
+                if (_deviceRowToolTip != null) _deviceRowToolTip.Dispose();
+                if (_deviceRowMenu != null)
+                {
+                    _deviceRowMenu.Dispose();
+                    _deviceRowMenu = null;
+                }
+                if (_targetHoverTimer != null)
+                {
+                    _targetHoverTimer.Stop();
+                    _targetHoverTimer.Dispose();
+                    _targetHoverTimer = null;
+                }
+                if (_targetOverlay != null)
+                {
+                    _targetOverlay.Dispose();
+                    _targetOverlay = null;
+                }
                 if (_folderMenu != null)
                 {
                     _folderMenu.Dispose();
@@ -690,6 +725,8 @@ namespace InspectionWidget
             };
             _titleToolTip = new ToolTip();
             _deviceToolTip = new ToolTip();
+            _deviceRowToolTip = new ToolTip();
+            _deviceRowMenu = new ContextMenuStrip();
             var settingsButton = _settingsButton = new Button
             {
                 Text = string.Empty,
@@ -2013,19 +2050,6 @@ namespace InspectionWidget
 
         private void RebuildDeviceButtons()
         {
-            foreach (DeviceRowWidget old in _deviceRows)
-            {
-                _deviceZonePanel.Controls.Remove(old.Panel);
-                old.Panel.Dispose();
-            }
-            _deviceRows.Clear();
-            if (_deviceHint != null)
-            {
-                _deviceZonePanel.Controls.Remove(_deviceHint);
-                _deviceHint.Dispose();
-                _deviceHint = null;
-            }
-
             _deviceDisplay = _session != null
                 ? _session.BuildDeviceDisplay()
                 : new DeviceDisplaySnapshot
@@ -2038,6 +2062,29 @@ namespace InspectionWidget
                 _uiRenderedPlanDate = _session.Plan.Date;
                 _session.ConsumePendingRolloverRefresh();
                 _pendingDayRolloverRefresh = false;
+            }
+
+            if (!_config.IsDeviceCollapsed && _deviceHint == null && CanReuseDeviceRows(_deviceDisplay))
+            {
+                for (int i = 0; i < _deviceRows.Count; i++)
+                    _deviceRows[i].Visited = _deviceDisplay.Items[i].Visited;
+                RefreshStateVisuals();
+                return;
+            }
+
+            if (_deviceRowToolTip != null)
+                _deviceRowToolTip.RemoveAll();
+            foreach (DeviceRowWidget old in _deviceRows)
+            {
+                _deviceZonePanel.Controls.Remove(old.Panel);
+                old.Panel.Dispose();
+            }
+            _deviceRows.Clear();
+            if (_deviceHint != null)
+            {
+                _deviceZonePanel.Controls.Remove(_deviceHint);
+                _deviceHint.Dispose();
+                _deviceHint = null;
             }
 
             // 截图区折叠（v1.0.3）：区高为 0，不建行控件；展开时照常重建。
@@ -2065,6 +2112,26 @@ namespace InspectionWidget
                 _deviceRows.Add(widget);
                 _deviceZonePanel.Controls.Add(widget.Panel);
             }
+        }
+
+        private bool CanReuseDeviceRows(DeviceDisplaySnapshot display)
+        {
+            if (display == null || display.Items == null || display.Items.Count == 0)
+                return false;
+            if (_deviceRows.Count != display.Items.Count)
+                return false;
+            int expectedHeight = M(PanelLayout.SchemeBDeviceRowHeight);
+            for (int i = 0; i < _deviceRows.Count; i++)
+            {
+                DeviceRowWidget row = _deviceRows[i];
+                if (row == null || row.Panel == null || row.Panel.IsDisposed)
+                    return false;
+                if (row.Panel.Height != expectedHeight)
+                    return false;
+                if (!string.Equals(row.Device, display.Items[i].Name, StringComparison.Ordinal))
+                    return false;
+            }
+            return true;
         }
 
         private Control CreateNoDevicesEmptyCard()
@@ -2167,7 +2234,8 @@ namespace InspectionWidget
                 Size = new Size(ContentWidthNow, M(PanelLayout.SchemeBDeviceRowHeight)),
                 Cursor = Cursors.Hand,
                 AccessibleName = "设备：" + device,
-                ActivateAction = delegate { OnDeviceRowActivated(device); }
+                ActivateAction = delegate { OnDeviceRowActivated(device); },
+                NavigateAction = delegate(int delta) { FocusAdjacentDeviceRow(device, delta); }
             };
             var nameLabel = new Label
             {
@@ -2241,17 +2309,87 @@ namespace InspectionWidget
             nameLabel.MouseLeave += onLeave;
             statusLabel.MouseEnter += onEnter;
             statusLabel.MouseLeave += onLeave;
-            rowPanel.Click += delegate { rowPanel.Focus(); OnDeviceRowActivated(device); };
-            nameLabel.Click += delegate { rowPanel.Focus(); OnDeviceRowActivated(device); };
-            statusLabel.Click += delegate { rowPanel.Focus(); OnDeviceRowActivated(device); };
+            MouseEventHandler onRowMouseClick = delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    rowPanel.Focus();
+                    OnDeviceRowActivated(device);
+                }
+                else if (e.Button == MouseButtons.Right && _stateMachine.State == PanelState.Idle)
+                {
+                    rowPanel.Focus();
+                    ShowDeviceRowContextMenu(widget, sender as Control, e.Location);
+                }
+            };
+            rowPanel.MouseClick += onRowMouseClick;
+            nameLabel.MouseClick += onRowMouseClick;
+            statusLabel.MouseClick += onRowMouseClick;
             unmarkBtn.Click += delegate { OnUnmarkDeviceClicked(device); };
 
             rowPanel.Controls.Add(nameLabel);
             rowPanel.Controls.Add(statusLabel);
             rowPanel.Controls.Add(unmarkBtn);
-            _deviceToolTip.SetToolTip(rowPanel, device);
-            _deviceToolTip.SetToolTip(nameLabel, device);
+            if (_deviceRowToolTip != null)
+            {
+                _deviceRowToolTip.SetToolTip(rowPanel, device);
+                _deviceRowToolTip.SetToolTip(nameLabel, device);
+            }
             return widget;
+        }
+
+        private void FocusAdjacentDeviceRow(string currentDevice, int delta)
+        {
+            if (_deviceRows.Count <= 1)
+                return;
+            int index = -1;
+            for (int i = 0; i < _deviceRows.Count; i++)
+            {
+                if (string.Equals(_deviceRows[i].Device, currentDevice, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0)
+                return;
+            int next = (index + delta + _deviceRows.Count) % _deviceRows.Count;
+            Panel target = _deviceRows[next].Panel;
+            if (target != null && !target.IsDisposed && target.CanSelect)
+            {
+                target.Select();
+                if (target.CanFocus)
+                    target.Focus();
+            }
+        }
+
+        private void ShowDeviceRowContextMenu(DeviceRowWidget widget, Control sourceControl, Point location)
+        {
+            if (widget == null || _deviceRowMenu == null || IsDisposed)
+                return;
+            string device = widget.Device;
+            _deviceRowMenu.Items.Clear();
+
+            var captureItem = new ToolStripMenuItem("截取「" + device + "」");
+            captureItem.Enabled = ScreenshotAvailable;
+            captureItem.Click += delegate { OnDeviceRowActivated(device); };
+            _deviceRowMenu.Items.Add(captureItem);
+
+            if (widget.Visited)
+            {
+                var unmarkItem = new ToolStripMenuItem("恢复未点");
+                unmarkItem.Click += delegate { OnUnmarkDeviceClicked(device); };
+                _deviceRowMenu.Items.Add(unmarkItem);
+            }
+
+            _deviceRowMenu.Items.Add(new ToolStripSeparator());
+            var openFolderItem = new ToolStripMenuItem("打开今日巡检目录");
+            openFolderItem.Click += delegate { OpenInspectionFolders(); };
+            _deviceRowMenu.Items.Add(openFolderItem);
+
+            Control anchor = sourceControl ?? widget.Panel;
+            if (anchor != null && !anchor.IsDisposed)
+                _deviceRowMenu.Show(anchor, location);
         }
 
         private void OnDeviceRowPaint(object sender, PaintEventArgs e)
@@ -2530,6 +2668,16 @@ namespace InspectionWidget
         {
             if (_deviceArrowLabel != null)
                 _deviceArrowLabel.Invalidate();
+            PositionDeviceSubLabel();
+        }
+
+        private void PositionDeviceSubLabel()
+        {
+            if (_deviceSubLabel == null || _deviceHeaderLabel == null || _deviceArrowLabel == null)
+                return;
+            _deviceSubLabel.Location = new Point(
+                Math.Max(_deviceHeaderLabel.Right + M(8), _deviceArrowLabel.Left - _deviceSubLabel.Width - M(6)),
+                M(3));
         }
 
         /// <summary>
@@ -2755,14 +2903,10 @@ namespace InspectionWidget
             {
                 if (_session != null)
                 {
-                    // 若正在切换目标或从空闲点下设备，绑定当前等待轮次令牌并刷新可见列表
+                    // 仅绑定当前等待轮次令牌；不在点下设备时提前计入已点过，
+                    // 只有真正截图并保存成功后才计入，确保右键/Esc/超时取消均不改变今日未点条数。
                     _waitingPlanToken = token;
                 }
-                _config.LastDevice = _stateMachine.CurrentDevice;
-                SaveBestEffort();
-                RebuildPlanCard();
-                RebuildDeviceButtons();
-                ApplyHeightAnchored();
                 OnStateChanged();
                 if (!string.IsNullOrEmpty(progressErr))
                 {
@@ -2770,13 +2914,8 @@ namespace InspectionWidget
                 }
                 else
                 {
-                    bool rowStillVisible = _session == null
-                        || !_session.PlanModeEnabled
-                        || !_session.HideVisitedDevices
-                        || _session.ShowVisitedOverride;
-                    string cancelHint = rowStillVisible ? "（Esc、右键或再点取消）" : "（Esc 或右键取消）";
                     ShowFeedback(
-                        "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」" + cancelHint,
+                        "请点目标窗口截取「" + _stateMachine.CurrentDevice + "」（右键、Esc 或再点取消）",
                         false);
                 }
                 return;
@@ -3361,10 +3500,28 @@ namespace InspectionWidget
                 : (capturing ? "正在截图…" : "截图设备");
             _deviceHeaderLabel.Font = waiting ? Font13Bold : Font12Bold;
             _deviceHeaderLabel.ForeColor = waiting ? WarningColor : (capturing ? AccentColor : SecondaryTextColor);
-            _deviceSubLabel.Text = waiting
-                ? (_stateMachine.CurrentDevice ?? "等待选窗")
-                : (capturing ? (_stateMachine.CurrentDevice ?? "截图中") : string.Empty);
-            _deviceSubLabel.ForeColor = waiting ? WarningColor : (capturing ? AccentColor : WeakTextColor);
+            if (waiting)
+            {
+                _deviceSubLabel.Text = _stateMachine.CurrentDevice ?? "等待选窗";
+                _deviceSubLabel.ForeColor = WarningColor;
+            }
+            else if (capturing)
+            {
+                _deviceSubLabel.Text = _stateMachine.CurrentDevice ?? "截图中";
+                _deviceSubLabel.ForeColor = AccentColor;
+            }
+            else if (_session != null && _session.PlanModeEnabled && _session.Plan.TotalCount > 0)
+            {
+                int remaining = Math.Max(0, _session.Plan.TotalCount - _session.Plan.VisitedCount);
+                _deviceSubLabel.Text = remaining == 0 ? "今日已全点" : ("待点 " + remaining + " 台");
+                _deviceSubLabel.ForeColor = remaining == 0 ? SuccessColor : WeakTextColor;
+            }
+            else
+            {
+                _deviceSubLabel.Text = string.Empty;
+                _deviceSubLabel.ForeColor = WeakTextColor;
+            }
+            PositionDeviceSubLabel();
 
             for (int i = 0; i < _deviceRows.Count; i++)
             {
@@ -3442,10 +3599,13 @@ namespace InspectionWidget
                     // Start 返回钩子会话号：已在运行（Waiting 内切换设备）返回现行
                     // 会话号、守卫不变；新会话则更新守卫（M-3 代次守卫）。
                     _waitingSessionId = _hooks.Start(this.Bounds);
+                    StartTargetHoverHighlight();
                 }
                 catch (Exception ex)
                 {
+                    StopTargetHoverHighlight();
                     _waitingSessionId = 0;
+                    _waitingPlanToken = default(InspectionPlanToken);
                     _stateMachine.Cancel();
                     RefreshStateVisuals();
                     _hooks.Stop();
@@ -3454,7 +3614,79 @@ namespace InspectionWidget
             }
             else
             {
+                StopTargetHoverHighlight();
                 _hooks.Stop();
+            }
+        }
+
+        private IntPtr GetTargetOverlayHandle()
+        {
+            return _targetOverlay != null && !_targetOverlay.IsDisposed && _targetOverlay.IsHandleCreated
+                ? _targetOverlay.Handle
+                : IntPtr.Zero;
+        }
+
+        private void StartTargetHoverHighlight()
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT
+                || !(_hooks is HookManager)
+                || IsDisposed
+                || _formClosing
+                || !Visible)
+            {
+                return;
+            }
+            if (_targetOverlay == null || _targetOverlay.IsDisposed)
+                _targetOverlay = new TargetHighlightOverlay();
+            if (_targetHoverTimer == null)
+            {
+                _targetHoverTimer = new Timer { Interval = 50 };
+                _targetHoverTimer.Tick += OnTargetHoverTick;
+            }
+            _targetHoverTimer.Start();
+            UpdateTargetHoverHighlight();
+        }
+
+        private void StopTargetHoverHighlight()
+        {
+            if (_targetHoverTimer != null)
+                _targetHoverTimer.Stop();
+            if (_targetOverlay != null && !_targetOverlay.IsDisposed)
+                _targetOverlay.HideOverlay();
+        }
+
+        private void OnTargetHoverTick(object sender, EventArgs e)
+        {
+            UpdateTargetHoverHighlight();
+        }
+
+        private void UpdateTargetHoverHighlight()
+        {
+            if (_targetOverlay == null || _targetOverlay.IsDisposed)
+                return;
+            if (_stateMachine.State != PanelState.Waiting || IsDisposed || _formClosing || !Visible)
+            {
+                StopTargetHoverHighlight();
+                return;
+            }
+            try
+            {
+                ResolveResult hovered = WindowResolver.ResolveTopLevel(
+                    Cursor.Position, this.Handle, GetTargetOverlayHandle());
+                Rectangle bounds;
+                if (hovered.Reason == ResolveReason.Ok
+                    && WindowResolver.TryGetTargetBounds(hovered.Hwnd, out bounds))
+                {
+                    _targetOverlay.ShowTarget(bounds, Math.Max(2, M(3)));
+                }
+                else
+                {
+                    _targetOverlay.HideOverlay();
+                }
+            }
+            catch
+            {
+                _targetOverlay.HideOverlay();
             }
         }
 
@@ -3476,7 +3708,7 @@ namespace InspectionWidget
             if (_stateMachine.State != PanelState.Waiting)
                 return;
 
-            ResolveResult result = WindowResolver.ResolveTopLevel(pt, this.Handle);
+            ResolveResult result = WindowResolver.ResolveTopLevel(pt, this.Handle, GetTargetOverlayHandle());
             switch (result.Reason)
             {
                 case ResolveReason.Excluded:
@@ -3486,6 +3718,7 @@ namespace InspectionWidget
                     break;
                 case ResolveReason.Minimized:
                     ShowFeedback("该窗口已最小化，请先打开", true);
+                    _waitingPlanToken = default(InspectionPlanToken);
                     _stateMachine.Cancel();
                     OnStateChanged();
                     SyncRolloverUiIfIdle();
@@ -3532,6 +3765,7 @@ namespace InspectionWidget
             catch (Exception ex)
             {
                 _waitingSessionId = 0;
+                _waitingPlanToken = default(InspectionPlanToken);
                 _stateMachine.Cancel();
                 OnStateChanged();
                 ShowFeedback("选窗启动失败：" + ex.Message, true);
@@ -3546,13 +3780,13 @@ namespace InspectionWidget
                 return;
             }
             bool cancelled = _stateMachine.Cancel();
+            if (!cancelled)
+                return;
+            _waitingPlanToken = default(InspectionPlanToken);
             OnStateChanged();
-            if (cancelled)
-            {
-                SyncRolloverUiIfIdle();
-                ShowFeedback("已取消选窗", false);
-                TryMaybeShowCompletionPrompt();
-            }
+            SyncRolloverUiIfIdle();
+            ShowFeedback("已取消选窗", false);
+            TryMaybeShowCompletionPrompt();
         }
 
         private void OnHookTimeoutElapsed()
@@ -3563,13 +3797,13 @@ namespace InspectionWidget
                 return;
             }
             bool cancelled = _stateMachine.Cancel();
+            if (!cancelled)
+                return;
+            _waitingPlanToken = default(InspectionPlanToken);
             OnStateChanged(); // 钩子已自停，Stop 幂等
-            if (cancelled)
-            {
-                SyncRolloverUiIfIdle();
-                ShowFeedback("等待超时，已取消", true);
-                TryMaybeShowCompletionPrompt();
-            }
+            SyncRolloverUiIfIdle();
+            ShowFeedback("等待超时，已取消", true);
+            TryMaybeShowCompletionPrompt();
         }
 
         /// <summary>
@@ -3796,7 +4030,13 @@ namespace InspectionWidget
                 if (_session != null)
                 {
                     InspectionPlanToken token = request != null ? request.PlanToken : default(InspectionPlanToken);
-                    _session.RecordSaveSucceeded(result.FullPath, token, out progressErr);
+                    string savedDevice = request != null ? request.Device : null;
+                    _session.RecordSaveSucceeded(savedDevice, result.FullPath, token, out progressErr);
+                }
+                if (request != null && !string.IsNullOrEmpty(request.Device))
+                {
+                    _config.LastDevice = request.Device;
+                    SaveBestEffort();
                 }
 
                 _saveInFlight = false;
@@ -3805,6 +4045,8 @@ namespace InspectionWidget
 
                 SyncRolloverUiIfIdle();
                 RebuildPlanCard();
+                RebuildDeviceButtons();
+                RefreshStateVisuals();
                 ApplyHeightAnchored();
 
                 string fileName = Path.GetFileName(result.FullPath);
@@ -4194,6 +4436,7 @@ namespace InspectionWidget
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
             _formClosing = true;
+            StopTargetHoverHighlight();
             if (_credentialCountdownTimer != null)
                 _credentialCountdownTimer.Stop();
             // 托盘图标先隐藏并释放，避免进程退出后托盘区残影。
@@ -4251,6 +4494,7 @@ namespace InspectionWidget
                 return;
             }
 
+            _waitingPlanToken = default(InspectionPlanToken);
             if (_stateMachine.State == PanelState.Waiting)
                 _stateMachine.Cancel();
             else if (_stateMachine.State == PanelState.Capturing)

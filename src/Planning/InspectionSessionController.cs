@@ -185,12 +185,8 @@ namespace InspectionWidget.Planning
 
             if (_stateMachine.State == PanelState.Waiting)
             {
-                if (_config != null)
-                    _config.LastDevice = _stateMachine.CurrentDevice;
                 capturedToken = token;
-                if (PlanModeEnabled && _plan.MarkVisited(device, token))
-                    SaveProgress(out progressSaveError);
-                else if (HasProgressError)
+                if (HasProgressError)
                     progressSaveError = ProgressError;
             }
             return true;
@@ -201,12 +197,25 @@ namespace InspectionWidget.Planning
             InspectionPlanToken token,
             out string progressSaveError)
         {
+            return RecordSaveSucceeded(null, fullPath, token, out progressSaveError);
+        }
+
+        public bool RecordSaveSucceeded(
+            string device,
+            string fullPath,
+            InspectionPlanToken token,
+            out string progressSaveError)
+        {
             progressSaveError = null;
             bool rolled;
             EnsureCurrentDayResetIfRolled(out rolled);
             if (string.IsNullOrWhiteSpace(fullPath))
                 return false;
-            if (!_plan.RecordSavedPath(fullPath, token))
+            bool marked = !string.IsNullOrWhiteSpace(device)
+                && PlanModeEnabled
+                && _plan.MarkVisited(device, token);
+            bool recordedPath = _plan.RecordSavedPath(fullPath, token);
+            if (!marked && !recordedPath)
             {
                 if (HasProgressError)
                     progressSaveError = ProgressError;

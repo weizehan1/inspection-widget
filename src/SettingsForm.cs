@@ -1284,7 +1284,7 @@ namespace InspectionWidget
             };
             var aboutVersion = new Label
             {
-                Text = "巡检助手 v1.2.0",
+                Text = "巡检助手 v1.2.1",
                 Font = UiTheme.SmallFont,
                 ForeColor = UiTheme.SecondaryTextColor,
                 AutoSize = true,

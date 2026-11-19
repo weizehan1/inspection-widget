@@ -5,6 +5,6 @@ using System.Runtime.CompilerServices;
 // 仅向测试程序集开放内部成员，产品对外面不变。
 [assembly: InternalsVisibleTo("InspectionWidget.Tests")]
 
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
-[assembly: AssemblyInformationalVersion("1.2.0")]
+[assembly: AssemblyVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyInformationalVersion("1.2.1")]

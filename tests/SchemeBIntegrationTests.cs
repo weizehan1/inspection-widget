@@ -137,7 +137,7 @@ namespace InspectionWidget.Tests
                 Assert.True(draft.PendingImportDeviceReplace);
             });
 
-            TestRunner.Run("集成：点击即隐藏、总数与配置不变、取消与失败后仍保持隐藏", () =>
+            TestRunner.Run("集成：等待选窗与取消/失败不改变未点设备数，保存成功后才标记并隐藏", () =>
             {
                 string dir = CreateTempDir();
                 try
@@ -148,33 +148,45 @@ namespace InspectionWidget.Tests
                     var sm = new PanelStateMachine();
                     var controller = new InspectionSessionController(clock, sm, store, cfg);
 
+                    // 点击设备进入 Waiting：未点设备数与可见列表保持不变（仍为 3）
                     InspectionPlanToken t1;
                     string err;
                     Assert.True(controller.TrySelectDevice("核心", out t1, out err));
                     Assert.Equal(PanelState.Waiting, sm.State);
-                    DeviceDisplaySnapshot snap1 = controller.BuildDeviceDisplay();
-                    Assert.Equal(3, snap1.TotalCount);
-                    Assert.Equal(1, snap1.VisitedCount);
-                    Assert.Equal(2, snap1.Items.Count);
-                    Assert.Equal("接入", snap1.Items[0].Name);
-                    Assert.Equal("汇聚", snap1.Items[1].Name);
+                    DeviceDisplaySnapshot snapWaiting = controller.BuildDeviceDisplay();
+                    Assert.Equal(3, snapWaiting.TotalCount);
+                    Assert.Equal(0, snapWaiting.VisitedCount);
+                    Assert.Equal(3, snapWaiting.Items.Count);
                     Assert.Equal(3, cfg.Devices.Count);
 
-                    // 取消选窗后仍保持已点过且隐藏
+                    // 右键/Esc 取消选窗后，今日未点设备数依然不变（仍为 3），设备保留在待截图列表
                     Assert.True(sm.Cancel());
                     DeviceDisplaySnapshot afterCancel = controller.BuildDeviceDisplay();
-                    Assert.Equal(1, afterCancel.VisitedCount);
-                    Assert.Equal(2, afterCancel.Items.Count);
+                    Assert.Equal(0, afterCancel.VisitedCount);
+                    Assert.Equal(3, afterCancel.Items.Count);
+                    Assert.Equal("核心", afterCancel.Items[0].Name);
 
-                    // 第二台进入截屏但失败：也仍保持已点过且隐藏
+                    // 第二台进入截屏但失败：也保持未点（未点设备数仍为 3）
                     InspectionPlanToken t2;
                     Assert.True(controller.TrySelectDevice("接入", out t2, out err));
                     Assert.True(sm.BeginCapture());
                     Assert.True(sm.FailCapture());
                     DeviceDisplaySnapshot afterFail = controller.BuildDeviceDisplay();
-                    Assert.Equal(2, afterFail.VisitedCount);
-                    Assert.Equal(1, afterFail.Items.Count);
-                    Assert.Equal("汇聚", afterFail.Items[0].Name);
+                    Assert.Equal(0, afterFail.VisitedCount);
+                    Assert.Equal(3, afterFail.Items.Count);
+
+                    // 真正截图并保存成功后：计入已点过并隐藏，总数与配置不变
+                    Assert.True(controller.TrySelectDevice("核心", out t1, out err));
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), t1, out err), err);
+                    DeviceDisplaySnapshot afterSave = controller.BuildDeviceDisplay();
+                    Assert.Equal(3, afterSave.TotalCount);
+                    Assert.Equal(1, afterSave.VisitedCount);
+                    Assert.Equal(2, afterSave.Items.Count);
+                    Assert.Equal("接入", afterSave.Items[0].Name);
+                    Assert.Equal("汇聚", afterSave.Items[1].Name);
+                    Assert.Equal(3, cfg.Devices.Count);
                 }
                 finally { SafeDeleteDir(dir); }
             });
@@ -195,6 +207,7 @@ namespace InspectionWidget.Tests
                     Assert.True(controller.TrySelectDevice("核心", out token, out err));
                     Assert.True(sm.BeginCapture());
                     Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), token, out err), err);
                     Assert.Equal(1, controller.BuildDeviceDisplay().Items.Count);
 
                     // 临时查看已点过
@@ -204,9 +217,14 @@ namespace InspectionWidget.Tests
                     Assert.True(revealed.Items[0].Visited);
                     Assert.False(revealed.Items[1].Visited);
 
-                    // 补截已点过项不重复增加计数
+                    // 补截已点过项取消或保存均不重复增加计数
                     Assert.True(controller.TrySelectDevice("核心", out token, out err));
                     Assert.True(sm.Cancel());
+                    Assert.Equal(1, controller.Plan.VisitedCount);
+                    Assert.True(controller.TrySelectDevice("核心", out token, out err));
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("核心", Path.Combine(dir, "核心-1.png"), token, out err), err);
                     Assert.Equal(1, controller.Plan.VisitedCount);
 
                     // 关闭查看已点过并恢复未点
@@ -233,7 +251,9 @@ namespace InspectionWidget.Tests
                     InspectionPlanToken token;
                     string err;
                     Assert.True(controller.TrySelectDevice("D1", out token, out err));
-                    Assert.True(sm.Cancel());
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("D1", Path.Combine(dir, "D1.png"), token, out err), err);
 
                     DeviceDisplaySnapshot visibleAll = controller.BuildDeviceDisplay();
                     Assert.Equal(2, visibleAll.Items.Count);
@@ -268,17 +288,25 @@ namespace InspectionWidget.Tests
                     Assert.True(controller.TrySelectDevice("D1", out t1, out err));
                     Assert.True(sm.BeginCapture());
                     Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("D1", Path.Combine(dir, "D1.png"), t1, out err), err);
 
-                    // 点最后一台：进入 Waiting，此时不能弹窗
+                    // 点最后一台但取消：不隐藏、不完成、不弹窗
                     Assert.True(controller.TrySelectDevice("D2", out t2, out err));
+                    Assert.Equal(1, controller.BuildDeviceDisplay().Items.Count);
+                    Assert.True(sm.Cancel());
+                    Assert.Equal(1, controller.Plan.VisitedCount);
+                    Assert.False(controller.TryClaimCompletionPrompt(false, false, false, out err));
+
+                    // 再次选中并完成截图与保存：忙碌/弹窗期间不弹，回到空闲只弹一次
+                    Assert.True(controller.TrySelectDevice("D2", out t2, out err));
+                    Assert.True(sm.BeginCapture());
+                    Assert.False(controller.TryClaimCompletionPrompt(false, false, false, out err));
+                    Assert.True(controller.RecordSaveSucceeded("D2", Path.Combine(dir, "D2.png"), t2, out err), err);
                     DeviceDisplaySnapshot allHidden = controller.BuildDeviceDisplay();
                     Assert.Equal(0, allHidden.Items.Count);
                     Assert.Equal(DeviceListEmptyKind.AllVisitedHidden, allHidden.EmptyKind);
-                    Assert.False(controller.TryClaimCompletionPrompt(false, false, false, out err));
+                    Assert.False(controller.TryClaimCompletionPrompt(false, false, false, out err)); // 仍在 Capturing
 
-                    // 进入 Capturing / 保存中 / 设置弹窗 / 隐身截图均不能弹窗
-                    Assert.True(sm.BeginCapture());
-                    Assert.False(controller.TryClaimCompletionPrompt(false, false, false, out err));
                     Assert.True(sm.CompleteCapture());
                     Assert.False(controller.TryClaimCompletionPrompt(true, false, false, out err));
                     Assert.False(controller.TryClaimCompletionPrompt(false, true, false, out err));
@@ -311,7 +339,9 @@ namespace InspectionWidget.Tests
                     InspectionPlanToken token;
                     string err;
                     Assert.True(controller.TrySelectDevice("核心", out token, out err));
-                    Assert.True(sm.Cancel());
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), token, out err), err);
 
                     // 改名保存：保留“核心”的已点过状态到“核心新”
                     AppConfig renamedCfg = AppConfigCloner.Clone(cfg);
@@ -331,9 +361,11 @@ namespace InspectionWidget.Tests
                     Assert.Equal(0, controller.Plan.VisitedCount);
                     Assert.Equal(1, controller.BuildDeviceDisplay().Items.Count);
 
-                    // 重新点选并跨午夜后自动清空、重现全部设备
+                    // 重新截存并跨午夜后自动清空、重现全部设备
                     Assert.True(controller.TrySelectDevice("独立设备", out token, out err));
-                    Assert.True(sm.Cancel());
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(controller.RecordSaveSucceeded("独立设备", Path.Combine(dir, "独立设备.png"), token, out err), err);
                     Assert.Equal(DeviceListEmptyKind.AllVisitedHidden, controller.BuildDeviceDisplay().EmptyKind);
 
                     clock.Now = new DateTime(2026, 11, 15, 0, 1, 0);
@@ -458,6 +490,9 @@ namespace InspectionWidget.Tests
                     InspectionPlanToken token;
                     Assert.True(day2Ctrl.TrySelectDevice("核心", out token, out err));
                     Assert.Null(err);
+                    Assert.Equal(0, day2Ctrl.Plan.VisitedCount);
+                    Assert.True(day2Ctrl.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), token, out err), err);
+                    Assert.Null(err);
                     Assert.Equal(1, day2Ctrl.Plan.VisitedCount);
                 }
                 finally { SafeDeleteDir(dir); }
@@ -540,7 +575,9 @@ namespace InspectionWidget.Tests
                     InspectionPlanToken token;
                     string err;
                     Assert.True(ctrl.TrySelectDevice("核心", out token, out err));
-                    Assert.True(sm.Cancel());
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(ctrl.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), token, out err), err);
 
                     // 托盘隐藏（panelVisible=false）不得认领且不消耗资格
                     Assert.False(ctrl.TryClaimCompletionPrompt(false, false, false, false, out err));
@@ -558,9 +595,8 @@ namespace InspectionWidget.Tests
                         new InspectionProgressStore(Path.Combine(dir, "fail.json"), AtomicConfigWriter.ForTests(failWriteOps)),
                         cfg);
                     Assert.True(failCtrl.TrySelectDevice("核心", out token, out err));
-                    failCtrl.Plan.Unmark("核心"); // 模拟前序操作成功，最后完成落盘失败
-                    Assert.True(failCtrl.Plan.MarkVisited("核心", token));
-                    Assert.NotNull(err); // TrySelectDevice 的落盘已失败
+                    Assert.True(failCtrl.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), token, out err));
+                    Assert.NotNull(err); // 保存落盘失败
                     Assert.True(failCtrl.HasProgressError);
                     // 换用允许第一次写入、在 Claim 时拒绝替换的 writer 测试 Claim 落盘失败
                     var toggleOps = new ToggleFailWriteOps();
@@ -572,7 +608,9 @@ namespace InspectionWidget.Tests
                         cfg);
                     Assert.True(toggleCtrl.TrySelectDevice("核心", out token, out err));
                     Assert.Null(err);
-                    Assert.True(toggleSm.Cancel());
+                    Assert.True(toggleSm.BeginCapture());
+                    Assert.True(toggleSm.CompleteCapture());
+                    Assert.True(toggleCtrl.RecordSaveSucceeded("核心", Path.Combine(dir, "核心.png"), token, out err), err);
                     toggleOps.ShouldFail = true;
                     Assert.True(toggleCtrl.TryClaimCompletionPrompt(false, false, false, true, out err));
                     Assert.NotNull(err);
@@ -619,6 +657,7 @@ namespace InspectionWidget.Tests
                     InspectionPlanToken token;
                     string err;
                     Assert.True(ctrl.TrySelectDevice("核心A", out token, out err));
+                    Assert.True(ctrl.RecordSaveSucceeded("核心A", Path.Combine(dir, "核心A.png"), token, out err), err);
                     AppConfig afterPartial = AppConfigCloner.Clone(current);
                     afterPartial.Devices = new List<string> { "核心A-改", "核心B" };
                     afterPartial.HideVisitedDevices = false;

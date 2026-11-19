@@ -32,6 +32,11 @@ namespace InspectionWidget.Capture
     {
         public static ResolveResult ResolveTopLevel(Point pt, IntPtr selfHwnd)
         {
+            return ResolveTopLevel(pt, selfHwnd, IntPtr.Zero);
+        }
+
+        public static ResolveResult ResolveTopLevel(Point pt, IntPtr selfHwnd, IntPtr ignoredHwnd)
+        {
             var result = new ResolveResult
             {
                 Hwnd = IntPtr.Zero,
@@ -56,7 +61,7 @@ namespace InspectionWidget.Capture
                 return result;
             }
 
-            bool isSelf = root == selfHwnd;
+            bool isSelf = root == selfHwnd || (ignoredHwnd != IntPtr.Zero && root == ignoredHwnd);
             string className = GetClassNameText(root);
             result.ClassName = className;
             if (TargetClassifier.IsExcluded(className, isSelf))
@@ -82,6 +87,38 @@ namespace InspectionWidget.Capture
             if (hwnd == IntPtr.Zero)
                 return false;
             return NativeMethods.IsWindow(hwnd) && !NativeMethods.IsIconic(hwnd);
+        }
+
+        /// <summary>读取目标窗口视觉外框（优先 DWM 扩展边框以避开透明阴影）。</summary>
+        public static bool TryGetTargetBounds(IntPtr hwnd, out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+                return false;
+
+            NativeMethods.RECT dwmNative;
+            if (NativeMethods.DwmGetWindowAttribute(
+                hwnd,
+                NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS,
+                out dwmNative,
+                System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.RECT))) == 0)
+            {
+                Rectangle dwmRect = dwmNative.ToRectangle();
+                if (dwmRect.Width > 0 && dwmRect.Height > 0)
+                {
+                    bounds = dwmRect;
+                    return true;
+                }
+            }
+
+            NativeMethods.RECT winNative;
+            if (!NativeMethods.GetWindowRect(hwnd, out winNative))
+                return false;
+            Rectangle winRect = winNative.ToRectangle();
+            if (winRect.Width <= 0 || winRect.Height <= 0)
+                return false;
+            bounds = winRect;
+            return true;
         }
 
         private static string GetClassNameText(IntPtr hwnd)

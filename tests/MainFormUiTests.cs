@@ -15,7 +15,7 @@ namespace InspectionWidget.Tests
 {
     public static class MainFormUiTests
     {
-        public const int CaseCount = 9;
+        public const int CaseCount = 11;
 
         private sealed class StepClock : IClock
         {
@@ -37,10 +37,19 @@ namespace InspectionWidget.Tests
                 remove { }
             }
 
+            private Action _cancelRequested;
+
             public event Action CancelRequested
             {
-                add { }
-                remove { }
+                add { _cancelRequested += value; }
+                remove { _cancelRequested -= value; }
+            }
+
+            public void RaiseCancelRequested()
+            {
+                Action handler = _cancelRequested;
+                if (handler != null)
+                    handler();
             }
 
             public event Action TimeoutElapsed
@@ -424,24 +433,36 @@ namespace InspectionWidget.Tests
                     env.Form.Show();
                     Application.DoEvents();
 
+                    var sm = (PanelStateMachine)Field(env.Form, "_stateMachine");
                     var session = (InspectionSessionController)Field(env.Form, "_session");
                     var dateLabel = (Label)Field(env.Form, "_dateLabel");
                     var progressLabel = (Label)Field(env.Form, "_planProgressLabel");
                     var countLabel = (Label)Field(env.Form, "_planCountLabel");
 
+                    string saveErr;
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    var token = (InspectionPlanToken)Field(env.Form, "_waitingPlanToken");
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    Assert.True(session.RecordSaveSucceeded("核心A", Path.Combine(env.TempDir, "Shots", "核心A.png"), token, out saveErr));
+                    Invoke(env.Form, "OnStateChanged");
+                    Invoke(env.Form, "RebuildPlanCard");
+                    Invoke(env.Form, "RebuildDeviceButtons");
                     Assert.Equal("已点过", progressLabel.Text);
                     Assert.Equal("1 / 3", countLabel.Text);
 
-                    // 午夜跨日时仍在 Waiting：更新时间显示，保留待刷新标志而不粗暴破坏当前等待上下文
+                    // 选中下一台进入 Waiting，跨午夜时更新时间显示，保留待刷新标志而不破坏当前等待上下文
+                    Invoke(env.Form, "OnDeviceRowActivated", "核心B");
+                    Assert.Equal(PanelState.Waiting, sm.State);
+                    Assert.Equal("1 / 3", countLabel.Text);
                     env.Clock.Now = new DateTime(2026, 11, 15, 0, 5, 0);
                     Invoke(env.Form, "OnDayRolloverTick", null, EventArgs.Empty);
                     Assert.Equal("2026年11月15日 星期日", dateLabel.Text);
                     Assert.True((bool)Field(env.Form, "_pendingDayRolloverRefresh"));
                     Assert.Equal("1 / 3", countLabel.Text);
 
-                    // 再次点击当前设备取消回 Idle，自动同步重绘新日 0 / 3 列表
-                    Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    // 右键取消选窗回 Idle，自动同步重绘新日 0 / 3 列表
+                    env.Hooks.RaiseCancelRequested();
                     Assert.False((bool)Field(env.Form, "_pendingDayRolloverRefresh"));
                     Assert.Equal(new DateTime(2026, 11, 15), (DateTime)Field(env.Form, "_uiRenderedPlanDate"));
                     Assert.Equal("0 / 3", countLabel.Text);
@@ -571,17 +592,15 @@ namespace InspectionWidget.Tests
                     var initialPanel = (Panel)Field(rows[0], "Panel");
                     Assert.True(initialPanel.TabStop);
 
-                    // 开启 HideVisitedDevices 时激活核心A进入 Waiting，会重建列表并收起核心A；
-                    // 展开「查看已点过」后重新查询活动行，验证 Waiting 琥珀色强调（不访问已释放旧控件）。
+                    // 开启 HideVisitedDevices 时激活核心A进入 Waiting，核心A 仍保持可见并展示 Waiting 琥珀色强调，且计数不变；
+                    // 右键取消选窗后保持未点且不改变未点设备数；只有保存成功后才标记“已点过”并隐藏。
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
                     Application.DoEvents();
-                    var rowsWhileHidden = (IList)Field(env.Form, "_deviceRows");
-                    Assert.Equal(2, rowsWhileHidden.Count);
-
-                    Invoke(env.Form, "OnToggleShowVisitedClicked", null, EventArgs.Empty);
-                    Application.DoEvents();
+                    var sm = (PanelStateMachine)Field(env.Form, "_stateMachine");
+                    var session = (InspectionSessionController)Field(env.Form, "_session");
                     var waitingRows = (IList)Field(env.Form, "_deviceRows");
                     Assert.Equal(3, waitingRows.Count);
+                    Assert.Equal(0, session.Plan.VisitedCount);
                     object waitingRow = waitingRows[0];
                     var waitingPanel = (Panel)Field(waitingRow, "Panel");
                     var waitingName = (Label)Field(waitingRow, "NameLabel");
@@ -593,10 +612,48 @@ namespace InspectionWidget.Tests
                     Assert.Equal(UiTheme.WarningColor, waitingStatus.ForeColor);
                     Assert.Equal(UiTheme.WarningColor, waitingName.ForeColor);
 
-                    // 再次点击取消选窗回到 Idle，验证去前缀“已点过”和浅绿背景
+                    // 右键/Esc 取消选窗回到 Idle，验证计数仍为 0 且状态回到“待截图”
+                    env.Hooks.RaiseCancelRequested();
+                    Application.DoEvents();
+                    Assert.Equal(PanelState.Idle, sm.State);
+                    Assert.Equal(0, session.Plan.VisitedCount);
+                    var rowsAfterCancel = (IList)Field(env.Form, "_deviceRows");
+                    Assert.Equal(3, rowsAfterCancel.Count);
+                    Assert.Equal("待截图", ((Label)Field(rowsAfterCancel[0], "StatusLabel")).Text);
+
+                    // 完整截图并保存成功后隐藏核心A，展开“查看已点过”验证“已点过”和浅绿背景
                     Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    var token = (InspectionPlanToken)Field(env.Form, "_waitingPlanToken");
+                    Assert.True(sm.BeginCapture());
+                    Type reqType = typeof(MainForm).GetNestedType("CaptureRequest", BindingFlags.NonPublic);
+                    object req = Activator.CreateInstance(reqType);
+                    SetField(req, "Device", "核心A");
+                    SetField(req, "RootPath", cfg.RootPath);
+                    SetField(req, "Date", env.Clock.Now);
+                    SetField(req, "RequestId", sm.CurrentRequestId);
+                    SetField(req, "FolderPattern", cfg.FolderNamePattern);
+                    SetField(req, "PlanToken", token);
+                    string saveDir = Path.Combine(env.TempDir, "Shots", "巡检-2026-11-14");
+                    Directory.CreateDirectory(saveDir);
+                    string saveFile = Path.Combine(saveDir, "核心A.png");
+                    File.WriteAllText(saveFile, "img");
+                    using (var okBmp = new Bitmap(8, 8))
+                    {
+                        Invoke(env.Form, "OnSaveCompleted",
+                            new StorageSaveResult { Saved = true, FullPath = saveFile },
+                            okBmp,
+                            req,
+                            true,
+                            (int)Field(env.Form, "_pendingGeneration"));
+                    }
+                    Application.DoEvents();
+                    Assert.Equal(1, session.Plan.VisitedCount);
+                    Assert.Equal(2, ((IList)Field(env.Form, "_deviceRows")).Count);
+
+                    Invoke(env.Form, "OnToggleShowVisitedClicked", null, EventArgs.Empty);
                     Application.DoEvents();
                     var rowsAfter = (IList)Field(env.Form, "_deviceRows");
+                    Assert.Equal(3, rowsAfter.Count);
                     object visitedRow = rowsAfter[0];
                     var visitedPanel = (Panel)Field(visitedRow, "Panel");
                     var visitedStatus = (Label)Field(visitedRow, "StatusLabel");
@@ -604,6 +661,95 @@ namespace InspectionWidget.Tests
                     Assert.Equal("已点过", visitedStatus.Text);
                     Assert.Equal(UiTheme.SuccessColor, visitedStatus.ForeColor);
                     Assert.Equal(UiTheme.VisitedBackColor, visitedPanel.BackColor);
+                }
+            });
+
+            TestRunner.Run("UI-Main：最后一台进入 Waiting 后右键取消不计入已点过且不触发完成弹窗", () =>
+            {
+                AppConfig cfg = MainEnv.BuildDefaultConfig();
+                cfg.PlanModeEnabled = true;
+                cfg.HideVisitedDevices = true;
+                cfg.Devices = new List<string> { "核心A" };
+
+                using (var env = new MainEnv(cfg))
+                {
+                    env.Form.Show();
+                    Application.DoEvents();
+
+                    var sm = (PanelStateMachine)Field(env.Form, "_stateMachine");
+                    var session = (InspectionSessionController)Field(env.Form, "_session");
+                    var countLabel = (Label)Field(env.Form, "_planCountLabel");
+                    var feedback = (Label)Field(env.Form, "_feedbackLabel");
+
+                    Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    Assert.Equal(PanelState.Waiting, sm.State);
+                    Assert.Equal("0 / 1", countLabel.Text);
+
+                    env.Hooks.RaiseCancelRequested();
+                    Application.DoEvents();
+
+                    Assert.Equal(PanelState.Idle, sm.State);
+                    Assert.Equal(0, session.Plan.VisitedCount);
+                    Assert.Equal("0 / 1", countLabel.Text);
+                    Assert.False(session.Plan.CompletionPrompted);
+                    Assert.Equal("已取消选窗", feedback.Text);
+                    Assert.Equal(1, ((IList)Field(env.Form, "_deviceRows")).Count);
+                }
+            });
+
+            TestRunner.Run("UI-Main：设备区显示待点台数、复用未变设备行、方向键切换焦点及高亮框安全隐藏", () =>
+            {
+                AppConfig cfg = MainEnv.BuildDefaultConfig();
+                cfg.PlanModeEnabled = true;
+                cfg.HideVisitedDevices = false;
+                cfg.Devices = new List<string> { "核心A", "核心B" };
+
+                using (var env = new MainEnv(cfg))
+                {
+                    env.Form.Show();
+                    Application.DoEvents();
+
+                    var deviceSub = (Label)Field(env.Form, "_deviceSubLabel");
+                    Assert.Equal("待点 2 台", deviceSub.Text);
+
+                    var rowsBefore = (IList)Field(env.Form, "_deviceRows");
+                    var firstPanelBefore = (Panel)Field(rowsBefore[0], "Panel");
+                    var secondPanelBefore = (Panel)Field(rowsBefore[1], "Panel");
+
+                    // 方向键上下切换焦点
+                    firstPanelBefore.Focus();
+                    Invoke(env.Form, "FocusAdjacentDeviceRow", "核心A", 1);
+                    Assert.True(object.ReferenceEquals(env.Form.ActiveControl, secondPanelBefore),
+                        "方向键下移后应将表单 ActiveControl 切至下一台设备");
+
+                    // 标记核心A后重建：名单未变时直接复用既有行控件而不释放重建
+                    var sm = (PanelStateMachine)Field(env.Form, "_stateMachine");
+                    var session = (InspectionSessionController)Field(env.Form, "_session");
+                    Invoke(env.Form, "OnDeviceRowActivated", "核心A");
+                    var token = (InspectionPlanToken)Field(env.Form, "_waitingPlanToken");
+                    Assert.True(sm.BeginCapture());
+                    Assert.True(sm.CompleteCapture());
+                    string err;
+                    Assert.True(session.RecordSaveSucceeded("核心A", Path.Combine(env.TempDir, "Shots", "核心A.png"), token, out err));
+                    Invoke(env.Form, "OnStateChanged");
+                    Invoke(env.Form, "RebuildDeviceButtons");
+                    Application.DoEvents();
+
+                    var rowsAfter = (IList)Field(env.Form, "_deviceRows");
+                    Assert.True(object.ReferenceEquals(firstPanelBefore, Field(rowsAfter[0], "Panel")),
+                        "设备名单未变化时应复用既有设备行控件");
+                    Assert.False(firstPanelBefore.IsDisposed);
+                    Assert.Equal("待点 1 台", deviceSub.Text);
+
+                    // 验证 TargetHighlightOverlay 镂空显示与退出隐藏安全无异常
+                    using (var overlay = new TargetHighlightOverlay())
+                    {
+                        overlay.ShowTarget(new Rectangle(20, 20, 300, 200), 3);
+                        Assert.True(overlay.Visible);
+                        Assert.NotNull(overlay.Region);
+                        overlay.HideOverlay();
+                        Assert.False(overlay.Visible);
+                    }
                 }
             });
         }
