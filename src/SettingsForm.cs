@@ -2584,33 +2584,48 @@ namespace InspectionWidget
 
         private void ShowError(int group, string message, Control focus)
         {
+            if (IsDisposed || Disposing)
+                return;
             if (group >= 0 && group < _groupPanels.Length)
                 SetGroup(group);
-            _feedbackLabel.ForeColor = UiTheme.ErrorColor;
-            _feedbackLabel.Text = message;
-            _feedbackToolTip.SetToolTip(_feedbackLabel, message);
-            if (focus != null)
+            if (_feedbackLabel != null && !_feedbackLabel.IsDisposed)
+            {
+                _feedbackLabel.ForeColor = UiTheme.ErrorColor;
+                _feedbackLabel.Text = message;
+                if (_feedbackToolTip != null)
+                    _feedbackToolTip.SetToolTip(_feedbackLabel, message);
+            }
+            if (focus != null && !focus.IsDisposed)
                 focus.Focus();
         }
 
         private void ShowInfo(string message)
         {
+            if (IsDisposed || Disposing || _feedbackLabel == null || _feedbackLabel.IsDisposed)
+                return;
             _feedbackLabel.ForeColor = UiTheme.SecondaryTextColor;
             _feedbackLabel.Text = message;
-            _feedbackToolTip.SetToolTip(_feedbackLabel, message);
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(_feedbackLabel, message);
         }
 
         private void ShowSuccess(string message)
         {
+            if (IsDisposed || Disposing || _feedbackLabel == null || _feedbackLabel.IsDisposed)
+                return;
             _feedbackLabel.ForeColor = UiTheme.SuccessColor;
             _feedbackLabel.Text = message;
-            _feedbackToolTip.SetToolTip(_feedbackLabel, message);
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(_feedbackLabel, message);
         }
 
         private void ClearFeedback()
         {
-            if (_feedbackLabel != null)
-                _feedbackLabel.Text = string.Empty;
+            if (IsDisposed || Disposing || _feedbackLabel == null || _feedbackLabel.IsDisposed)
+                return;
+            _feedbackLabel.Text = string.Empty;
+            if (_feedbackToolTip != null)
+                _feedbackToolTip.SetToolTip(_feedbackLabel, null);
         }
 
         private sealed class DiscardChangesDialog : Form

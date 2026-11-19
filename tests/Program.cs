@@ -73,6 +73,8 @@ namespace InspectionWidget.Tests
             {
                 try
                 {
+                    System.Windows.Forms.Application.SetUnhandledExceptionMode(
+                        System.Windows.Forms.UnhandledExceptionMode.ThrowException);
                     SettingsUiTests.RunAll();
                     MainFormUiTests.RunAll();
                 }

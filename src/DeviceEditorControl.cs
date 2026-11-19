@@ -16,6 +16,7 @@ namespace InspectionWidget
         private readonly DataGridView _grid;
         private readonly BindingSource _bindingSource;
         private readonly ListChangedEventHandler _devicesListChangedHandler;
+        private readonly EventHandler _selectionChangedHandler;
         private readonly Label _countLabel;
         private readonly Button _addButton;
         private readonly Button _deleteButton;
@@ -108,7 +109,8 @@ namespace InspectionWidget
             _grid.CellValueChanged += OnCellValueChanged;
             _grid.CellDoubleClick += OnCellDoubleClick;
             _grid.KeyDown += OnGridKeyDown;
-            _grid.SelectionChanged += delegate { UpdateButtons(); };
+            _selectionChangedHandler = delegate { UpdateButtons(); };
+            _grid.SelectionChanged += _selectionChangedHandler;
             _grid.DataError += OnDataError;
             var gridFrame = new Panel
             {
@@ -163,13 +165,29 @@ namespace InspectionWidget
         {
             if (disposing)
             {
+                _loading = true;
+                _cancellingEdit = true;
+                DraftChanged = null;
+                ValidationFailed = null;
                 if (_devicesListChangedHandler != null)
                     _draft.Devices.ListChanged -= _devicesListChangedHandler;
-                if (_bindingSource != null)
+                if (_grid != null && !_grid.IsDisposed)
                 {
-                    _grid.DataSource = null;
-                    _bindingSource.Dispose();
+                    _grid.CausesValidation = false;
+                    _grid.CellBeginEdit -= OnCellBeginEdit;
+                    _grid.CellValidating -= OnCellValidating;
+                    _grid.CellEndEdit -= OnCellEndEdit;
+                    _grid.CellValueChanged -= OnCellValueChanged;
+                    _grid.CellDoubleClick -= OnCellDoubleClick;
+                    _grid.KeyDown -= OnGridKeyDown;
+                    if (_selectionChangedHandler != null)
+                        _grid.SelectionChanged -= _selectionChangedHandler;
+                    _grid.DataError -= OnDataError;
+                    if (_bindingSource != null)
+                        _grid.DataSource = null;
                 }
+                if (_bindingSource != null)
+                    _bindingSource.Dispose();
             }
             base.Dispose(disposing);
         }
